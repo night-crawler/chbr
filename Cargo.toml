@@ -1,0 +1,12 @@
+[package]
+name = "chbr"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+unsigned-varint = { version = "0.8", features = ["std"] }
+thiserror = "2"
+chrono = "0.4"
+chrono-tz = "0.10"
+phf = { version = "0.11", features = ["macros", "std"] }
+nom = { version = "8", features = ["std"] }
