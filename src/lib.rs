@@ -29,11 +29,10 @@ pub fn parse_block(data: &[u8]) -> Result<()> {
 
         println!("--- {num_rows} {num_columns} {name:?}, {type_name:?}");
         let typ = types::Type::from_str(type_name)?;
-        
+
         let (marker, len) = typ.transcode_remainder(remainder, num_columns, num_rows)?;
         remainder = &remainder[len..];
         markers.push(marker);
-
     }
 
     Ok(())
@@ -47,6 +46,28 @@ mod tests {
     #[test]
     fn it_works() -> Result<()> {
         let mut file = std::fs::File::open("./sample.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn it_works2() -> Result<()> {
+        let mut file = std::fs::File::open("./array.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn tuple() -> Result<()> {
+        let mut file = std::fs::File::open("./tuple.native")?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
 

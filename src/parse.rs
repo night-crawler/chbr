@@ -1,4 +1,7 @@
 use crate::types::{Field, Type};
+use chrono_tz::Tz;
+use chrono_tz::Tz::UTC;
+use std::str::FromStr;
 
 use nom::branch::alt;
 use nom::bytes::complete::take_while1;
@@ -7,7 +10,7 @@ use nom::combinator::{map, map_res, recognize};
 use nom::error::ParseError;
 use nom::multi::{many0, separated_list1};
 use nom::sequence::{delimited, pair, preceded, separated_pair};
-use nom::{bytes::complete::tag, IResult, Parser};
+use nom::{IResult, Parser, bytes::complete::tag};
 
 fn ws<'a, O, E, F>(inner: F) -> impl Parser<&'a str, Output = O, Error = E>
 where
@@ -74,6 +77,7 @@ fn parse_fixedstring(input: &str) -> IResult<&str, Type> {
 fn parse_int_primitives(input: &str) -> IResult<&str, Type> {
     alt((
         map(tag("UUID"), |_| Type::Uuid),
+        map(tag("Bool"), |_| Type::Bool),
         map(tag("UInt256"), |_| Type::UInt256),
         map(tag("Int256"), |_| Type::Int256),
         map(tag("UInt128"), |_| Type::UInt128),
@@ -107,8 +111,56 @@ fn parse_inet_primitives(input: &str) -> IResult<&str, Type> {
     .parse(input)
 }
 
-fn parse_other_primitives(input: &str) -> IResult<&str, Type> {
+fn parse_datetime64(input: &str) -> IResult<&str, Type> {
+    let (input, (precision, tz)) = preceded(
+        tag("DateTime64"),
+        delimited(
+            ws(char('(')),
+            separated_pair(
+                map_res(digit1, |s: &str| s.parse::<u8>()),
+                ws(char(',')),
+                delimited(ws(char('\'')), take_while1(|c| c != '\''), ws(char('\''))),
+            ),
+            ws(char(')')),
+        ),
+    )
+    .parse(input)?;
+
+    let tz = Tz::from_str(tz)
+        .map_err(|_| nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Fail)))?;
+    Ok((input, Type::DateTime64(precision, tz)))
+}
+
+fn parse_tuple(input: &str) -> IResult<&str, Type> {
+    map(
+        preceded(
+            tag("Tuple"),
+            delimited(
+                ws(char('(')),
+                separated_list1(ws(char(',')), parse_type),
+                ws(char(')')),
+            ),
+        ),
+        Type::Tuple,
+    )
+        .parse(input)
+}
+
+fn parse_date_primitives(input: &str) -> IResult<&str, Type> {
     alt((
+        parse_datetime64,
+        map(tag("DateTime64"), |_| Type::DateTime64(3, UTC)),
+        map(tag("DateTime"), |_| Type::DateTime(UTC)),
+        map(tag("Date32"), |_| Type::Date32),
+        map(tag("Date"), |_| Type::Date),
+    ))
+    .parse(input)
+}
+
+fn parse_geo_primitives(input: &str) -> IResult<&str, Type> {
+    alt((
+        map(tag("LineString"), |_| Type::LineString),
+        map(tag("MultiLineString"), |_| Type::MultiLineString),
         map(tag("MultiPolygon"), |_| Type::MultiPolygon),
         map(tag("Polygon"), |_| Type::Polygon),
         map(tag("Ring"), |_| Type::Ring),
@@ -123,8 +175,9 @@ fn parse_primitive_type(input: &str) -> IResult<&str, Type> {
         parse_int_primitives,
         parse_float_primitives,
         parse_fixedstring,
+        parse_date_primitives,
         parse_inet_primitives,
-        parse_other_primitives,
+        parse_geo_primitives,
     ))
     .parse(input)
 }
@@ -269,6 +322,7 @@ pub fn parse_type(input: &str) -> IResult<&str, Type> {
         parse_primitive_type,
         parse_array,
         parse_map,
+        parse_tuple,
         parse_decimal_type,
         parse_variant,
         parse_nested,
