@@ -348,7 +348,37 @@ impl<'a> Type<'a> {
 
             // https://raw.githubusercontent.com/ClickHouse/ClickHouse/master/src/Columns/ColumnVariant.h
             // https://raw.githubusercontent.com/ClickHouse/ClickHouse/master/src/Columns/ColumnVariant.cpp
-            Self::Variant(variants) => {}
+            Self::Variant(types) => {
+                const NULL_DISCR: u8 = 255;
+                let (mode, buf) = u64_le(remainder)?;
+                if mode != 0 {
+                    panic!();
+                }
+                let (discriminators, mut buf) = buf.split_at(num_rows);
+            
+                let mut num_rows_per_discriminant = vec![0usize; types.len()];
+                for &discriminator in discriminators {
+                    if discriminator == NULL_DISCR {
+                        continue;
+                    }
+                    num_rows_per_discriminant[discriminator as usize] += 1;
+                }
+            
+                let mut blocks = Vec::with_capacity(types.len());
+            
+                for (idx, typ) in types.into_iter().enumerate() {
+                    let rows_here = num_rows_per_discriminant[idx];
+                    let (sub_block, sz) = typ.transcode_remainder(buf, num_cols, rows_here)?;
+                    blocks.push(sub_block);
+                    buf = &buf[sz..];
+                }
+            
+                let consumed = remainder.len() - buf.len();
+                let marker = BlockMarker::Variant(discriminators, blocks);
+                return Ok((marker, consumed));
+            }
+           
+
             _ => {}
         }
 

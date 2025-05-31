@@ -75,4 +75,15 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn variant() -> Result<()> {
+        let mut file = std::fs::File::open("./variant.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf).unwrap();
+
+        Ok(())
+    }
 }
