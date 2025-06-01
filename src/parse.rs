@@ -59,7 +59,7 @@ fn parse_string(input: &str) -> IResult<&str, Type> {
     map(tag("String"), |_| Type::String).parse(input)
 }
 
-fn parse_fixedstring(input: &str) -> IResult<&str, Type> {
+fn parse_fixed_string(input: &str) -> IResult<&str, Type> {
     map(
         preceded(
             tag("FixedString"),
@@ -169,12 +169,19 @@ fn parse_geo_primitives(input: &str) -> IResult<&str, Type> {
     .parse(input)
 }
 
+fn parse_other_primitives(input: &str) -> IResult<&str, Type> {
+    alt((
+        map(tag("Dynamic"), |_| Type::Dynamic),
+    ))
+        .parse(input)
+}
+
 fn parse_primitive_type(input: &str) -> IResult<&str, Type> {
     alt((
         parse_string,
         parse_int_primitives,
         parse_float_primitives,
-        parse_fixedstring,
+        parse_fixed_string,
         parse_date_primitives,
         parse_inet_primitives,
         parse_geo_primitives,
@@ -328,6 +335,7 @@ pub fn parse_type(input: &str) -> IResult<&str, Type> {
         parse_nested,
         parse_enum8,
         parse_enum16,
+        parse_other_primitives,
     ))
     .parse(input)
 }

@@ -13,6 +13,11 @@ pub fn u64_le(buf: &[u8]) -> crate::Result<(u64, &[u8])> {
     Ok((n, rest))
 }
 
+pub fn u64_varuint(buf: &[u8]) -> crate::Result<(usize, &[u8])> {
+    let (n, rest) = decode::u64(buf)?;
+    Ok((n as usize, rest))
+}
+
 pub struct Data<'a> {
     pub data: &'a [u8],
     pub num_rows: usize,
@@ -67,6 +72,7 @@ pub enum BlockMarker<'a> {
     Map(Vec<usize>, Box<BlockMarker<'a>>, Box<BlockMarker<'a>>),
     Variant(&'a [u8], Vec<BlockMarker<'a>>),
     Nested(Vec<Field<'a>>, Data<'a>),
+    Dynamic(&'a [u8], Vec<BlockMarker<'a>>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -145,6 +151,8 @@ pub enum Type<'a> {
     Variant(Vec<Type<'a>>),
 
     Nested(Vec<Field<'a>>),
+
+    Dynamic,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -215,8 +223,9 @@ impl<'a> Type<'a> {
 
             // TODO: is it always variable?
             Self::Variant(_) => None,
+            Self::Dynamic => None,
 
-            _ => unimplemented!("Size not implemented for type: {:?}", self),
+            _ => unimplemented!("Size is not implemented for type: {:?}", self),
         }
     }
 
@@ -253,9 +262,9 @@ impl<'a> Type<'a> {
             Self::String => {
                 let mut buf = remainder;
                 let start_ptr = buf.as_ptr();
-                let mut n = 0;
+                let mut n;
                 for _ in 0..num_rows {
-                    (n, buf) = decode::usize(buf)?;
+                    (n, buf) = u64_varuint(buf)?;
                     buf = &buf[n..];
                 }
                 let end = buf.as_ptr();
@@ -355,7 +364,7 @@ impl<'a> Type<'a> {
                     panic!();
                 }
                 let (discriminators, mut buf) = buf.split_at(num_rows);
-            
+
                 let mut num_rows_per_discriminant = vec![0usize; types.len()];
                 for &discriminator in discriminators {
                     if discriminator == NULL_DISCR {
@@ -363,21 +372,68 @@ impl<'a> Type<'a> {
                     }
                     num_rows_per_discriminant[discriminator as usize] += 1;
                 }
-            
+
                 let mut blocks = Vec::with_capacity(types.len());
-            
+
                 for (idx, typ) in types.into_iter().enumerate() {
                     let rows_here = num_rows_per_discriminant[idx];
                     let (sub_block, sz) = typ.transcode_remainder(buf, num_cols, rows_here)?;
                     blocks.push(sub_block);
                     buf = &buf[sz..];
                 }
-            
+
                 let consumed = remainder.len() - buf.len();
                 let marker = BlockMarker::Variant(discriminators, blocks);
                 return Ok((marker, consumed));
             }
-           
+
+            Self::Dynamic => {
+                let (version, mut buf) = u64_le(remainder)?;
+                let num_types;
+                if version == 1 {
+                    (_, buf) = u64_varuint(buf)?;
+                }
+                (num_types, buf) = u64_varuint(buf)?;
+
+                let mut types = Vec::with_capacity(num_types);
+                let mut name_len;
+                for _ in 0..num_types {
+                    (name_len, buf) = u64_varuint(buf)?;
+                    let name = unsafe { std::str::from_utf8_unchecked(&buf[..name_len]) };
+                    buf = &buf[name_len..];
+                    let typ = Type::from_str(name)?;
+                    types.push(typ);
+                }
+                
+                // skip stats I guess?
+                buf = &buf[8..];
+                
+                let mut discriminator;
+                let mut counters = vec![0usize; num_types];
+                let discriminator_start = buf;
+                for _ in 0..num_rows {
+                    (discriminator, buf) = u64_varuint(buf)?;
+                    if discriminator == 0 {
+                        continue;
+                    }
+                    counters[discriminator - 1] += 1;
+                }
+                let discriminators_size = discriminator_start.len() - buf.len();
+                let discriminators = &discriminator_start[..discriminators_size];
+
+                let mut markers = Vec::with_capacity(num_types);
+                for (index, typ) in types.into_iter().enumerate() {
+                    let typ_rows = counters[index];
+                    let (marker, sz) = typ.transcode_remainder(buf, num_cols, typ_rows)?;
+                    markers.push(marker);
+                    buf = &buf[sz..];
+                }
+                
+                let marker = BlockMarker::Dynamic(discriminators, markers);
+                let consumed = remainder.len() - buf.len();
+                
+                return Ok((marker, consumed));
+            }
 
             _ => {}
         }

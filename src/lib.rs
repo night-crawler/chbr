@@ -55,7 +55,7 @@ mod tests {
     }
 
     #[test]
-    fn it_works2() -> Result<()> {
+    fn array() -> Result<()> {
         let mut file = std::fs::File::open("./array.native")?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
@@ -79,6 +79,17 @@ mod tests {
     #[test]
     fn variant() -> Result<()> {
         let mut file = std::fs::File::open("./variant.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf).unwrap();
+
+        Ok(())
+    }
+
+    #[test]
+    fn dynamic() -> Result<()> {
+        let mut file = std::fs::File::open("./dynamic.native")?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
 
