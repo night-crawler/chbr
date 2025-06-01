@@ -10,7 +10,7 @@ use nom::combinator::{map, map_res, recognize};
 use nom::error::ParseError;
 use nom::multi::{many0, separated_list1};
 use nom::sequence::{delimited, pair, preceded, separated_pair};
-use nom::{IResult, Parser, bytes::complete::tag};
+use nom::{bytes::complete::tag, IResult, Parser};
 
 fn ws<'a, O, E, F>(inner: F) -> impl Parser<&'a str, Output = O, Error = E>
 where
@@ -143,7 +143,7 @@ fn parse_tuple(input: &str) -> IResult<&str, Type> {
         ),
         Type::Tuple,
     )
-        .parse(input)
+    .parse(input)
 }
 
 fn parse_date_primitives(input: &str) -> IResult<&str, Type> {
@@ -172,8 +172,9 @@ fn parse_geo_primitives(input: &str) -> IResult<&str, Type> {
 fn parse_other_primitives(input: &str) -> IResult<&str, Type> {
     alt((
         map(tag("Dynamic"), |_| Type::Dynamic),
+        map(tag("JSON"), |_| Type::Json),
     ))
-        .parse(input)
+    .parse(input)
 }
 
 fn parse_primitive_type(input: &str) -> IResult<&str, Type> {

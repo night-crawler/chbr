@@ -68,7 +68,7 @@ pub enum BlockMarker<'a> {
     Array(Vec<usize>, Box<BlockMarker<'a>>),
     VarTuple(Vec<BlockMarker<'a>>),
     FixTuple(Type<'a>, Data<'a>),
-    Nullable(Box<Type<'a>>, Data<'a>),
+    Nullable(&'a [u8], Box<BlockMarker<'a>>),
     Map(Vec<usize>, Box<BlockMarker<'a>>, Box<BlockMarker<'a>>),
     Variant(&'a [u8], Vec<BlockMarker<'a>>),
     Nested(Vec<Field<'a>>, Data<'a>),
@@ -151,8 +151,9 @@ pub enum Type<'a> {
     Variant(Vec<Type<'a>>),
 
     Nested(Vec<Field<'a>>),
-
+    
     Dynamic,
+    Json,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -224,6 +225,9 @@ impl<'a> Type<'a> {
             // TODO: is it always variable?
             Self::Variant(_) => None,
             Self::Dynamic => None,
+            Self::Json => None,
+            
+            Self::Nullable(_) => None,
 
             _ => unimplemented!("Size is not implemented for type: {:?}", self),
         }
@@ -257,8 +261,15 @@ impl<'a> Type<'a> {
             return Ok((self.into_fixed_size_marker(data), data_size));
         }
 
-        #[allow(clippy::single_match)]
         match self {
+            Self::Nullable(inner) => {
+                let (mask, buf) = remainder.split_at(num_rows);
+                let (inner_block, size) = inner.transcode_remainder(buf, num_cols, num_rows)?;
+                
+                let block = BlockMarker::Nullable(mask, Box::new(inner_block));
+                return Ok((block, size + num_rows));
+            }
+            
             Self::String => {
                 let mut buf = remainder;
                 let start_ptr = buf.as_ptr();
@@ -433,6 +444,25 @@ impl<'a> Type<'a> {
                 let consumed = remainder.len() - buf.len();
                 
                 return Ok((marker, consumed));
+            }
+            Self::Json => {
+                let (_version, mut buf) = u64_le(remainder)?;
+                let dict_len;
+                let num_subcols;
+
+                (dict_len, buf) = u64_varuint(buf)?;
+                (num_subcols, buf) = u64_varuint(buf)?;
+                
+                let (subcols, size) = Type::String.transcode_remainder(buf, num_cols, num_subcols)?;
+                buf = &buf[size..];
+                
+                let (what, buf) = u64_varuint(buf)?;
+                println!("{}", what);
+                
+
+                println!("{}", dict_len);;
+                println!("{}", num_subcols);
+                
             }
 
             _ => {}

@@ -97,4 +97,26 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn nullable_string() -> Result<()> {
+        let mut file = std::fs::File::open("./nullable_string.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf).unwrap();
+
+        Ok(())
+    }
+
+    #[test]
+    fn json() -> Result<()> {
+        let mut file = std::fs::File::open("./json.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf).unwrap();
+
+        Ok(())
+    }
 }
