@@ -2,13 +2,13 @@ pub mod error;
 mod parse;
 mod types;
 
-use crate::types::BlockMarker;
+use crate::types::Marker;
 use unsigned_varint::decode;
 
 pub type Result<T> = std::result::Result<T, error::Error>;
 
 pub fn parse_block(data: &[u8]) -> Result<()> {
-    let mut markers: Vec<BlockMarker> = vec![];
+    let mut markers: Vec<Marker> = vec![];
     let mut remainder = data;
     let mut num;
 
@@ -30,10 +30,12 @@ pub fn parse_block(data: &[u8]) -> Result<()> {
         println!("--- {num_rows} {num_columns} {name:?}, {type_name:?}");
         let typ = types::Type::from_str(type_name)?;
 
-        let (marker, len) = typ.transcode_remainder(remainder, num_columns, num_rows)?;
+        let (marker, len) = typ.transcode_remainder(remainder,  num_rows)?;
         remainder = &remainder[len..];
         markers.push(marker);
     }
+
+    println!("parse_block remainder {:?}", remainder);
 
     Ok(())
 }
@@ -112,6 +114,17 @@ mod tests {
     #[test]
     fn json() -> Result<()> {
         let mut file = std::fs::File::open("./json.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf).unwrap();
+
+        Ok(())
+    }
+    
+    #[test]
+    fn array_nullable_int64() -> Result<()> {
+        let mut file = std::fs::File::open("./array_nullable_int64.native")?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
 
