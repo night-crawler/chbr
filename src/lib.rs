@@ -1,5 +1,5 @@
 pub mod error;
-mod parse;
+mod parse_type;
 mod types;
 
 use crate::types::Marker;
@@ -24,13 +24,13 @@ pub fn parse_block(data: &[u8]) -> Result<()> {
         remainder = &remainder[num..];
 
         (num, remainder) = decode::usize(remainder)?;
-        let type_name = unsafe { str::from_utf8_unchecked(&remainder[..num]) };
+        let type_name = &remainder[..num];
         remainder = &remainder[num..];
 
         println!("--- {num_rows} {num_columns} {name:?}, {type_name:?}");
-        let typ = types::Type::from_str(type_name)?;
+        let typ = types::Type::from_bytes(type_name)?;
 
-        let (marker, len) = typ.transcode_remainder(remainder,  num_rows)?;
+        let (marker, len) = typ.transcode_remainder(remainder, num_rows)?;
         remainder = &remainder[len..];
         markers.push(marker);
     }
@@ -121,7 +121,7 @@ mod tests {
 
         Ok(())
     }
-    
+
     #[test]
     fn array_nullable_int64() -> Result<()> {
         let mut file = std::fs::File::open("./array_nullable_int64.native")?;

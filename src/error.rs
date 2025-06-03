@@ -8,7 +8,7 @@ pub enum Error {
 
     #[error("Parse error: {0}")]
     Parse(String),
-    
+
     #[error("Unexpected end of input")]
     UnexpectedEndOfInput,
 }

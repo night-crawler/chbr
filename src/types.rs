@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::parse::parse_type;
+use crate::parse_type::parse_type;
 pub use chrono_tz::Tz;
 use unsigned_varint::decode;
 
@@ -75,8 +75,8 @@ pub enum Marker<'a> {
 
     Json {
         columns: Box<Marker<'a>>,
-        data: Vec<Marker<'a>>
-    }
+        data: Vec<Marker<'a>>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -158,9 +158,7 @@ pub enum Type<'a> {
 
     Dynamic,
     Json,
-
 }
-
 
 #[derive(Debug)]
 struct JsonColumnHeader<'a> {
@@ -248,12 +246,12 @@ impl<'a> Type<'a> {
         }
     }
 
-    pub fn from_str(s: &str) -> Result<Type, crate::error::Error> {
+    pub fn from_bytes(s: &[u8]) -> Result<Type, crate::error::Error> {
         let (remainder, typ) =
             parse_type(s).map_err(|e| crate::error::Error::Parse(e.to_string()))?;
-        if !remainder.trim().is_empty() {
+        if !remainder.trim_ascii().is_empty() {
             return Err(crate::error::Error::Parse(format!(
-                "Unparsed remainder: {remainder}"
+                "Unparsed remainder: {remainder:?}"
             )));
         }
 
@@ -325,23 +323,22 @@ impl<'a> Type<'a> {
                     (n, buf) = u64_le(buf)?;
                     offsets.push(n as usize);
                 }
-                println!("{:?}", offsets);
-                let (inner_block, col_data_size) =
-                    inner.transcode_remainder(buf,  n as usize)?;
+                println!("offsets: {:?}", offsets);
+                let (inner_block, col_data_size) = inner.transcode_remainder(buf, n as usize)?;
                 let block = Marker::Array(offsets, Box::new(inner_block));
                 let complete_size = col_data_size + size_of::<u64>() * num_rows;
                 return Ok((block, complete_size));
             }
 
             Self::Ring => {
-                let (points, size) = Type::Array(Box::new(Type::Point))
-                    .transcode_remainder(remainder,  num_rows)?;
+                let (points, size) =
+                    Type::Array(Box::new(Type::Point)).transcode_remainder(remainder, num_rows)?;
                 let wrapped = Marker::Ring(Box::new(points));
                 return Ok((wrapped, size));
             }
             Self::Polygon => {
-                let (rings, size) = Type::Array(Box::new(Type::Ring))
-                    .transcode_remainder(remainder,  num_rows)?;
+                let (rings, size) =
+                    Type::Array(Box::new(Type::Ring)).transcode_remainder(remainder, num_rows)?;
                 let wrapped = Marker::Polygon(Box::new(rings));
                 return Ok((wrapped, size));
             }
@@ -352,8 +349,8 @@ impl<'a> Type<'a> {
                 return Ok((wrapped, size));
             }
             Self::LineString => {
-                let (points, size) = Type::Array(Box::new(Type::Point))
-                    .transcode_remainder(remainder, num_rows)?;
+                let (points, size) =
+                    Type::Array(Box::new(Type::Point)).transcode_remainder(remainder, num_rows)?;
                 let wrapped = Marker::LineString(Box::new(points));
                 return Ok((wrapped, size));
             }
@@ -402,7 +399,7 @@ impl<'a> Type<'a> {
 
                 for (idx, typ) in types.into_iter().enumerate() {
                     let rows_here = num_rows_per_discriminant[idx];
-                    let (sub_block, sz) = typ.transcode_remainder(buf,  rows_here)?;
+                    let (sub_block, sz) = typ.transcode_remainder(buf, rows_here)?;
                     blocks.push(sub_block);
                     buf = &buf[sz..];
                 }
@@ -425,9 +422,8 @@ impl<'a> Type<'a> {
                 let mut name_len;
                 for _ in 0..num_types {
                     (name_len, buf) = u64_varuint(buf)?;
-                    let name = unsafe { std::str::from_utf8_unchecked(&buf[..name_len]) };
+                    let typ = Type::from_bytes(&buf[..name_len])?;
                     buf = &buf[name_len..];
-                    let typ = Type::from_str(name)?;
                     types.push(typ);
                 }
 
@@ -487,8 +483,7 @@ impl<'a> Type<'a> {
                     let name_len;
                     (name_len, buf) = u64_varuint(buf)?;
 
-                    let name = unsafe { std::str::from_utf8_unchecked(&buf[..name_len]) };
-                    let typ = Type::from_str(name)?;
+                    let typ = Type::from_bytes(&buf[..name_len])?;
                     buf = &buf[name_len..];
 
                     let variant;
@@ -504,16 +499,16 @@ impl<'a> Type<'a> {
                     col_headers.push(header);
                 }
 
-                println!("{:#?}", col_headers);
-
                 let mut final_cols = Vec::with_capacity(num_paths);
                 for (index, header) in col_headers.into_iter().enumerate() {
                     let discriminators;
                     (discriminators, buf) = buf.split_at(num_rows);
 
+                    println!("discriminators {:?}", discriminators);
                     let local_rows = discriminators.iter().filter(|&&d| d == index as u8).count();
+                    println!("{:?} rows = {}", header.typ, local_rows);
 
-                    let (marker, sz) = header.typ.transcode_remainder(buf,  local_rows)?;
+                    let (marker, sz) = header.typ.transcode_remainder(buf, local_rows)?;
                     buf = &buf[sz..];
                     final_cols.push(marker);
                 }
@@ -522,8 +517,7 @@ impl<'a> Type<'a> {
                     columns: Box::new(subcols),
                     data: final_cols,
                 };
-                let consumed = buf.as_ptr() as usize - 
-                    remainder.as_ptr() as usize;
+                let consumed = buf.as_ptr() as usize - remainder.as_ptr() as usize;
 
                 return Ok((marker, consumed));
             }
