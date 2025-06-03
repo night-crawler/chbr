@@ -4,6 +4,17 @@ use crate::parse_type::parse_type;
 pub use chrono_tz::Tz;
 use unsigned_varint::decode;
 
+pub const NEED_GLOBAL_DICTIONARY_BIT: u64 = 1u64 << 8;
+pub const HAS_ADDITIONAL_KEYS_BIT: u64 = 1u64 << 9;
+pub const NEED_UPDATE_DICTIONARY_BIT: u64 = 1u64 << 10;
+
+pub const TUINT8: u64 = 0;
+pub const TUINT16: u64 = 1;
+pub const TUINT32: u64 = 2;
+pub const TUINT64: u64 = 3;
+
+pub const LOW_CARDINALITY_VERSION: u64 = 1;
+
 pub fn u64_le(buf: &[u8]) -> crate::Result<(u64, &[u8])> {
     if buf.len() < 8 {
         return Err(crate::error::Error::UnexpectedEndOfInput);
@@ -63,7 +74,12 @@ pub enum Marker<'a> {
     Enum8(Vec<(&'a str, i8)>, Data<'a>),
     Enum16(Vec<(&'a str, i16)>, Data<'a>),
 
-    LowCardinality(Box<Type<'a>>, Data<'a>),
+    LowCardinality {
+        index_type: Type<'a>,
+        indices: Box<Marker<'a>>,
+        global_dictionary: Option<Box<Marker<'a>>>,
+        additional_keys: Option<Box<Marker<'a>>>,
+    },
     Array(Vec<usize>, Box<Marker<'a>>),
     VarTuple(Vec<Marker<'a>>),
     FixTuple(Type<'a>, Data<'a>),
@@ -160,6 +176,18 @@ pub enum Type<'a> {
     Json,
 }
 
+impl<'a> Type<'a> {
+    pub fn is_nullable(&self) -> bool {
+        matches!(self, Type::Nullable(_))
+    }
+    pub fn strip_null(&self) -> &Type<'a> {
+        match self {
+            Type::Nullable(inner) => inner,
+            _ => self,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct JsonColumnHeader<'a> {
     path_version: u64,
@@ -242,6 +270,8 @@ impl<'a> Type<'a> {
 
             Self::Nullable(_) => None,
 
+            Self::LowCardinality(_) => None,
+
             _ => unimplemented!("Size is not implemented for type: {:?}", self),
         }
     }
@@ -275,7 +305,7 @@ impl<'a> Type<'a> {
         match self {
             Self::Nullable(inner) => {
                 let (mask, buf) = remainder.split_at(num_rows);
-                println!("{:?}", mask);
+                // println!("{:?}", mask);
                 let (inner_block, size) = inner.transcode_remainder(buf, num_rows)?;
 
                 let block = Marker::Nullable(mask, Box::new(inner_block));
@@ -500,15 +530,13 @@ impl<'a> Type<'a> {
                 }
 
                 let mut final_cols = Vec::with_capacity(num_paths);
-                for (index, header) in col_headers.into_iter().enumerate() {
+                for (_index, header) in col_headers.into_iter().enumerate() {
                     let discriminators;
                     (discriminators, buf) = buf.split_at(num_rows);
 
-                    println!("discriminators {:?}", discriminators);
-                    let local_rows = discriminators.iter().filter(|&&d| d == index as u8).count();
-                    println!("{:?} rows = {}", header.typ, local_rows);
+                    let local_rows = discriminators.iter().filter(|&&d| d != 255).count();
 
-                    let (marker, sz) = header.typ.transcode_remainder(buf, local_rows)?;
+                    let (marker, sz) = header.typ.clone().transcode_remainder(buf, local_rows)?;
                     buf = &buf[sz..];
                     final_cols.push(marker);
                 }
@@ -517,7 +545,83 @@ impl<'a> Type<'a> {
                     columns: Box::new(subcols),
                     data: final_cols,
                 };
-                let consumed = buf.as_ptr() as usize - remainder.as_ptr() as usize;
+
+                let todo_wtf_is_it = num_rows * 8;
+
+                let consumed = buf.as_ptr() as usize - remainder.as_ptr() as usize + todo_wtf_is_it;
+
+                return Ok((marker, consumed));
+            }
+
+            Self::LowCardinality(inner) => {
+                println!("Parsing LowCardinality type: {inner:?}");
+                let mut buf = remainder;
+                let version;
+                (version, buf) = u64_le(buf)?;
+                if version != LOW_CARDINALITY_VERSION {
+                    return Err(crate::error::Error::Parse(format!(
+                        "LowCardinality: invalid version {version}"
+                    )));
+                }
+
+                let flags;
+                (flags, buf) = u64_le(buf)?;
+                let has_additional_keys = flags & HAS_ADDITIONAL_KEYS_BIT != 0;
+                let needs_global_dictionary = flags & NEED_GLOBAL_DICTIONARY_BIT != 0;
+                let _needs_update_dictionary = flags & NEED_UPDATE_DICTIONARY_BIT != 0; // not needed for transcoding
+
+                let index_type = match flags & 0xff {
+                    TUINT8 => Type::UInt8,
+                    TUINT16 => Type::UInt16,
+                    TUINT32 => Type::UInt32,
+                    TUINT64 => Type::UInt64,
+                    x => {
+                        return Err(crate::error::Error::Parse(format!(
+                            "LowCardinality: bad index type {x}"
+                        )));
+                    }
+                };
+
+                let base_inner = inner.strip_null().clone();
+
+                let mut global_dictionary = None;
+                if needs_global_dictionary {
+                    let (cnt, buf2) = u64_le(buf)?;
+                    buf = buf2;
+                    let (dict_marker, sz) =
+                        base_inner.clone().transcode_remainder(buf, cnt as usize)?;
+                    buf = &buf[sz..];
+                    global_dictionary = Some(Box::new(dict_marker));
+                }
+
+                let mut additional_keys = None;
+                if has_additional_keys {
+                    let cnt;
+                    (cnt, buf) = u64_le(buf)?;
+                    let (add_marker, sz) =
+                        base_inner.clone().transcode_remainder(buf, cnt as usize)?;
+                    buf = &buf[sz..];
+                    additional_keys = Some(Box::new(add_marker));
+                }
+
+                let rows_here;
+                (rows_here, buf) = u64_le(buf)?;
+                if rows_here as usize != num_rows {
+                    return Err(crate::error::Error::Parse(format!(
+                        "LowCardinality: row-count mismatch (expected {num_rows}, got {rows_here})"
+                    )));
+                }
+
+                let (indices_marker, sz) = index_type.clone().transcode_remainder(buf, num_rows)?;
+                buf = &buf[sz..];
+
+                let consumed = remainder.len() - buf.len();
+                let marker = Marker::LowCardinality {
+                    index_type,
+                    indices: Box::new(indices_marker),
+                    global_dictionary,
+                    additional_keys,
+                };
 
                 return Ok((marker, consumed));
             }

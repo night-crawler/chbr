@@ -25,9 +25,10 @@ pub fn parse_block(data: &[u8]) -> Result<()> {
 
         (num, remainder) = decode::usize(remainder)?;
         let type_name = &remainder[..num];
+        let readable_name = unsafe { str::from_utf8_unchecked(type_name) };
         remainder = &remainder[num..];
 
-        println!("--- {num_rows} {num_columns} {name:?}, {type_name:?}");
+        println!("--- {num_rows} {num_columns} {name:?}, {readable_name:?}");
         let typ = types::Type::from_bytes(type_name)?;
 
         let (marker, len) = typ.transcode_remainder(remainder, num_rows)?;
@@ -132,4 +133,38 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn array_lc_string() -> Result<()> {
+        let mut file = std::fs::File::open("./array_lc_string.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf).unwrap();
+
+        Ok(())
+    }
+
+    #[test]
+    fn array_lc_nullable_string() -> Result<()> {
+        let mut file = std::fs::File::open("./array_lc_nullable_string.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf).unwrap();
+
+        Ok(())
+    }
+
+    #[test]
+    fn array_string() -> Result<()> {
+        let mut file = std::fs::File::open("./array_string.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf).unwrap();
+
+        Ok(())
+    }
 }
+
