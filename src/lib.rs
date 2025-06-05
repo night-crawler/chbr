@@ -1,6 +1,7 @@
 pub mod error;
-mod parse_type;
-mod types;
+pub mod types;
+pub mod parse;
+mod slice;
 
 use crate::types::Marker;
 use unsigned_varint::decode;
@@ -42,9 +43,22 @@ pub fn parse_block(data: &[u8]) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod common {
     use super::*;
     use std::io::Read;
+    use log::LevelFilter;
+    use once_cell::sync::OnceCell;
+
+    static INIT: OnceCell<()> = OnceCell::new();
+
+    pub fn init_logger() {
+        INIT.get_or_init(|| {
+            env_logger::builder()
+                .filter_level(LevelFilter::Debug)
+                .is_test(true)
+                .init();
+        });
+    }
 
     #[test]
     fn it_works() -> Result<()> {

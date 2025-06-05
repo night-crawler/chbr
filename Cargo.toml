@@ -11,3 +11,10 @@ chrono-tz = "0.10"
 phf = { version = "0.11", features = ["macros", "std"] }
 nom = { version = "8", features = ["std"] }
 zerocopy = "0.8"
+log = "0.4"
+once_cell = "1.21.3"
+env_logger = "0.11.8"
+
+[dev-dependencies]
+testresult = "0.4"
+pretty_assertions = "1.4"

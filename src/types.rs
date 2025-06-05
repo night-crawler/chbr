@@ -1,8 +1,13 @@
 #![allow(dead_code)]
 
-use crate::parse_type::parse_type;
 pub use chrono_tz::Tz;
 use unsigned_varint::decode;
+use zerocopy::byteorder::{LittleEndian, U64};
+
+use crate::parse::typ::parse_type;
+use crate::slice::ByteView;
+
+pub type Offsets<'a> = ByteView<'a, U64<LittleEndian>>;
 
 pub const NEED_GLOBAL_DICTIONARY_BIT: u64 = 1u64 << 8;
 pub const HAS_ADDITIONAL_KEYS_BIT: u64 = 1u64 << 9;
@@ -80,11 +85,15 @@ pub enum Marker<'a> {
         global_dictionary: Option<Box<Marker<'a>>>,
         additional_keys: Option<Box<Marker<'a>>>,
     },
-    Array(Vec<usize>, Box<Marker<'a>>),
+    Array(Offsets<'a>, Box<Marker<'a>>),
     VarTuple(Vec<Marker<'a>>),
     FixTuple(Type<'a>, Data<'a>),
     Nullable(&'a [u8], Box<Marker<'a>>),
-    Map(Vec<usize>, Box<Marker<'a>>, Box<Marker<'a>>),
+    Map {
+        offsets: Offsets<'a>, 
+        keys: Box<Marker<'a>>,
+        values: Box<Marker<'a>>
+    },
     Variant(&'a [u8], Vec<Marker<'a>>),
     Nested(Vec<Field<'a>>, Data<'a>),
     Dynamic(&'a [u8], Vec<Marker<'a>>),
@@ -355,9 +364,10 @@ impl<'a> Type<'a> {
                 }
                 println!("offsets: {:?}", offsets);
                 let (inner_block, col_data_size) = inner.transcode_remainder(buf, n as usize)?;
-                let block = Marker::Array(offsets, Box::new(inner_block));
-                let complete_size = col_data_size + size_of::<u64>() * num_rows;
-                return Ok((block, complete_size));
+                todo!()
+                // let block = Marker::Array(offsets, Box::new(inner_block));
+                // let complete_size = col_data_size + size_of::<u64>() * num_rows;
+                // return Ok((block, complete_size));
             }
 
             Self::Ring => {
@@ -402,9 +412,10 @@ impl<'a> Type<'a> {
                 buf = &buf[key_size..];
                 let (val_block, val_size) = val.transcode_remainder(buf, n as usize)?;
 
-                let block = Marker::Map(offsets, Box::new(key_block), Box::new(val_block));
-                let complete_size = key_size + val_size + size_of::<u64>() * num_rows;
-                return Ok((block, complete_size));
+                // let block = Marker::Map(offsets, Box::new(key_block), Box::new(val_block));
+                // let complete_size = key_size + val_size + size_of::<u64>() * num_rows;
+                // return Ok((block, complete_size));
+                todo!()
             }
 
             // https://raw.githubusercontent.com/ClickHouse/ClickHouse/master/src/Columns/ColumnVariant.h
@@ -673,4 +684,25 @@ impl<'a> Type<'a> {
             _ => unimplemented!("Block marker not implemented for type: {:?}", self),
         }
     }
+}
+
+
+#[macro_export]
+macro_rules! t {
+    ($name:ident) => {
+        Type::$name
+    };
+    ($name:ident ( $($inner:tt)* )) => {
+        Type::$name( $($inner)* )
+    };
+}
+
+#[macro_export]
+macro_rules! bt {
+    ($name:ident) => {
+        Box::new(Type::$name)
+    };
+    ($name:ident ( $($inner:tt)* )) => {
+        Box::new(Type::$name( $($inner)* ))
+    };
 }
