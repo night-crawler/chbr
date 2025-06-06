@@ -251,4 +251,17 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn events() -> TestResult {
+        init_logger();
+
+        let mut file = std::fs::File::open("./events.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf)?;
+
+        Ok(())
+    }
 }

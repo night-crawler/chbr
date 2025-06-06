@@ -35,6 +35,7 @@ pub fn u64_varuint(buf: &[u8]) -> crate::Result<(usize, &[u8])> {
 }
 
 pub enum Marker<'a> {
+    Empty,
     Bool(&'a [u8]),
     Int8(ByteView<'a, i8>),
     Int16(ByteView<'a, I16>),
@@ -262,7 +263,7 @@ impl<'a> Type<'a> {
 
             Self::Array(_) => None,
 
-            Self::Tuple(inner) => {
+            Self::Tuple(_inner) => {
                 // let mut size = 0;
                 // for typ in inner {
                 //     size += typ.size()?;
@@ -347,154 +348,154 @@ impl<'a> Type<'a> {
                 return Ok((block, total_size));
             }
 
-            Self::Array(inner) => {
-                let mut buf = remainder;
-                let mut offsets = vec![];
-                let mut n = 0;
-                for _ in 0..num_rows {
-                    (n, buf) = u64_le(buf)?;
-                    offsets.push(n as usize);
-                }
-                println!("offsets: {:?}", offsets);
-                let (inner_block, col_data_size) = inner.transcode_remainder(buf, n as usize)?;
-                todo!()
-                // let block = Marker::Array(offsets, Box::new(inner_block));
-                // let complete_size = col_data_size + size_of::<u64>() * num_rows;
-                // return Ok((block, complete_size));
-            }
+            // Self::Array(inner) => {
+            //     let mut buf = remainder;
+            //     let mut offsets = vec![];
+            //     let mut n = 0;
+            //     for _ in 0..num_rows {
+            //         (n, buf) = u64_le(buf)?;
+            //         offsets.push(n as usize);
+            //     }
+            //     println!("offsets: {:?}", offsets);
+            //     let (inner_block, col_data_size) = inner.transcode_remainder(buf, n as usize)?;
+            //     todo!()
+            //     // let block = Marker::Array(offsets, Box::new(inner_block));
+            //     // let complete_size = col_data_size + size_of::<u64>() * num_rows;
+            //     // return Ok((block, complete_size));
+            // }
 
-            Self::Ring => {
-                let (points, size) =
-                    Type::Array(Box::new(Type::Point)).transcode_remainder(remainder, num_rows)?;
-                let wrapped = Marker::Ring(Box::new(points));
-                return Ok((wrapped, size));
-            }
-            Self::Polygon => {
-                let (rings, size) =
-                    Type::Array(Box::new(Type::Ring)).transcode_remainder(remainder, num_rows)?;
-                let wrapped = Marker::Polygon(Box::new(rings));
-                return Ok((wrapped, size));
-            }
-            Self::MultiPolygon => {
-                let (polygons, size) = Type::Array(Box::new(Type::Polygon))
-                    .transcode_remainder(remainder, num_rows)?;
-                let wrapped = Marker::MultiPolygon(Box::new(polygons));
-                return Ok((wrapped, size));
-            }
-            Self::LineString => {
-                let (points, size) =
-                    Type::Array(Box::new(Type::Point)).transcode_remainder(remainder, num_rows)?;
-                let wrapped = Marker::LineString(Box::new(points));
-                return Ok((wrapped, size));
-            }
-            Self::MultiLineString => {
-                let (points, size) = Type::Array(Box::new(Type::LineString))
-                    .transcode_remainder(remainder, num_rows)?;
-                let wrapped = Marker::MultiLineString(Box::new(points));
-                return Ok((wrapped, size));
-            }
-            Self::Map(key, val) => {
-                let mut buf = remainder;
-                let mut offsets = vec![];
-                let mut n = 0;
-                for _ in 0..num_rows {
-                    (n, buf) = u64_le(buf)?;
-                    offsets.push(n as usize);
-                }
-                let (key_block, key_size) = key.transcode_remainder(buf, n as usize)?;
-                buf = &buf[key_size..];
-                let (val_block, val_size) = val.transcode_remainder(buf, n as usize)?;
-
-                // let block = Marker::Map(offsets, Box::new(key_block), Box::new(val_block));
-                // let complete_size = key_size + val_size + size_of::<u64>() * num_rows;
-                // return Ok((block, complete_size));
-                todo!()
-            }
+            // Self::Ring => {
+            //     let (points, size) =
+            //         Type::Array(Box::new(Type::Point)).transcode_remainder(remainder, num_rows)?;
+            //     let wrapped = Marker::Ring(Box::new(points));
+            //     return Ok((wrapped, size));
+            // }
+            // Self::Polygon => {
+            //     let (rings, size) =
+            //         Type::Array(Box::new(Type::Ring)).transcode_remainder(remainder, num_rows)?;
+            //     let wrapped = Marker::Polygon(Box::new(rings));
+            //     return Ok((wrapped, size));
+            // }
+            // Self::MultiPolygon => {
+            //     let (polygons, size) = Type::Array(Box::new(Type::Polygon))
+            //         .transcode_remainder(remainder, num_rows)?;
+            //     let wrapped = Marker::MultiPolygon(Box::new(polygons));
+            //     return Ok((wrapped, size));
+            // }
+            // Self::LineString => {
+            //     let (points, size) =
+            //         Type::Array(Box::new(Type::Point)).transcode_remainder(remainder, num_rows)?;
+            //     let wrapped = Marker::LineString(Box::new(points));
+            //     return Ok((wrapped, size));
+            // }
+            // Self::MultiLineString => {
+            //     let (points, size) = Type::Array(Box::new(Type::LineString))
+            //         .transcode_remainder(remainder, num_rows)?;
+            //     let wrapped = Marker::MultiLineString(Box::new(points));
+            //     return Ok((wrapped, size));
+            // }
+            // Self::Map(key, val) => {
+            //     let mut buf = remainder;
+            //     let mut offsets = vec![];
+            //     let mut n = 0;
+            //     for _ in 0..num_rows {
+            //         (n, buf) = u64_le(buf)?;
+            //         offsets.push(n as usize);
+            //     }
+            //     let (key_block, key_size) = key.transcode_remainder(buf, n as usize)?;
+            //     buf = &buf[key_size..];
+            //     let (val_block, val_size) = val.transcode_remainder(buf, n as usize)?;
+            // 
+            //     // let block = Marker::Map(offsets, Box::new(key_block), Box::new(val_block));
+            //     // let complete_size = key_size + val_size + size_of::<u64>() * num_rows;
+            //     // return Ok((block, complete_size));
+            //     todo!()
+            // }
 
             // https://raw.githubusercontent.com/ClickHouse/ClickHouse/master/src/Columns/ColumnVariant.h
             // https://raw.githubusercontent.com/ClickHouse/ClickHouse/master/src/Columns/ColumnVariant.cpp
-            Self::Variant(types) => {
-                const NULL_DISCR: u8 = 255;
-                let (mode, buf) = u64_le(remainder)?;
-                if mode != 0 {
-                    panic!();
-                }
-                let (discriminators, mut buf) = buf.split_at(num_rows);
+            // Self::Variant(types) => {
+            //     const NULL_DISCR: u8 = 255;
+            //     let (mode, buf) = u64_le(remainder)?;
+            //     if mode != 0 {
+            //         panic!();
+            //     }
+            //     let (discriminators, mut buf) = buf.split_at(num_rows);
+            // 
+            //     let mut num_rows_per_discriminant = vec![0usize; types.len()];
+            //     for &discriminator in discriminators {
+            //         if discriminator == NULL_DISCR {
+            //             continue;
+            //         }
+            //         num_rows_per_discriminant[discriminator as usize] += 1;
+            //     }
+            // 
+            //     let mut blocks = Vec::with_capacity(types.len());
+            // 
+            //     for (idx, typ) in types.into_iter().enumerate() {
+            //         let rows_here = num_rows_per_discriminant[idx];
+            //         let (sub_block, sz) = typ.transcode_remainder(buf, rows_here)?;
+            //         blocks.push(sub_block);
+            //         buf = &buf[sz..];
+            //     }
+            // 
+            //     let consumed = remainder.len() - buf.len();
+            //     let marker = Marker::Variant {
+            //         discriminators,
+            //         types: blocks,
+            //     };
+            //     return Ok((marker, consumed));
+            // }
 
-                let mut num_rows_per_discriminant = vec![0usize; types.len()];
-                for &discriminator in discriminators {
-                    if discriminator == NULL_DISCR {
-                        continue;
-                    }
-                    num_rows_per_discriminant[discriminator as usize] += 1;
-                }
-
-                let mut blocks = Vec::with_capacity(types.len());
-
-                for (idx, typ) in types.into_iter().enumerate() {
-                    let rows_here = num_rows_per_discriminant[idx];
-                    let (sub_block, sz) = typ.transcode_remainder(buf, rows_here)?;
-                    blocks.push(sub_block);
-                    buf = &buf[sz..];
-                }
-
-                let consumed = remainder.len() - buf.len();
-                let marker = Marker::Variant {
-                    discriminators,
-                    types: blocks,
-                };
-                return Ok((marker, consumed));
-            }
-
-            Self::Dynamic => {
-                let (version, mut buf) = u64_le(remainder)?;
-                if version == 1 {
-                    (_, buf) = u64_varuint(buf)?;
-                }
-                let num_types;
-                (num_types, buf) = u64_varuint(buf)?;
-                println!("num_types: {num_types}");
-
-                let mut types = Vec::with_capacity(num_types);
-                let mut name_len;
-                for _ in 0..num_types {
-                    (name_len, buf) = u64_varuint(buf)?;
-                    let typ = Type::from_bytes(&buf[..name_len])?;
-                    buf = &buf[name_len..];
-                    types.push(typ);
-                }
-
-                println!("{:?}", types);
-
-                // skip stats I guess?
-                buf = &buf[8..];
-
-                let mut discriminator;
-                let mut counters = vec![0usize; num_types];
-                let discriminator_start = buf;
-                for _ in 0..num_rows {
-                    (discriminator, buf) = u64_varuint(buf)?;
-                    if discriminator == 0 {
-                        continue;
-                    }
-                    counters[discriminator - 1] += 1;
-                }
-                let discriminators_size = discriminator_start.len() - buf.len();
-                let discriminators = &discriminator_start[..discriminators_size];
-
-                let mut markers = Vec::with_capacity(num_types);
-                for (index, typ) in types.into_iter().enumerate() {
-                    let typ_rows = counters[index];
-                    let (marker, sz) = typ.transcode_remainder(buf, typ_rows)?;
-                    markers.push(marker);
-                    buf = &buf[sz..];
-                }
-
-                let marker = Marker::Dynamic(vec![], markers);
-                let consumed = remainder.len() - buf.len();
-
-                return Ok((marker, consumed));
-            }
+            // Self::Dynamic => {
+            //     let (version, mut buf) = u64_le(remainder)?;
+            //     if version == 1 {
+            //         (_, buf) = u64_varuint(buf)?;
+            //     }
+            //     let num_types;
+            //     (num_types, buf) = u64_varuint(buf)?;
+            //     println!("num_types: {num_types}");
+            // 
+            //     let mut types = Vec::with_capacity(num_types);
+            //     let mut name_len;
+            //     for _ in 0..num_types {
+            //         (name_len, buf) = u64_varuint(buf)?;
+            //         let typ = Type::from_bytes(&buf[..name_len])?;
+            //         buf = &buf[name_len..];
+            //         types.push(typ);
+            //     }
+            // 
+            //     println!("{:?}", types);
+            // 
+            //     // skip stats I guess?
+            //     buf = &buf[8..];
+            // 
+            //     let mut discriminator;
+            //     let mut counters = vec![0usize; num_types];
+            //     let discriminator_start = buf;
+            //     for _ in 0..num_rows {
+            //         (discriminator, buf) = u64_varuint(buf)?;
+            //         if discriminator == 0 {
+            //             continue;
+            //         }
+            //         counters[discriminator - 1] += 1;
+            //     }
+            //     let discriminators_size = discriminator_start.len() - buf.len();
+            //     let discriminators = &discriminator_start[..discriminators_size];
+            // 
+            //     let mut markers = Vec::with_capacity(num_types);
+            //     for (index, typ) in types.into_iter().enumerate() {
+            //         let typ_rows = counters[index];
+            //         let (marker, sz) = typ.transcode_remainder(buf, typ_rows)?;
+            //         markers.push(marker);
+            //         buf = &buf[sz..];
+            //     }
+            // 
+            //     let marker = Marker::Dynamic(vec![], markers);
+            //     let consumed = remainder.len() - buf.len();
+            // 
+            //     return Ok((marker, consumed));
+            // }
             Self::Json => {
                 let (_version, mut buf) = u64_le(remainder)?;
 
@@ -560,78 +561,78 @@ impl<'a> Type<'a> {
                 return Ok((marker, consumed));
             }
 
-            Self::LowCardinality(inner) => {
-                println!("Parsing LowCardinality type: {inner:?}");
-                let mut buf = remainder;
-                let version;
-                (version, buf) = u64_le(buf)?;
-                if version != LOW_CARDINALITY_VERSION {
-                    return Err(crate::error::Error::Parse(format!(
-                        "LowCardinality: invalid version {version}"
-                    )));
-                }
-
-                let flags;
-                (flags, buf) = u64_le(buf)?;
-                let has_additional_keys = flags & HAS_ADDITIONAL_KEYS_BIT != 0;
-                let needs_global_dictionary = flags & NEED_GLOBAL_DICTIONARY_BIT != 0;
-                let _needs_update_dictionary = flags & NEED_UPDATE_DICTIONARY_BIT != 0; // not needed for transcoding
-
-                let index_type = match flags & 0xff {
-                    TUINT8 => Type::UInt8,
-                    TUINT16 => Type::UInt16,
-                    TUINT32 => Type::UInt32,
-                    TUINT64 => Type::UInt64,
-                    x => {
-                        return Err(crate::error::Error::Parse(format!(
-                            "LowCardinality: bad index type {x}"
-                        )));
-                    }
-                };
-
-                let base_inner = inner.strip_null().clone();
-
-                let mut global_dictionary = None;
-                if needs_global_dictionary {
-                    let (cnt, buf2) = u64_le(buf)?;
-                    buf = buf2;
-                    let (dict_marker, sz) =
-                        base_inner.clone().transcode_remainder(buf, cnt as usize)?;
-                    buf = &buf[sz..];
-                    global_dictionary = Some(Box::new(dict_marker));
-                }
-
-                let mut additional_keys = None;
-                if has_additional_keys {
-                    let cnt;
-                    (cnt, buf) = u64_le(buf)?;
-                    let (add_marker, sz) =
-                        base_inner.clone().transcode_remainder(buf, cnt as usize)?;
-                    buf = &buf[sz..];
-                    additional_keys = Some(Box::new(add_marker));
-                }
-
-                let rows_here;
-                (rows_here, buf) = u64_le(buf)?;
-                if rows_here as usize != num_rows {
-                    return Err(crate::error::Error::Parse(format!(
-                        "LowCardinality: row-count mismatch (expected {num_rows}, got {rows_here})"
-                    )));
-                }
-
-                let (indices_marker, sz) = index_type.clone().transcode_remainder(buf, num_rows)?;
-                buf = &buf[sz..];
-
-                let consumed = remainder.len() - buf.len();
-                let marker = Marker::LowCardinality {
-                    index_type,
-                    indices: Box::new(indices_marker),
-                    global_dictionary,
-                    additional_keys,
-                };
-
-                return Ok((marker, consumed));
-            }
+            // Self::LowCardinality(inner) => {
+            //     println!("Parsing LowCardinality type: {inner:?}");
+            //     let mut buf = remainder;
+            //     let version;
+            //     (version, buf) = u64_le(buf)?;
+            //     if version != LOW_CARDINALITY_VERSION {
+            //         return Err(crate::error::Error::Parse(format!(
+            //             "LowCardinality: invalid version {version}"
+            //         )));
+            //     }
+            // 
+            //     let flags;
+            //     (flags, buf) = u64_le(buf)?;
+            //     let has_additional_keys = flags & HAS_ADDITIONAL_KEYS_BIT != 0;
+            //     let needs_global_dictionary = flags & NEED_GLOBAL_DICTIONARY_BIT != 0;
+            //     let _needs_update_dictionary = flags & NEED_UPDATE_DICTIONARY_BIT != 0; // not needed for transcoding
+            // 
+            //     let index_type = match flags & 0xff {
+            //         TUINT8 => Type::UInt8,
+            //         TUINT16 => Type::UInt16,
+            //         TUINT32 => Type::UInt32,
+            //         TUINT64 => Type::UInt64,
+            //         x => {
+            //             return Err(crate::error::Error::Parse(format!(
+            //                 "LowCardinality: bad index type {x}"
+            //             )));
+            //         }
+            //     };
+            // 
+            //     let base_inner = inner.strip_null().clone();
+            // 
+            //     let mut global_dictionary = None;
+            //     if needs_global_dictionary {
+            //         let (cnt, buf2) = u64_le(buf)?;
+            //         buf = buf2;
+            //         let (dict_marker, sz) =
+            //             base_inner.clone().transcode_remainder(buf, cnt as usize)?;
+            //         buf = &buf[sz..];
+            //         global_dictionary = Some(Box::new(dict_marker));
+            //     }
+            // 
+            //     let mut additional_keys = None;
+            //     if has_additional_keys {
+            //         let cnt;
+            //         (cnt, buf) = u64_le(buf)?;
+            //         let (add_marker, sz) =
+            //             base_inner.clone().transcode_remainder(buf, cnt as usize)?;
+            //         buf = &buf[sz..];
+            //         additional_keys = Some(Box::new(add_marker));
+            //     }
+            // 
+            //     let rows_here;
+            //     (rows_here, buf) = u64_le(buf)?;
+            //     if rows_here as usize != num_rows {
+            //         return Err(crate::error::Error::Parse(format!(
+            //             "LowCardinality: row-count mismatch (expected {num_rows}, got {rows_here})"
+            //         )));
+            //     }
+            // 
+            //     let (indices_marker, sz) = index_type.clone().transcode_remainder(buf, num_rows)?;
+            //     buf = &buf[sz..];
+            // 
+            //     let consumed = remainder.len() - buf.len();
+            //     let marker = Marker::LowCardinality {
+            //         index_type,
+            //         indices: Box::new(indices_marker),
+            //         global_dictionary,
+            //         additional_keys,
+            //     };
+            // 
+            //     return Ok((marker, consumed));
+            // }
 
             _ => {}
         }

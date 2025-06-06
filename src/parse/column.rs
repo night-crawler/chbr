@@ -1,17 +1,13 @@
 use crate::parse::block::ParseContext;
-use crate::parse::typ::parse_type;
-use crate::parse::{
-    parse_offsets, parse_u64, parse_var_str, parse_var_str_bytes, parse_var_str_type, parse_varuint,
-};
+use crate::parse::{parse_offsets, parse_u64, parse_var_str, parse_var_str_type, parse_varuint};
 use crate::types::{
-    HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION, Marker, NEED_GLOBAL_DICTIONARY_BIT,
-    NEED_UPDATE_DICTIONARY_BIT, TUINT8, TUINT16, TUINT32, TUINT64, Type, u64_le, u64_varuint,
+    Marker, Type, HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION,
+    NEED_GLOBAL_DICTIONARY_BIT, NEED_UPDATE_DICTIONARY_BIT, TUINT16, TUINT32, TUINT64, TUINT8,
 };
 use crate::{bt, t};
 use log::{debug, error, info};
 use nom::error::ErrorKind;
 use nom::{IResult, Needed};
-use zerocopy::U64;
 
 impl<'a> Type<'a> {
     pub(crate) fn decode_prefix(&self, mut ctx: ParseContext<'a>) -> IResult<&'a [u8], ()> {
@@ -91,7 +87,7 @@ impl<'a> Type<'a> {
             Type::Map(key, value) => Self::decode_map(*key, *value, ctx),
             Type::Variant(inner) => Self::decode_variant(inner, ctx),
             Type::LowCardinality(inner) => Self::decode_lc(*inner, ctx),
-            Type::Nullable(inner) => Self::decode_nullable_string(*inner, ctx),
+            Type::Nullable(inner) => Self::decode_nullable(*inner, ctx),
             Type::Dynamic => Self::decode_dynamic(ctx),
             _ => {
                 todo!("Not implemented for {self:?}")
@@ -138,7 +134,7 @@ impl<'a> Type<'a> {
         Ok((input, marker))
     }
 
-    pub(crate) fn decode_nullable_string(
+    pub(crate) fn decode_nullable(
         inner: Type<'a>,
         ctx: ParseContext<'a>,
     ) -> IResult<&'a [u8], Marker<'a>> {
@@ -258,7 +254,7 @@ impl<'a> Type<'a> {
         ctx: ParseContext<'a>,
     ) -> IResult<&'a [u8], Marker<'a>> {
         let (input, offsets) = parse_offsets(ctx.input, ctx.num_rows)?;
-        let n = offsets.last().copied().unwrap_or(U64::from(0)).get() as usize;
+        let n = offsets.last_or_default().get() as usize;
 
         let (input, keys) = key.decode(ctx.fork(input).with_num_rows(n))?;
         let (input, values) = value.decode(ctx.fork(input).with_num_rows(n))?;
@@ -291,8 +287,13 @@ impl<'a> Type<'a> {
         ctx: ParseContext<'a>,
     ) -> IResult<&'a [u8], Marker<'a>> {
         let (input, offsets) = parse_offsets(ctx.input, ctx.num_rows)?;
-        let num_rows = offsets.last().copied().unwrap_or(U64::from(0)).get() as usize;
+        debug!("Array Offsets: {:?}", offsets.as_bytes());
+        let num_rows = offsets.last_or_default().get() as usize;
         debug!("Array num_rows: {}", num_rows);
+        
+        if num_rows == 0 {
+            return Ok((input, Marker::Array(offsets, Box::new(Marker::Empty))));
+        }
 
         let (input, inner_block) = inner.decode(ctx.fork(input).with_num_rows(num_rows))?;
         Ok((input, inner_block))
