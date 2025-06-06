@@ -9,10 +9,11 @@ thiserror = "2"
 chrono = "0.4"
 chrono-tz = "0.10"
 nom = { version = "8", features = ["std"] }
-zerocopy = "0.8"
+zerocopy = {version = "0.8", features = ["std", "derive"]}
 log = "0.4"
 once_cell = "1.21.3"
 env_logger = "0.11.8"
+rust_decimal = "1.37.1"
 
 [dev-dependencies]
 testresult = "0.4"

@@ -1,11 +1,11 @@
+use crate::parse::typ::parse_type;
 use crate::slice::ByteView;
+use crate::types::Type;
 use log::trace;
 use nom::IResult;
 use nom::error::{ErrorKind, FromExternalError};
 use unsigned_varint::decode;
 use zerocopy::{LittleEndian, U64};
-use crate::parse::typ::parse_type;
-use crate::types::Type;
 
 pub mod block;
 pub mod column;

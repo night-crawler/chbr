@@ -1,12 +1,17 @@
 use crate::parse::block::ParseContext;
-use crate::parse::{parse_offsets, parse_u64, parse_var_str, parse_var_str_bytes, parse_var_str_type, parse_varuint};
-use crate::types::{u64_le, u64_varuint, Data, Marker, Type, HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION, NEED_GLOBAL_DICTIONARY_BIT, NEED_UPDATE_DICTIONARY_BIT, TUINT16, TUINT32, TUINT64, TUINT8};
+use crate::parse::typ::parse_type;
+use crate::parse::{
+    parse_offsets, parse_u64, parse_var_str, parse_var_str_bytes, parse_var_str_type, parse_varuint,
+};
+use crate::types::{
+    HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION, Marker, NEED_GLOBAL_DICTIONARY_BIT,
+    NEED_UPDATE_DICTIONARY_BIT, TUINT8, TUINT16, TUINT32, TUINT64, Type, u64_le, u64_varuint,
+};
 use crate::{bt, t};
 use log::{debug, error, info};
 use nom::error::ErrorKind;
 use nom::{IResult, Needed};
 use zerocopy::U64;
-use crate::parse::typ::parse_type;
 
 impl<'a> Type<'a> {
     pub(crate) fn decode_prefix(&self, mut ctx: ParseContext<'a>) -> IResult<&'a [u8], ()> {
@@ -58,7 +63,7 @@ impl<'a> Type<'a> {
                     (input, legacy_columns) = parse_varuint(input)?;
                     debug!("Legacy columns: {legacy_columns}");
                 }
-                
+
                 return Ok((input, ()));
             }
             _ => {}
@@ -70,11 +75,8 @@ impl<'a> Type<'a> {
     pub(crate) fn decode(self, ctx: ParseContext<'a>) -> IResult<&'a [u8], Marker<'a>> {
         if let Some(size) = self.size() {
             let (data, input) = ctx.input.split_at(size * ctx.num_rows);
-            let data = Data {
-                data,
-                num_rows: ctx.num_rows,
-            };
-            return Ok((input, self.into_fixed_size_marker(data)));
+            let q = self.into_fixed_size_marker(data).unwrap();
+            return Ok((input, q));
         }
 
         match self {
@@ -96,17 +98,15 @@ impl<'a> Type<'a> {
             }
         }
     }
-    
-    pub(crate) fn decode_dynamic(
-        ctx: ParseContext<'a>,
-    ) -> IResult<&'a [u8], Marker<'a>> {
+
+    pub(crate) fn decode_dynamic(ctx: ParseContext<'a>) -> IResult<&'a [u8], Marker<'a>> {
         let (mut input, num_types) = parse_varuint(ctx.input)?;
         debug!("num_types: {num_types}");
 
         let mut types = Vec::with_capacity(num_types);
         for _ in 0..num_types {
             let typ;
-            (input, typ ) = parse_var_str_type(input)?;
+            (input, typ) = parse_var_str_type(input)?;
             types.push(typ);
         }
 
@@ -300,14 +300,15 @@ impl<'a> Type<'a> {
 
     pub(crate) fn decode_string(self, ctx: ParseContext<'a>) -> IResult<&'a [u8], Marker<'a>> {
         let mut input = ctx.input;
+        let mut offsets = vec![0u32; ctx.num_rows];
+        let mut offset = 0;
         for _ in 0..ctx.num_rows {
-            (input, _) = parse_var_str_bytes(input)?;
+            let s;
+            (input, s) = parse_var_str(input)?;
+            offset += s.len() as u32;
+            offsets.push(offset)
         }
-        let data = Data {
-            data: ctx.input,
-            num_rows: ctx.num_rows,
-        };
 
-        Ok((input, Marker::String(data)))
+        Ok((input, Marker::String(offsets, input)))
     }
 }

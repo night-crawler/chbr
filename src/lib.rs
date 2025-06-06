@@ -5,9 +5,41 @@ pub mod parse;
 mod slice;
 pub mod types;
 
+#[repr(C)]
+#[derive(
+    Clone,
+    Copy,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Debug,
+    Default,
+    zerocopy::FromBytes,
+    zerocopy::Unaligned,
+)]
+#[allow(non_camel_case_types)]
+pub struct i256(pub [u8; 32]);
+
+#[repr(C)]
+#[derive(
+    Clone,
+    Copy,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Debug,
+    Default,
+    zerocopy::FromBytes,
+    zerocopy::Unaligned,
+)]
+#[allow(non_camel_case_types)]
+pub struct u256(pub [u8; 32]);
 
 pub type Result<T> = std::result::Result<T, error::Error>;
-
 
 pub struct ParsedBlock<'a> {
     pub markers: Vec<Marker<'a>>,
@@ -15,7 +47,6 @@ pub struct ParsedBlock<'a> {
     pub col_names: Vec<&'a str>,
     pub num_rows: usize,
 }
-
 
 #[cfg(test)]
 pub mod common {

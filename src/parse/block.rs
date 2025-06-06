@@ -1,6 +1,6 @@
+use crate::ParsedBlock;
 use crate::parse::typ::parse_type;
 use crate::parse::{parse_var_str, parse_varuint};
-use crate::ParsedBlock;
 use log::debug;
 use nom::IResult;
 use std::ops::Deref;
@@ -94,7 +94,15 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
         markers.push(marker);
     }
 
-    Ok((input, ParsedBlock { markers, col_names, index: 0, num_rows }))
+    Ok((
+        input,
+        ParsedBlock {
+            markers,
+            col_names,
+            index: 0,
+            num_rows,
+        },
+    ))
 }
 
 #[cfg(test)]
@@ -166,7 +174,7 @@ mod tests {
     #[test]
     fn dynamic() -> TestResult {
         init_logger();
-        
+
         let mut file = std::fs::File::open("./dynamic.native")?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
@@ -234,7 +242,7 @@ mod tests {
     #[test]
     fn map_nullable_lc_string() -> TestResult {
         init_logger();
-        
+
         let mut file = std::fs::File::open("./map_nullable_lc_string.native")?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;

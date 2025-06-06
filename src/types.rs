@@ -1,13 +1,13 @@
 #![allow(dead_code)]
 
-pub use chrono_tz::Tz;
-use unsigned_varint::decode;
-use zerocopy::byteorder::{LittleEndian, U64};
-
 use crate::parse::typ::parse_type;
 use crate::slice::ByteView;
+use crate::{i256, u256};
+pub use chrono_tz::Tz;
+use unsigned_varint::decode;
+use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
 
-pub type Offsets<'a> = ByteView<'a, U64<LittleEndian>>;
+pub type Offsets<'a> = ByteView<'a, U64>;
 
 pub const NEED_GLOBAL_DICTIONARY_BIT: u64 = 1u64 << 8;
 pub const HAS_ADDITIONAL_KEYS_BIT: u64 = 1u64 << 9;
@@ -34,50 +34,45 @@ pub fn u64_varuint(buf: &[u8]) -> crate::Result<(usize, &[u8])> {
     Ok((n as usize, rest))
 }
 
-pub struct Data<'a> {
-    pub data: &'a [u8],
-    pub num_rows: usize,
-}
-
 pub enum Marker<'a> {
     Bool(&'a [u8]),
     Int8(ByteView<'a, i8>),
-    Int16(Data<'a>),
-    Int32(Data<'a>),
-    Int64(Data<'a>),
-    Int128(Data<'a>),
-    Int256(Data<'a>),
-    UInt8(Data<'a>),
-    UInt16(Data<'a>),
-    UInt32(Data<'a>),
-    UInt64(Data<'a>),
-    UInt128(Data<'a>),
-    UInt256(Data<'a>),
-    Float32(Data<'a>),
-    Float64(Data<'a>),
-    BFloat16(Data<'a>),
-    Decimal32(u8, Data<'a>),
-    Decimal64(u8, Data<'a>),
-    Decimal128(u8, Data<'a>),
-    Decimal256(u8, Data<'a>),
-    String(Data<'a>),
-    FixedString(usize, Data<'a>),
-    Uuid(Data<'a>),
-    Date(Data<'a>),
-    Date32(Data<'a>),
-    DateTime(Tz, Data<'a>),
-    DateTime64(u8, Tz, Data<'a>),
-    Ipv4(Data<'a>),
-    Ipv6(Data<'a>),
-    Point(Data<'a>),
+    Int16(ByteView<'a, I16>),
+    Int32(ByteView<'a, I32>),
+    Int64(ByteView<'a, I64>),
+    Int128(ByteView<'a, I128>),
+    Int256(ByteView<'a, i256>),
+    UInt8(ByteView<'a, u8>),
+    UInt16(ByteView<'a, U16>),
+    UInt32(ByteView<'a, U32>),
+    UInt64(ByteView<'a, U64>),
+    UInt128(ByteView<'a, U128>),
+    UInt256(ByteView<'a, u256>),
+    Float32(ByteView<'a, F32>),
+    Float64(ByteView<'a, F64>),
+    BFloat16(ByteView<'a, U16>),
+    Decimal32(u8, &'a [u8]),
+    Decimal64(u8, &'a [u8]),
+    Decimal128(u8, &'a [u8]),
+    Decimal256(u8, &'a [u8]),
+    String(Vec<u32>, &'a [u8]),
+    FixedString(usize, &'a [u8]),
+    Uuid(&'a [u8]),
+    Date(&'a [u8]),
+    Date32(&'a [u8]),
+    DateTime(Tz, &'a [u8]),
+    DateTime64(u8, Tz, &'a [u8]),
+    Ipv4(&'a [u8]),
+    Ipv6(&'a [u8]),
+    Point(&'a [u8]),
     Ring(Box<Marker<'a>>),
     Polygon(Box<Marker<'a>>),
     MultiPolygon(Box<Marker<'a>>),
     LineString(Box<Marker<'a>>),
     MultiLineString(Box<Marker<'a>>),
 
-    Enum8(Vec<(&'a str, i8)>, Data<'a>),
-    Enum16(Vec<(&'a str, i16)>, Data<'a>),
+    Enum8(Vec<(&'a str, i8)>, &'a [u8]),
+    Enum16(Vec<(&'a str, i16)>, &'a [u8]),
 
     LowCardinality {
         index_type: Type<'a>,
@@ -87,7 +82,7 @@ pub enum Marker<'a> {
     },
     Array(Offsets<'a>, Box<Marker<'a>>),
     VarTuple(Vec<Marker<'a>>),
-    FixTuple(Type<'a>, Data<'a>),
+    FixTuple(Type<'a>, &'a [u8]),
     Nullable(&'a [u8], Box<Marker<'a>>),
     Map {
         offsets: Offsets<'a>,
@@ -98,7 +93,7 @@ pub enum Marker<'a> {
         discriminators: &'a [u8],
         types: Vec<Marker<'a>>,
     },
-    Nested(Vec<Field<'a>>, Data<'a>),
+    Nested(Vec<Field<'a>>, &'a [u8]),
     Dynamic(Vec<usize>, Vec<Marker<'a>>),
 
     Json {
@@ -308,11 +303,10 @@ impl<'a> Type<'a> {
     ) -> crate::Result<(Marker<'a>, usize)> {
         if let Some(size) = self.size() {
             let data_size = size * num_rows;
-            let data = Data {
-                data: &remainder[..data_size],
-                num_rows,
-            };
-            return Ok((self.into_fixed_size_marker(data), data_size));
+            return Ok((
+                self.into_fixed_size_marker(&remainder[..data_size])?,
+                data_size,
+            ));
         }
 
         match self {
@@ -325,23 +319,18 @@ impl<'a> Type<'a> {
                 return Ok((block, size + num_rows));
             }
 
-            Self::String => {
-                let mut buf = remainder;
-                let start_ptr = buf.as_ptr();
-                let mut n;
-                for _ in 0..num_rows {
-                    (n, buf) = u64_varuint(buf)?;
-                    buf = &buf[n..];
-                }
-                let end = buf.as_ptr();
-                let data_size = end as usize - start_ptr as usize;
-                let data = Data {
-                    data: &remainder[..data_size],
-                    num_rows,
-                };
-                return Ok((Marker::String(data), data_size));
-            }
-
+            // Self::String => {
+            //     let mut buf = remainder;
+            //     let start_ptr = buf.as_ptr();
+            //     let mut n;
+            //     for _ in 0..num_rows {
+            //         (n, buf) = u64_varuint(buf)?;
+            //         buf = &buf[n..];
+            //     }
+            //     let end = buf.as_ptr();
+            //     let data_size = end as usize - start_ptr as usize;
+            //     return Ok((Marker::String(&remainder[..data_size]), data_size));
+            // }
             Self::Tuple(inner) => {
                 let mut buf = remainder;
                 let mut blocks = vec![];
@@ -650,29 +639,28 @@ impl<'a> Type<'a> {
         todo!()
     }
 
-    pub fn into_fixed_size_marker(self, data: Data<'a>) -> Marker<'a> {
-        match self {
-            Type::Bool => Marker::Bool(data.data),
-            Type::Int8 => Marker::Int8(ByteView::try_from(data.data).unwrap()),
-            Type::Int16 => Marker::Int16(data),
-            Type::Int32 => Marker::Int32(data),
-            Type::Int64 => Marker::Int64(data),
-            Type::Int128 => Marker::Int128(data),
-            Type::Int256 => Marker::Int256(data),
-            Type::UInt8 => Marker::UInt8(data),
-            Type::UInt16 => Marker::UInt16(data),
-            Type::UInt32 => Marker::UInt32(data),
-            Type::UInt64 => Marker::UInt64(data),
-            Type::UInt128 => Marker::UInt128(data),
-            Type::UInt256 => Marker::UInt256(data),
-            Type::Float32 => Marker::Float32(data),
-            Type::Float64 => Marker::Float64(data),
-            Type::BFloat16 => Marker::BFloat16(data),
+    pub fn into_fixed_size_marker(self, data: &'a [u8]) -> crate::Result<Marker<'a>> {
+        let q = match self {
+            Type::Bool => Marker::Bool(data),
+            Type::Int8 => Marker::Int8(ByteView::try_from(data)?),
+            Type::Int16 => Marker::Int16(ByteView::try_from(data)?),
+            Type::Int32 => Marker::Int32(ByteView::try_from(data)?),
+            Type::Int64 => Marker::Int64(ByteView::try_from(data)?),
+            Type::Int128 => Marker::Int128(ByteView::try_from(data)?),
+            Type::Int256 => Marker::Int256(ByteView::try_from(data)?),
+            Type::UInt8 => Marker::UInt8(ByteView::try_from(data)?),
+            Type::UInt16 => Marker::UInt16(ByteView::try_from(data)?),
+            Type::UInt32 => Marker::UInt32(ByteView::try_from(data)?),
+            Type::UInt64 => Marker::UInt64(ByteView::try_from(data)?),
+            Type::UInt128 => Marker::UInt128(ByteView::try_from(data)?),
+            Type::UInt256 => Marker::UInt256(ByteView::try_from(data)?),
+            Type::Float32 => Marker::Float32(ByteView::try_from(data)?),
+            Type::Float64 => Marker::Float64(ByteView::try_from(data)?),
+            Type::BFloat16 => Marker::BFloat16(ByteView::try_from(data)?),
             Type::Decimal32(scale) => Marker::Decimal32(scale, data),
             Type::Decimal64(scale) => Marker::Decimal64(scale, data),
             Type::Decimal128(scale) => Marker::Decimal128(scale, data),
             Type::Decimal256(scale) => Marker::Decimal256(scale, data),
-            Type::String => Marker::String(data),
             Type::FixedString(size) => Marker::FixedString(size, data),
             Type::Uuid => Marker::Uuid(data),
             Type::Date => Marker::Date(data),
@@ -689,7 +677,9 @@ impl<'a> Type<'a> {
             Type::Enum16(values) => Marker::Enum16(values, data),
 
             _ => unimplemented!("Block marker not implemented for type: {:?}", self),
-        }
+        };
+
+        Ok(q)
     }
 }
 
