@@ -1,8 +1,8 @@
 use crate::parse::block::ParseContext;
 use crate::parse::{parse_offsets, parse_u64, parse_var_str_bytes};
 use crate::types::{
-    Data, HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION, Marker, NEED_GLOBAL_DICTIONARY_BIT,
-    NEED_UPDATE_DICTIONARY_BIT, TUINT8, TUINT16, TUINT32, TUINT64, Type, u64_le,
+    Data, Marker, Type, HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION,
+    NEED_GLOBAL_DICTIONARY_BIT, NEED_UPDATE_DICTIONARY_BIT, TUINT16, TUINT32, TUINT64, TUINT8,
 };
 use crate::{bt, t};
 use log::{debug, error, info};
@@ -11,22 +11,32 @@ use nom::{IResult, Needed};
 use zerocopy::U64;
 
 impl<'a> Type<'a> {
-    pub(crate) fn decode_prefix(&self, ctx: ParseContext<'a>) -> IResult<&'a [u8], ()> {
+    pub(crate) fn decode_prefix(&self, mut ctx: ParseContext<'a>) -> IResult<&'a [u8], ()> {
         info!("Decoding prefix for type: {:?}", self);
         match self {
+            Type::Nullable(inner) => {
+                let (input, _) = inner.decode_prefix(ctx.clone())?;
+                return Ok((input, ()));
+            }
             Type::Tuple(inner) => {
                 for typ in inner {
-                    typ.decode_prefix(ctx.clone())?;
+                    let (input, ()) = typ.decode_prefix(ctx.clone())?;
+                    ctx = ctx.fork(input);
                 }
+
+                return Ok((ctx.input, ()));
             }
             Type::Map(key, val) => {
                 let inner_tuple = t!(Tuple(vec![*key.clone(), *val.clone()]));
-                inner_tuple.decode_prefix(ctx.clone())?;
+                let (input, _) = inner_tuple.decode_prefix(ctx.clone())?;
+                return Ok((input, ()));
             }
             Type::Variant(inner) => {
                 for typ in inner {
                     typ.decode_prefix(ctx.clone())?;
+                    ctx = ctx.fork(ctx.input);
                 }
+                return Ok((ctx.input, ()));
             }
             Type::LowCardinality(_) => {
                 let (input, version) = parse_u64(ctx.input)?;
@@ -39,8 +49,13 @@ impl<'a> Type<'a> {
                 }
                 return Ok((input, ()));
             }
+            Type::Array(inner) => {
+                let (input, ()) = inner.decode_prefix(ctx.clone())?;
+                return Ok((input, ()));
+            }
             _ => {}
         }
+        debug!("Nothing decoded for {:?}", self);
         Ok((ctx.input, ()))
     }
 
@@ -66,10 +81,20 @@ impl<'a> Type<'a> {
             Type::Map(key, value) => Self::decode_map(*key, *value, ctx),
             Type::Variant(inner) => Self::decode_variant(inner, ctx),
             Type::LowCardinality(inner) => Self::decode_lc(*inner, ctx),
+            Type::Nullable(inner) => Self::decode_nullable_string(*inner, ctx),
             _ => {
                 todo!("Not implemented for {self:?}")
             }
         }
+    }
+
+    pub(crate) fn decode_nullable_string(
+        inner: Type<'a>,
+        ctx: ParseContext<'a>,
+    ) -> IResult<&'a [u8], Marker<'a>> {
+        let (mask, input) = ctx.input.split_at(ctx.num_rows);
+        let (input, marker) = inner.decode(ctx.fork(input))?;
+        Ok((input, Marker::Nullable(mask, Box::new(marker))))
     }
 
     pub(crate) fn decode_lc(
@@ -215,8 +240,7 @@ impl<'a> Type<'a> {
         inner: Type<'a>,
         ctx: ParseContext<'a>,
     ) -> IResult<&'a [u8], Marker<'a>> {
-        let (input, _) = inner.decode_prefix(ctx.clone())?;
-        let (input, offsets) = parse_offsets(input, ctx.num_rows)?;
+        let (input, offsets) = parse_offsets(ctx.input, ctx.num_rows)?;
         let num_rows = offsets.last().copied().unwrap_or(U64::from(0)).get() as usize;
         debug!("Array num_rows: {}", num_rows);
 

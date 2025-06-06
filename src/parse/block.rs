@@ -1,6 +1,6 @@
 use crate::parse::typ::parse_type;
 use crate::parse::{parse_var_str, parse_varuint};
-use crate::types::Marker;
+use crate::ParsedBlock;
 use log::debug;
 use nom::IResult;
 use std::ops::Deref;
@@ -45,7 +45,7 @@ impl<'a> ParseContext<'a> {
     }
 }
 
-pub fn parse_block(input: &[u8]) -> IResult<&[u8], Vec<Marker>> {
+pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
     let mut parse_context = ParseContext {
         input,
         num_columns: 0,
@@ -62,7 +62,7 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], Vec<Marker>> {
     parse_context.num_columns = num_columns;
     parse_context.num_rows = num_rows;
 
-    let mut result = Vec::with_capacity(num_columns);
+    let mut markers = Vec::with_capacity(num_columns);
 
     for index in 0..num_columns {
         debug!("Parsing column {index} of {num_columns}");
@@ -83,13 +83,16 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], Vec<Marker>> {
         debug!("column type parsed: {:?}", typ);
 
         let ctx = parse_context.fork(input);
-        let marker;
-        (input, marker) = typ.decode(ctx)?;
+        (input, _) = typ.decode_prefix(ctx.clone())?;
 
-        result.push(marker);
+        let marker;
+        (input, marker) = typ.decode(ctx.fork(input))?;
+        debug!("Decoded, remaining bytes: {}", input.len());
+
+        markers.push(marker);
     }
 
-    Ok((input, result))
+    Ok((input, ParsedBlock { markers }))
 }
 
 #[cfg(test)]
@@ -117,6 +120,118 @@ mod tests {
         init_logger();
 
         let mut file = std::fs::File::open("./array_lc_string.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn array() -> TestResult {
+        let mut file = std::fs::File::open("./array.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn tuple() -> TestResult {
+        let mut file = std::fs::File::open("./tuple.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn variant() -> TestResult {
+        let mut file = std::fs::File::open("./variant.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn dynamic() -> TestResult {
+        let mut file = std::fs::File::open("./dynamic.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn nullable_string() -> TestResult {
+        let mut file = std::fs::File::open("./nullable_string.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn json() -> TestResult {
+        let mut file = std::fs::File::open("./json.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn array_nullable_int64() -> TestResult {
+        let mut file = std::fs::File::open("./array_nullable_int64.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn array_lc_nullable_string() -> TestResult {
+        let mut file = std::fs::File::open("./array_lc_nullable_string.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn array_string() -> TestResult {
+        let mut file = std::fs::File::open("./array_string.native")?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        parse_block(&buf)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn map_nullable_lc_string() -> TestResult {
+        init_logger();
+        
+        let mut file = std::fs::File::open("./map_nullable_lc_string.native")?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
 

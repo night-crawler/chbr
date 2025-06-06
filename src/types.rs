@@ -268,11 +268,12 @@ impl<'a> Type<'a> {
             Self::Array(_) => None,
 
             Self::Tuple(inner) => {
-                let mut size = 0;
-                for typ in inner {
-                    size += typ.size()?;
-                }
-                Some(size)
+                // let mut size = 0;
+                // for typ in inner {
+                //     size += typ.size()?;
+                // }
+                // Some(size)
+                None
             }
 
             // TODO: is it always variable?
