@@ -1,14 +1,12 @@
 use crate::parse::block::ParseContext;
-use crate::parse::{parse_offsets, parse_u64, parse_var_str_bytes};
-use crate::types::{
-    Data, Marker, Type, HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION,
-    NEED_GLOBAL_DICTIONARY_BIT, NEED_UPDATE_DICTIONARY_BIT, TUINT16, TUINT32, TUINT64, TUINT8,
-};
+use crate::parse::{parse_offsets, parse_u64, parse_var_str, parse_var_str_bytes, parse_var_str_type, parse_varuint};
+use crate::types::{u64_le, u64_varuint, Data, Marker, Type, HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION, NEED_GLOBAL_DICTIONARY_BIT, NEED_UPDATE_DICTIONARY_BIT, TUINT16, TUINT32, TUINT64, TUINT8};
 use crate::{bt, t};
 use log::{debug, error, info};
 use nom::error::ErrorKind;
 use nom::{IResult, Needed};
 use zerocopy::U64;
+use crate::parse::typ::parse_type;
 
 impl<'a> Type<'a> {
     pub(crate) fn decode_prefix(&self, mut ctx: ParseContext<'a>) -> IResult<&'a [u8], ()> {
@@ -53,6 +51,16 @@ impl<'a> Type<'a> {
                 let (input, ()) = inner.decode_prefix(ctx.clone())?;
                 return Ok((input, ()));
             }
+            Type::Dynamic => {
+                let (mut input, version) = parse_u64(ctx.input)?;
+                if version == 1 {
+                    let legacy_columns;
+                    (input, legacy_columns) = parse_varuint(input)?;
+                    debug!("Legacy columns: {legacy_columns}");
+                }
+                
+                return Ok((input, ()));
+            }
             _ => {}
         }
         debug!("Nothing decoded for {:?}", self);
@@ -82,10 +90,52 @@ impl<'a> Type<'a> {
             Type::Variant(inner) => Self::decode_variant(inner, ctx),
             Type::LowCardinality(inner) => Self::decode_lc(*inner, ctx),
             Type::Nullable(inner) => Self::decode_nullable_string(*inner, ctx),
+            Type::Dynamic => Self::decode_dynamic(ctx),
             _ => {
                 todo!("Not implemented for {self:?}")
             }
         }
+    }
+    
+    pub(crate) fn decode_dynamic(
+        ctx: ParseContext<'a>,
+    ) -> IResult<&'a [u8], Marker<'a>> {
+        let (mut input, num_types) = parse_varuint(ctx.input)?;
+        debug!("num_types: {num_types}");
+
+        let mut types = Vec::with_capacity(num_types);
+        for _ in 0..num_types {
+            let typ;
+            (input, typ ) = parse_var_str_type(input)?;
+            types.push(typ);
+        }
+
+        debug!("{:?}", types);
+
+        // skip stats I guess?
+        input = &input[8..];
+
+        let mut discriminators = Vec::with_capacity(ctx.num_rows);
+        let mut counters = vec![0usize; num_types];
+        for _ in 0..ctx.num_rows {
+            let discriminator;
+            (input, discriminator) = parse_varuint(input)?;
+            discriminators.push(discriminator);
+            if discriminator == 0 {
+                continue;
+            }
+            counters[discriminator - 1] += 1;
+        }
+
+        let mut markers = Vec::with_capacity(num_types);
+        for (index, typ) in types.into_iter().enumerate() {
+            let marker;
+            (input, marker) = typ.decode(ctx.fork(input).with_num_rows(counters[index]))?;
+            markers.push(marker);
+        }
+
+        let marker = Marker::Dynamic(discriminators, markers);
+        Ok((input, marker))
     }
 
     pub(crate) fn decode_nullable_string(

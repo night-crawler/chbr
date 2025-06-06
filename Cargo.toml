@@ -8,7 +8,6 @@ unsigned-varint = { version = "0.8", features = ["std"] }
 thiserror = "2"
 chrono = "0.4"
 chrono-tz = "0.10"
-phf = { version = "0.11", features = ["macros", "std"] }
 nom = { version = "8", features = ["std"] }
 zerocopy = "0.8"
 log = "0.4"

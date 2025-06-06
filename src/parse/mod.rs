@@ -4,6 +4,8 @@ use nom::IResult;
 use nom::error::{ErrorKind, FromExternalError};
 use unsigned_varint::decode;
 use zerocopy::{LittleEndian, U64};
+use crate::parse::typ::parse_type;
+use crate::types::Type;
 
 pub mod block;
 pub mod column;
@@ -56,6 +58,19 @@ fn parse_var_str(input: &[u8]) -> IResult<&[u8], &str> {
         ))
     })?;
     Ok((remainder, str_value))
+}
+
+fn parse_var_str_type(input: &[u8]) -> IResult<&[u8], Type> {
+    let (input, str_bytes) = parse_var_str_bytes(input)?;
+    std::str::from_utf8(str_bytes).map_err(|e| {
+        nom::Err::Failure(nom::error::Error::from_external_error(
+            input,
+            ErrorKind::Fail,
+            e,
+        ))
+    })?;
+    let (_, typ) = parse_type(str_bytes)?;
+    Ok((input, typ))
 }
 
 fn parse_offsets(input: &[u8], num_rows: usize) -> IResult<&[u8], ByteView<U64<LittleEndian>>> {

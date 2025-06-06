@@ -40,8 +40,8 @@ pub struct Data<'a> {
 }
 
 pub enum Marker<'a> {
-    Bool(Data<'a>),
-    Int8(Data<'a>),
+    Bool(&'a [u8]),
+    Int8(ByteView<'a, i8>),
     Int16(Data<'a>),
     Int32(Data<'a>),
     Int64(Data<'a>),
@@ -99,7 +99,7 @@ pub enum Marker<'a> {
         types: Vec<Marker<'a>>,
     },
     Nested(Vec<Field<'a>>, Data<'a>),
-    Dynamic(&'a [u8], Vec<Marker<'a>>),
+    Dynamic(Vec<usize>, Vec<Marker<'a>>),
 
     Json {
         columns: Box<Marker<'a>>,
@@ -459,10 +459,10 @@ impl<'a> Type<'a> {
 
             Self::Dynamic => {
                 let (version, mut buf) = u64_le(remainder)?;
-                let num_types;
                 if version == 1 {
                     (_, buf) = u64_varuint(buf)?;
                 }
+                let num_types;
                 (num_types, buf) = u64_varuint(buf)?;
                 println!("num_types: {num_types}");
 
@@ -501,7 +501,7 @@ impl<'a> Type<'a> {
                     buf = &buf[sz..];
                 }
 
-                let marker = Marker::Dynamic(discriminators, markers);
+                let marker = Marker::Dynamic(vec![], markers);
                 let consumed = remainder.len() - buf.len();
 
                 return Ok((marker, consumed));
@@ -652,8 +652,8 @@ impl<'a> Type<'a> {
 
     pub fn into_fixed_size_marker(self, data: Data<'a>) -> Marker<'a> {
         match self {
-            Type::Bool => Marker::Bool(data),
-            Type::Int8 => Marker::Int8(data),
+            Type::Bool => Marker::Bool(data.data),
+            Type::Int8 => Marker::Int8(ByteView::try_from(data.data).unwrap()),
             Type::Int16 => Marker::Int16(data),
             Type::Int32 => Marker::Int32(data),
             Type::Int64 => Marker::Int64(data),

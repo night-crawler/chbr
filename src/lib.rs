@@ -11,6 +11,9 @@ pub type Result<T> = std::result::Result<T, error::Error>;
 
 pub struct ParsedBlock<'a> {
     pub markers: Vec<Marker<'a>>,
+    pub index: usize,
+    pub col_names: Vec<&'a str>,
+    pub num_rows: usize,
 }
 
 

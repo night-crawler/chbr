@@ -63,6 +63,7 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
     parse_context.num_rows = num_rows;
 
     let mut markers = Vec::with_capacity(num_columns);
+    let mut col_names = Vec::with_capacity(num_columns);
 
     for index in 0..num_columns {
         debug!("Parsing column {index} of {num_columns}");
@@ -72,6 +73,7 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
         (input, column_name) = parse_var_str(input)?;
         debug!("column name: {column_name}");
         parse_context.column_name = column_name;
+        col_names.push(column_name);
 
         let column_type;
         (input, column_type) = parse_var_str(input)?;
@@ -92,7 +94,7 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
         markers.push(marker);
     }
 
-    Ok((input, ParsedBlock { markers }))
+    Ok((input, ParsedBlock { markers, col_names, index: 0, num_rows }))
 }
 
 #[cfg(test)]
@@ -163,6 +165,8 @@ mod tests {
 
     #[test]
     fn dynamic() -> TestResult {
+        init_logger();
+        
         let mut file = std::fs::File::open("./dynamic.native")?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
