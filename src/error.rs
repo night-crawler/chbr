@@ -13,5 +13,5 @@ pub enum Error {
     UnexpectedEndOfInput,
 
     #[error("Length error: {0}")]
-    LengthError(usize)
+    LengthError(usize),
 }

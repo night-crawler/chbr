@@ -31,14 +31,14 @@ impl<'a, T: Unaligned + FromBytes + Copy> ByteView<'a, T> {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    
+
     pub fn get(&self, index: usize) -> Option<&T> {
         if self.is_empty() || index >= self.len() {
             return None;
         }
         Some(&self[index])
     }
-    
+
     pub fn last(&self) -> Option<&T> {
         if self.is_empty() {
             None

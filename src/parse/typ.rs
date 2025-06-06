@@ -45,7 +45,7 @@ fn parse_decimal_type(input: &[u8]) -> IResult<&[u8], Type> {
             ws(char(')')),
         ),
     )
-        .parse(input)?;
+    .parse(input)?;
 
     let typ = match precision {
         0..10 => Type::Decimal32(scale),
@@ -79,7 +79,7 @@ fn parse_fixed_string(input: &[u8]) -> IResult<&[u8], Type> {
         ),
         Type::FixedString,
     )
-        .parse(input)
+    .parse(input)
 }
 
 fn parse_int_primitives(input: &[u8]) -> IResult<&[u8], Type> {
@@ -99,7 +99,7 @@ fn parse_int_primitives(input: &[u8]) -> IResult<&[u8], Type> {
         map(tag("UInt8"), |_| Type::UInt8),
         map(tag("Int8"), |_| Type::Int8),
     ))
-        .parse(input)
+    .parse(input)
 }
 
 fn parse_float_primitives(input: &[u8]) -> IResult<&[u8], Type> {
@@ -108,7 +108,7 @@ fn parse_float_primitives(input: &[u8]) -> IResult<&[u8], Type> {
         map(tag("Float32"), |_| Type::Float32),
         map(tag("BFloat16"), |_| Type::BFloat16),
     ))
-        .parse(input)
+    .parse(input)
 }
 
 fn parse_inet_primitives(input: &[u8]) -> IResult<&[u8], Type> {
@@ -116,7 +116,7 @@ fn parse_inet_primitives(input: &[u8]) -> IResult<&[u8], Type> {
         map(tag("IPv6"), |_| Type::Ipv6),
         map(tag("IPv4"), |_| Type::Ipv4),
     ))
-        .parse(input)
+    .parse(input)
 }
 
 fn parse_datetime64(input: &[u8]) -> IResult<&[u8], Type> {
@@ -132,7 +132,7 @@ fn parse_datetime64(input: &[u8]) -> IResult<&[u8], Type> {
             ws(char(')')),
         ),
     )
-        .parse(input)?;
+    .parse(input)?;
 
     let tz = unsafe { std::str::from_utf8_unchecked(tz) };
 
@@ -153,7 +153,7 @@ fn parse_tuple(input: &[u8]) -> IResult<&[u8], Type> {
         ),
         Type::Tuple,
     )
-        .parse(input)
+    .parse(input)
 }
 
 fn parse_date_primitives(input: &[u8]) -> IResult<&[u8], Type> {
@@ -164,7 +164,7 @@ fn parse_date_primitives(input: &[u8]) -> IResult<&[u8], Type> {
         map(tag("Date32"), |_| Type::Date32),
         map(tag("Date"), |_| Type::Date),
     ))
-        .parse(input)
+    .parse(input)
 }
 
 fn parse_geo_primitives(input: &[u8]) -> IResult<&[u8], Type> {
@@ -176,7 +176,7 @@ fn parse_geo_primitives(input: &[u8]) -> IResult<&[u8], Type> {
         map(tag("Ring"), |_| Type::Ring),
         map(tag("Point"), |_| Type::Point),
     ))
-        .parse(input)
+    .parse(input)
 }
 
 fn parse_other_primitives(input: &[u8]) -> IResult<&[u8], Type> {
@@ -184,7 +184,7 @@ fn parse_other_primitives(input: &[u8]) -> IResult<&[u8], Type> {
         map(tag("Dynamic"), |_| Type::Dynamic),
         map(tag("JSON"), |_| Type::Json),
     ))
-        .parse(input)
+    .parse(input)
 }
 
 fn parse_primitive_type(input: &[u8]) -> IResult<&[u8], Type> {
@@ -197,7 +197,7 @@ fn parse_primitive_type(input: &[u8]) -> IResult<&[u8], Type> {
         parse_inet_primitives,
         parse_geo_primitives,
     ))
-        .parse(input)
+    .parse(input)
 }
 
 fn parse_nullable(input: &[u8]) -> IResult<&[u8], Type> {
@@ -208,7 +208,7 @@ fn parse_nullable(input: &[u8]) -> IResult<&[u8], Type> {
         ),
         |inner| Type::Nullable(Box::new(inner)),
     )
-        .parse(input)
+    .parse(input)
 }
 
 fn parse_map(input: &[u8]) -> IResult<&[u8], Type> {
@@ -223,7 +223,7 @@ fn parse_map(input: &[u8]) -> IResult<&[u8], Type> {
         ),
         |(k, v)| Type::Map(Box::new(k), Box::new(v)),
     )
-        .parse(input)
+    .parse(input)
 }
 
 fn parse_array(input: &[u8]) -> IResult<&[u8], Type> {
@@ -234,7 +234,7 @@ fn parse_array(input: &[u8]) -> IResult<&[u8], Type> {
         ),
         |inner| Type::Array(Box::new(inner)),
     )
-        .parse(input)
+    .parse(input)
 }
 
 fn parse_variant(input: &[u8]) -> IResult<&[u8], Type> {
@@ -249,7 +249,7 @@ fn parse_variant(input: &[u8]) -> IResult<&[u8], Type> {
         ),
         Type::Variant,
     )
-        .parse(input)
+    .parse(input)
 }
 
 fn parse_lowcardinality(input: &[u8]) -> IResult<&[u8], Type> {
@@ -260,7 +260,7 @@ fn parse_lowcardinality(input: &[u8]) -> IResult<&[u8], Type> {
         ),
         |inner| Type::LowCardinality(Box::new(inner)),
     )
-        .parse(input)
+    .parse(input)
 }
 
 fn parse_nested(input: &[u8]) -> IResult<&[u8], Type> {
@@ -279,7 +279,7 @@ fn parse_nested(input: &[u8]) -> IResult<&[u8], Type> {
             ws(char(')')),
         ),
     )
-        .parse(input)?;
+    .parse(input)?;
 
     let fields = pairs
         .into_iter()
@@ -318,7 +318,7 @@ fn parse_enum8(input: &[u8]) -> IResult<&[u8], Type> {
             Type::Enum8(enum_values)
         },
     )
-        .parse(input)
+    .parse(input)
 }
 
 fn parse_enum16(input: &[u8]) -> IResult<&[u8], Type> {
@@ -347,7 +347,7 @@ fn parse_enum16(input: &[u8]) -> IResult<&[u8], Type> {
             Type::Enum16(enum_values)
         },
     )
-        .parse(input)
+    .parse(input)
 }
 
 pub fn parse_type(input: &[u8]) -> IResult<&[u8], Type> {
@@ -365,7 +365,7 @@ pub fn parse_type(input: &[u8]) -> IResult<&[u8], Type> {
         parse_enum16,
         parse_other_primitives,
     ))
-        .parse(input)
+    .parse(input)
 }
 
 mod tests {

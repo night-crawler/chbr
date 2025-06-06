@@ -90,11 +90,14 @@ pub enum Marker<'a> {
     FixTuple(Type<'a>, Data<'a>),
     Nullable(&'a [u8], Box<Marker<'a>>),
     Map {
-        offsets: Offsets<'a>, 
+        offsets: Offsets<'a>,
         keys: Box<Marker<'a>>,
-        values: Box<Marker<'a>>
+        values: Box<Marker<'a>>,
     },
-    Variant(&'a [u8], Vec<Marker<'a>>),
+    Variant {
+        discriminators: &'a [u8],
+        types: Vec<Marker<'a>>,
+    },
     Nested(Vec<Field<'a>>, Data<'a>),
     Dynamic(&'a [u8], Vec<Marker<'a>>),
 
@@ -446,7 +449,10 @@ impl<'a> Type<'a> {
                 }
 
                 let consumed = remainder.len() - buf.len();
-                let marker = Marker::Variant(discriminators, blocks);
+                let marker = Marker::Variant {
+                    discriminators,
+                    types: blocks,
+                };
                 return Ok((marker, consumed));
             }
 
@@ -685,7 +691,6 @@ impl<'a> Type<'a> {
         }
     }
 }
-
 
 #[macro_export]
 macro_rules! t {

@@ -1,7 +1,7 @@
 pub mod error;
-pub mod types;
 pub mod parse;
 mod slice;
+pub mod types;
 
 use crate::types::Marker;
 use unsigned_varint::decode;
@@ -45,9 +45,9 @@ pub fn parse_block(data: &[u8]) -> Result<()> {
 #[cfg(test)]
 pub mod common {
     use super::*;
-    use std::io::Read;
     use log::LevelFilter;
     use once_cell::sync::OnceCell;
+    use std::io::Read;
 
     static INIT: OnceCell<()> = OnceCell::new();
 
@@ -181,4 +181,3 @@ pub mod common {
         Ok(())
     }
 }
-
