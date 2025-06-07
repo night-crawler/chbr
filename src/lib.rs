@@ -1,9 +1,11 @@
-use crate::parse::marker::Marker;
+use crate::marker::Marker;
 
 pub mod error;
 pub mod parse;
 mod slice;
 pub mod types;
+pub mod index;
+pub mod marker;
 
 #[repr(C)]
 #[derive(

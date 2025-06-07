@@ -9,7 +9,6 @@ use zerocopy::{LittleEndian, U64};
 
 pub mod block;
 pub mod column;
-pub mod marker;
 pub mod typ;
 mod consts;
 

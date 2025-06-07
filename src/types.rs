@@ -1,10 +1,10 @@
 #![allow(dead_code)]
 
-use crate::parse::marker::Marker;
 use crate::parse::typ::parse_type;
 use crate::slice::ByteView;
 pub use chrono_tz::Tz;
 use zerocopy::little_endian::U64;
+use crate::marker::Marker;
 
 pub type Offsets<'a> = ByteView<'a, U64>;
 
@@ -145,7 +145,6 @@ impl<'a> Type<'a> {
             Self::Decimal128(_) => Some(16),
             Self::Decimal256(_) => Some(32),
 
-            Self::String => None,
             Self::FixedString(size) => Some(*size),
 
             Self::Ipv4 => Some(4),
@@ -160,6 +159,8 @@ impl<'a> Type<'a> {
 
             // Point is represented by its X and Y coordinates, stored as a Tuple(Float64, Float64).
             Self::Point => Some(16),
+            
+            // For completeness, everything below is variable in size
             Self::Ring => None,
             Self::Polygon => None,
             Self::MultiPolygon => None,
@@ -169,14 +170,9 @@ impl<'a> Type<'a> {
 
             Self::Array(_) => None,
 
-            Self::Tuple(_inner) => {
-                // let mut size = 0;
-                // for typ in inner {
-                //     size += typ.size()?;
-                // }
-                // Some(size)
-                None
-            }
+            // we can calculate the size for the tuple of fixed size types, but still we'll need
+            // to parse nested columns later, so it's not worth it
+            Self::Tuple(_) => None,
 
             // TODO: is it always variable?
             Self::Variant(_) => None,
@@ -184,10 +180,9 @@ impl<'a> Type<'a> {
             Self::Json => None,
 
             Self::Nullable(_) => None,
-
             Self::LowCardinality(_) => None,
-
-            _ => unimplemented!("Size is not implemented for type: {:?}", self),
+            Self::String => None,
+            Self::Nested(_) => None
         }
     }
 

@@ -1,9 +1,9 @@
+use crate::marker::Marker;
 use crate::parse::block::ParseContext;
 use crate::parse::consts::{
     HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION, NEED_GLOBAL_DICTIONARY_BIT,
     NEED_UPDATE_DICTIONARY_BIT, TUINT16, TUINT32, TUINT64, TUINT8,
 };
-use crate::parse::marker::Marker;
 use crate::parse::{parse_offsets, parse_u64, parse_var_str, parse_var_str_type, parse_varuint};
 use crate::types::{JsonColumnHeader, Type};
 use crate::{bt, t};
@@ -343,7 +343,6 @@ impl<'a> Type<'a> {
         Ok((input, Marker::String(offsets, input)))
     }
 }
-
 
 fn json_column_header(ctx: ParseContext<'_>) -> IResult<&[u8], JsonColumnHeader> {
     let (input, version) = parse_u64(ctx.input)?;
