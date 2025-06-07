@@ -113,7 +113,7 @@ mod tests {
     use testresult::TestResult;
 
     #[test]
-    fn it_works() -> TestResult {
+    fn a_lot_of_types() -> TestResult {
         init_logger();
 
         let mut file = std::fs::File::open("./sample.native")?;

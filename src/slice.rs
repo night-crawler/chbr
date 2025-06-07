@@ -46,7 +46,7 @@ impl<'a, T: Unaligned + FromBytes + Copy> ByteView<'a, T> {
             Some(&self[self.len() - 1])
         }
     }
-    
+
     pub fn as_bytes(&self) -> &'a [u8] {
         self.bytes
     }

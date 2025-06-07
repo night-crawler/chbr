@@ -1,9 +1,11 @@
 use crate::parse::block::ParseContext;
-use crate::parse::{parse_offsets, parse_u64, parse_var_str, parse_var_str_type, parse_varuint};
-use crate::types::{
-    Marker, Type, HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION,
-    NEED_GLOBAL_DICTIONARY_BIT, NEED_UPDATE_DICTIONARY_BIT, TUINT16, TUINT32, TUINT64, TUINT8,
+use crate::parse::consts::{
+    HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION, NEED_GLOBAL_DICTIONARY_BIT,
+    NEED_UPDATE_DICTIONARY_BIT, TUINT16, TUINT32, TUINT64, TUINT8,
 };
+use crate::parse::marker::Marker;
+use crate::parse::{parse_offsets, parse_u64, parse_var_str, parse_var_str_type, parse_varuint};
+use crate::types::{JsonColumnHeader, Type};
 use crate::{bt, t};
 use log::{debug, error, info};
 use nom::error::ErrorKind;
@@ -62,6 +64,11 @@ impl<'a> Type<'a> {
 
                 return Ok((input, ()));
             }
+            Type::Json => {
+                let (input, version) = parse_u64(ctx.input)?;
+                debug!("JSON version: {version}");
+                return Ok((input, ()));
+            }
             _ => {}
         }
         debug!("Nothing decoded for {:?}", self);
@@ -76,26 +83,68 @@ impl<'a> Type<'a> {
         }
 
         match self {
-            Type::String => self.decode_string(ctx),
-            Type::Array(inner) => Self::decode_array(*inner, ctx),
+            Type::String => self.string(ctx),
+            Type::Array(inner) => Self::array(*inner, ctx),
             Type::Ring => t!(Array(bt!(Point))).decode(ctx),
             Type::Polygon => t!(Array(bt!(Ring))).decode(ctx),
             Type::MultiPolygon => t!(Array(bt!(Polygon))).decode(ctx),
             Type::LineString => t!(Array(bt!(Point))).decode(ctx),
             Type::MultiLineString => t!(Array(bt!(LineString))).decode(ctx),
-            Type::Tuple(inner) => Self::decode_tuple(inner, ctx),
-            Type::Map(key, value) => Self::decode_map(*key, *value, ctx),
-            Type::Variant(inner) => Self::decode_variant(inner, ctx),
-            Type::LowCardinality(inner) => Self::decode_lc(*inner, ctx),
-            Type::Nullable(inner) => Self::decode_nullable(*inner, ctx),
-            Type::Dynamic => Self::decode_dynamic(ctx),
+            Type::Tuple(inner) => Self::tuple(inner, ctx),
+            Type::Map(key, value) => Self::map(*key, *value, ctx),
+            Type::Variant(inner) => Self::variant(inner, ctx),
+            Type::LowCardinality(inner) => Self::lc(*inner, ctx),
+            Type::Nullable(inner) => Self::nullable(*inner, ctx),
+            Type::Dynamic => Self::dynamic(ctx),
+            Type::Json => Self::json(ctx),
             _ => {
                 todo!("Not implemented for {self:?}")
             }
         }
     }
 
-    pub(crate) fn decode_dynamic(ctx: ParseContext<'a>) -> IResult<&'a [u8], Marker<'a>> {
+    fn json(ctx: ParseContext<'a>) -> IResult<&'a [u8], Marker<'a>> {
+        let (input, num_paths_old) = parse_varuint(ctx.input)?;
+        debug!("num_paths_old: {num_paths_old}");
+
+        let (input, num_paths) = parse_varuint(input)?;
+        let (mut input, subcols) = Type::String.decode(ctx.fork(input).with_num_rows(num_paths))?;
+
+        let mut col_headers = Vec::with_capacity(num_paths);
+
+        for _ in 0..num_paths {
+            let header;
+            (input, header) = json_column_header(ctx.fork(input))?;
+            col_headers.push(header);
+        }
+
+        let mut final_cols = Vec::with_capacity(num_paths);
+        for header in col_headers {
+            let discriminators;
+            (discriminators, input) = input.split_at(ctx.num_rows);
+
+            let local_rows = discriminators.iter().filter(|&&d| d != 255).count();
+            let marker;
+            (input, marker) = header
+                .typ
+                .clone()
+                .decode(ctx.fork(input).with_num_rows(local_rows))?;
+            final_cols.push(marker);
+        }
+
+        let marker = Marker::Json {
+            columns: Box::new(subcols),
+            data: final_cols,
+        };
+
+        let todo_wtf_is_it = ctx.num_rows * 8;
+        let _wtf;
+        (_wtf, input) = input.split_at(todo_wtf_is_it);
+
+        Ok((input, marker))
+    }
+
+    fn dynamic(ctx: ParseContext<'a>) -> IResult<&'a [u8], Marker<'a>> {
         let (mut input, num_types) = parse_varuint(ctx.input)?;
         debug!("num_types: {num_types}");
 
@@ -134,19 +183,13 @@ impl<'a> Type<'a> {
         Ok((input, marker))
     }
 
-    pub(crate) fn decode_nullable(
-        inner: Type<'a>,
-        ctx: ParseContext<'a>,
-    ) -> IResult<&'a [u8], Marker<'a>> {
+    fn nullable(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Marker<'a>> {
         let (mask, input) = ctx.input.split_at(ctx.num_rows);
         let (input, marker) = inner.decode(ctx.fork(input))?;
         Ok((input, Marker::Nullable(mask, Box::new(marker))))
     }
 
-    pub(crate) fn decode_lc(
-        inner: Type<'a>,
-        ctx: ParseContext<'a>,
-    ) -> IResult<&'a [u8], Marker<'a>> {
+    fn lc(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Marker<'a>> {
         let (mut input, flags) = parse_u64(ctx.input)?;
         info!("LowCardinality flags: {flags:#x}");
         let has_additional_keys = flags & HAS_ADDITIONAL_KEYS_BIT != 0;
@@ -209,10 +252,7 @@ impl<'a> Type<'a> {
         Ok((input, marker))
     }
 
-    pub(crate) fn decode_variant(
-        inner: Vec<Type<'a>>,
-        ctx: ParseContext<'a>,
-    ) -> IResult<&'a [u8], Marker<'a>> {
+    fn variant(inner: Vec<Type<'a>>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Marker<'a>> {
         const NULL_DISCR: u8 = 255;
         let (input, mode) = parse_u64(ctx.input)?;
 
@@ -248,11 +288,7 @@ impl<'a> Type<'a> {
         Ok((input, marker))
     }
 
-    pub(crate) fn decode_map(
-        key: Type<'a>,
-        value: Type<'a>,
-        ctx: ParseContext<'a>,
-    ) -> IResult<&'a [u8], Marker<'a>> {
+    fn map(key: Type<'a>, value: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Marker<'a>> {
         let (input, offsets) = parse_offsets(ctx.input, ctx.num_rows)?;
         let n = offsets.last_or_default().get() as usize;
 
@@ -268,10 +304,7 @@ impl<'a> Type<'a> {
         Ok((input, marker))
     }
 
-    pub(crate) fn decode_tuple(
-        inner: Vec<Type<'a>>,
-        ctx: ParseContext<'a>,
-    ) -> IResult<&'a [u8], Marker<'a>> {
+    fn tuple(inner: Vec<Type<'a>>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Marker<'a>> {
         let mut markers = Vec::with_capacity(inner.len());
         let mut input = ctx.input;
         for typ in inner {
@@ -282,15 +315,12 @@ impl<'a> Type<'a> {
         Ok((input, Marker::VarTuple(markers)))
     }
 
-    pub(crate) fn decode_array(
-        inner: Type<'a>,
-        ctx: ParseContext<'a>,
-    ) -> IResult<&'a [u8], Marker<'a>> {
+    fn array(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Marker<'a>> {
         let (input, offsets) = parse_offsets(ctx.input, ctx.num_rows)?;
         debug!("Array Offsets: {:?}", offsets.as_bytes());
         let num_rows = offsets.last_or_default().get() as usize;
         debug!("Array num_rows: {}", num_rows);
-        
+
         if num_rows == 0 {
             return Ok((input, Marker::Array(offsets, Box::new(Marker::Empty))));
         }
@@ -299,7 +329,7 @@ impl<'a> Type<'a> {
         Ok((input, inner_block))
     }
 
-    pub(crate) fn decode_string(self, ctx: ParseContext<'a>) -> IResult<&'a [u8], Marker<'a>> {
+    fn string(self, ctx: ParseContext<'a>) -> IResult<&'a [u8], Marker<'a>> {
         let mut input = ctx.input;
         let mut offsets = vec![0u32; ctx.num_rows];
         let mut offset = 0;
@@ -312,4 +342,24 @@ impl<'a> Type<'a> {
 
         Ok((input, Marker::String(offsets, input)))
     }
+}
+
+
+fn json_column_header(ctx: ParseContext<'_>) -> IResult<&[u8], JsonColumnHeader> {
+    let (input, version) = parse_u64(ctx.input)?;
+    let (input, max_types) = parse_varuint(input)?;
+    let (input, total_types) = parse_varuint(input)?;
+    let (input, typ) = parse_var_str_type(input)?;
+    let (input, variant) = parse_u64(input)?;
+
+    Ok((
+        input,
+        JsonColumnHeader {
+            path_version: version,
+            max_types,
+            total_types,
+            typ: Box::new(typ),
+            variant_version: variant,
+        },
+    ))
 }

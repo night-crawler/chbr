@@ -9,7 +9,9 @@ use zerocopy::{LittleEndian, U64};
 
 pub mod block;
 pub mod column;
+pub mod marker;
 pub mod typ;
+mod consts;
 
 fn parse_varuint(input: &[u8]) -> IResult<&[u8], usize> {
     let (value, rest) = decode::u64(input).map_err(|e| {
