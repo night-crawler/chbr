@@ -1,11 +1,12 @@
-use crate::marker::Marker;
+use crate::index::IndexableColumn;
 
 pub mod error;
+pub mod index;
+pub mod mark;
 pub mod parse;
 mod slice;
 pub mod types;
-pub mod index;
-pub mod marker;
+mod value;
 
 #[repr(C)]
 #[derive(
@@ -44,7 +45,7 @@ pub struct u256(pub [u8; 32]);
 pub type Result<T> = std::result::Result<T, error::Error>;
 
 pub struct ParsedBlock<'a> {
-    pub markers: Vec<Marker<'a>>,
+    pub cols: Vec<IndexableColumn<'a>>,
     pub index: usize,
     pub col_names: Vec<&'a str>,
     pub num_rows: usize,

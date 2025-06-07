@@ -1,13 +1,12 @@
 #![allow(dead_code)]
 
+use crate::mark::Mark;
 use crate::parse::typ::parse_type;
 use crate::slice::ByteView;
 pub use chrono_tz::Tz;
 use zerocopy::little_endian::U64;
-use crate::marker::Marker;
 
 pub type Offsets<'a> = ByteView<'a, U64>;
-
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type<'a> {
@@ -109,6 +108,7 @@ pub struct JsonColumnHeader<'a> {
     pub total_types: usize,
     pub typ: Box<Type<'a>>,
     pub variant_version: u64,
+    pub mark: Mark<'a>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -159,7 +159,7 @@ impl<'a> Type<'a> {
 
             // Point is represented by its X and Y coordinates, stored as a Tuple(Float64, Float64).
             Self::Point => Some(16),
-            
+
             // For completeness, everything below is variable in size
             Self::Ring => None,
             Self::Polygon => None,
@@ -182,7 +182,7 @@ impl<'a> Type<'a> {
             Self::Nullable(_) => None,
             Self::LowCardinality(_) => None,
             Self::String => None,
-            Self::Nested(_) => None
+            Self::Nested(_) => None,
         }
     }
 
@@ -198,42 +198,42 @@ impl<'a> Type<'a> {
         Ok(typ)
     }
 
-    pub fn into_fixed_size_marker(self, data: &'a [u8]) -> crate::Result<Marker<'a>> {
+    pub fn into_fixed_size_marker(self, data: &'a [u8]) -> crate::Result<Mark<'a>> {
         let q = match self {
-            Type::Bool => Marker::Bool(data),
-            Type::Int8 => Marker::Int8(ByteView::try_from(data)?),
-            Type::Int16 => Marker::Int16(ByteView::try_from(data)?),
-            Type::Int32 => Marker::Int32(ByteView::try_from(data)?),
-            Type::Int64 => Marker::Int64(ByteView::try_from(data)?),
-            Type::Int128 => Marker::Int128(ByteView::try_from(data)?),
-            Type::Int256 => Marker::Int256(ByteView::try_from(data)?),
-            Type::UInt8 => Marker::UInt8(ByteView::try_from(data)?),
-            Type::UInt16 => Marker::UInt16(ByteView::try_from(data)?),
-            Type::UInt32 => Marker::UInt32(ByteView::try_from(data)?),
-            Type::UInt64 => Marker::UInt64(ByteView::try_from(data)?),
-            Type::UInt128 => Marker::UInt128(ByteView::try_from(data)?),
-            Type::UInt256 => Marker::UInt256(ByteView::try_from(data)?),
-            Type::Float32 => Marker::Float32(ByteView::try_from(data)?),
-            Type::Float64 => Marker::Float64(ByteView::try_from(data)?),
-            Type::BFloat16 => Marker::BFloat16(ByteView::try_from(data)?),
-            Type::Decimal32(scale) => Marker::Decimal32(scale, data),
-            Type::Decimal64(scale) => Marker::Decimal64(scale, data),
-            Type::Decimal128(scale) => Marker::Decimal128(scale, data),
-            Type::Decimal256(scale) => Marker::Decimal256(scale, data),
-            Type::FixedString(size) => Marker::FixedString(size, data),
-            Type::Uuid => Marker::Uuid(data),
-            Type::Date => Marker::Date(data),
-            Type::Date32 => Marker::Date32(data),
-            Type::DateTime(tz) => Marker::DateTime(tz, data),
-            Type::DateTime64(precision, tz) => Marker::DateTime64(precision, tz, data),
-            Type::Ipv4 => Marker::Ipv4(data),
-            Type::Ipv6 => Marker::Ipv6(data),
-            Type::Point => Marker::Point(data),
+            Type::Bool => Mark::Bool(data),
+            Type::Int8 => Mark::Int8(ByteView::try_from(data)?),
+            Type::Int16 => Mark::Int16(ByteView::try_from(data)?),
+            Type::Int32 => Mark::Int32(ByteView::try_from(data)?),
+            Type::Int64 => Mark::Int64(ByteView::try_from(data)?),
+            Type::Int128 => Mark::Int128(ByteView::try_from(data)?),
+            Type::Int256 => Mark::Int256(ByteView::try_from(data)?),
+            Type::UInt8 => Mark::UInt8(ByteView::try_from(data)?),
+            Type::UInt16 => Mark::UInt16(ByteView::try_from(data)?),
+            Type::UInt32 => Mark::UInt32(ByteView::try_from(data)?),
+            Type::UInt64 => Mark::UInt64(ByteView::try_from(data)?),
+            Type::UInt128 => Mark::UInt128(ByteView::try_from(data)?),
+            Type::UInt256 => Mark::UInt256(ByteView::try_from(data)?),
+            Type::Float32 => Mark::Float32(ByteView::try_from(data)?),
+            Type::Float64 => Mark::Float64(ByteView::try_from(data)?),
+            Type::BFloat16 => Mark::BFloat16(ByteView::try_from(data)?),
+            Type::Decimal32(scale) => Mark::Decimal32(scale, data),
+            Type::Decimal64(scale) => Mark::Decimal64(scale, data),
+            Type::Decimal128(scale) => Mark::Decimal128(scale, data),
+            Type::Decimal256(scale) => Mark::Decimal256(scale, data),
+            Type::FixedString(size) => Mark::FixedString(size, data),
+            Type::Uuid => Mark::Uuid(data),
+            Type::Date => Mark::Date(data),
+            Type::Date32 => Mark::Date32(data),
+            Type::DateTime(tz) => Mark::DateTime(tz, data),
+            Type::DateTime64(precision, tz) => Mark::DateTime64(precision, tz, data),
+            Type::Ipv4 => Mark::Ipv4(data),
+            Type::Ipv6 => Mark::Ipv6(data),
+            Type::Point => Mark::Point(data),
 
-            Type::Tuple(inner) => Marker::FixTuple(Type::Tuple(inner), data),
+            Type::Tuple(inner) => Mark::FixTuple(Type::Tuple(inner), data),
 
-            Type::Enum8(values) => Marker::Enum8(values, data),
-            Type::Enum16(values) => Marker::Enum16(values, data),
+            Type::Enum8(values) => Mark::Enum8(values, data),
+            Type::Enum16(values) => Mark::Enum16(values, data),
 
             _ => unimplemented!("Const size is not implemented for type: {:?}", self),
         };

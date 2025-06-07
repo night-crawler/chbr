@@ -77,6 +77,24 @@ impl<'a, T: Unaligned + FromBytes + Copy> Index<usize> for ByteView<'a, T> {
     }
 }
 
+
+use core::{any::type_name, fmt, mem::size_of};
+
+impl<'a, T> fmt::Debug for ByteView<'a, T>
+where
+    T: Unaligned + FromBytes + Copy,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ByteView")
+            .field("T", &type_name::<T>())
+            .field("size_of_T", &size_of::<T>())
+            .field("len_T", &self.len())
+            .field("len_bytes", &self.bytes.len())
+            .finish()
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

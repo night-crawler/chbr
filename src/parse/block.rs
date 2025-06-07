@@ -4,6 +4,7 @@ use crate::parse::{parse_var_str, parse_varuint};
 use log::debug;
 use nom::IResult;
 use std::ops::Deref;
+use crate::index::IndexableColumn;
 
 #[derive(Debug, Clone)]
 pub struct ParseContext<'a> {
@@ -62,7 +63,7 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
     parse_context.num_columns = num_columns;
     parse_context.num_rows = num_rows;
 
-    let mut markers = Vec::with_capacity(num_columns);
+    let mut columns = Vec::with_capacity(num_columns);
     let mut col_names = Vec::with_capacity(num_columns);
 
     for index in 0..num_columns {
@@ -90,14 +91,16 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
         let marker;
         (input, marker) = typ.decode(ctx.fork(input))?;
         debug!("Decoded, remaining bytes: {}", input.len());
+        
+        let col = IndexableColumn::from(marker);
 
-        markers.push(marker);
+        columns.push(col);
     }
 
     Ok((
         input,
         ParsedBlock {
-            markers,
+            cols: columns,
             col_names,
             index: 0,
             num_rows,
