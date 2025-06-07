@@ -77,7 +77,6 @@ impl<'a, T: Unaligned + FromBytes + Copy> Index<usize> for ByteView<'a, T> {
     }
 }
 
-
 use core::{any::type_name, fmt, mem::size_of};
 
 impl<'a, T> fmt::Debug for ByteView<'a, T>
@@ -93,7 +92,6 @@ where
             .finish()
     }
 }
-
 
 #[cfg(test)]
 mod tests {

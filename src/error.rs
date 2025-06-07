@@ -14,7 +14,7 @@ pub enum Error {
 
     #[error("Length error: {0}")]
     LengthError(usize),
-    
+
     #[error("Mismatched type: Internal type is {0}, but asked to get {1}")]
     MismatchedType(&'static str, &'static str),
 }

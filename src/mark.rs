@@ -2,7 +2,7 @@ use crate::slice::ByteView;
 use crate::types::{Field, JsonColumnHeader, Offsets, Type};
 use crate::{i256, u256};
 use chrono_tz::Tz;
-use zerocopy::little_endian::{F32, F64, I128, I16, I32, I64, U128, U16, U32, U64};
+use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
 
 pub enum Mark<'a> {
     Empty,

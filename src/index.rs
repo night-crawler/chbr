@@ -1,7 +1,7 @@
 use crate::mark::Mark;
 use crate::value::Value;
-use std::ops::Index;
 
+#[derive(Debug)]
 pub enum IndexableColumn<'a> {
     Stateless(Mark<'a>),
     Stateful { marker: Mark<'a> },
@@ -46,7 +46,7 @@ impl<'a> From<Mark<'a>> for IndexableColumn<'a> {
 }
 
 impl<'a> IndexableColumn<'a> {
-    fn get(&self, index: usize) -> Option<Value<'a>> {
+    pub fn get(&self, index: usize) -> Option<Value<'a>> {
         match self {
             IndexableColumn::Stateless(m) => match m {
                 Mark::Empty => None,
@@ -101,7 +101,12 @@ impl<'a> IndexableColumn<'a> {
                 Mark::Enum8(_, _) => todo!(),
                 Mark::Enum16(_, _) => todo!(),
                 Mark::LowCardinality { .. } => todo!(),
-                Mark::Array(_, _) => todo!(),
+                Mark::Array(offsets, marker) => {
+                    println!("{:?}", offsets);
+                    println!("{:?}", marker);
+
+                    todo!()
+                }
                 Mark::VarTuple(_) => todo!(),
                 Mark::FixTuple(_, _) => todo!(),
                 Mark::Nullable(_, _) => todo!(),
@@ -113,14 +118,6 @@ impl<'a> IndexableColumn<'a> {
             },
             IndexableColumn::Stateful { .. } => todo!(),
         }
-    }
-}
-
-impl<'a> Index<usize> for IndexableColumn<'a> {
-    type Output = Value<'a>;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        todo!()
     }
 }
 
@@ -154,7 +151,6 @@ mod tests {
         let (_, block) = parse_block(&buf)?;
 
         let index_marker = &block.cols[0];
-        let arr_marker = &block.cols[1];
 
         let indices = (0..block.num_rows)
             .filter_map(|i| index_marker.get(i))
@@ -169,7 +165,10 @@ mod tests {
             ]
         );
 
-        index_marker.get(0);
+        let arr_marker = &block.cols[1];
+        println!("{:?}", arr_marker);
+
+        arr_marker.get(0);
 
         Ok(())
     }

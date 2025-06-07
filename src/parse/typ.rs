@@ -368,6 +368,7 @@ pub fn parse_type(input: &[u8]) -> IResult<&[u8], Type> {
     .parse(input)
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]
