@@ -1,7 +1,7 @@
 use crate::types::{Field, Type};
 use chrono_tz::Tz;
 use chrono_tz::Tz::UTC;
-use std::str::{FromStr, from_utf8};
+use std::str::{from_utf8, FromStr};
 
 use nom::branch::alt;
 use nom::bytes::complete::take_while1;
@@ -10,7 +10,7 @@ use nom::combinator::{map, map_res, recognize};
 use nom::error::{ErrorKind, FromExternalError, ParseError};
 use nom::multi::{many0, separated_list1};
 use nom::sequence::{delimited, pair, preceded, separated_pair};
-use nom::{IResult, Parser, bytes::complete::tag};
+use nom::{bytes::complete::tag, IResult, Parser};
 
 fn parse_num<T>(input: &[u8]) -> Result<T, nom::error::Error<&[u8]>>
 where

@@ -1,170 +1,66 @@
-pub mod error;
-mod parse_type;
-mod types;
+use crate::parse::marker::Marker;
 
-use crate::types::Marker;
-use unsigned_varint::decode;
+pub mod error;
+pub mod parse;
+mod slice;
+pub mod types;
+
+#[repr(C)]
+#[derive(
+    Clone,
+    Copy,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Debug,
+    Default,
+    zerocopy::FromBytes,
+    zerocopy::Unaligned,
+)]
+#[allow(non_camel_case_types)]
+pub struct i256(pub [u8; 32]);
+
+#[repr(C)]
+#[derive(
+    Clone,
+    Copy,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Debug,
+    Default,
+    zerocopy::FromBytes,
+    zerocopy::Unaligned,
+)]
+#[allow(non_camel_case_types)]
+pub struct u256(pub [u8; 32]);
 
 pub type Result<T> = std::result::Result<T, error::Error>;
 
-pub fn parse_block(data: &[u8]) -> Result<()> {
-    let mut markers: Vec<Marker> = vec![];
-    let mut remainder = data;
-    let mut num;
-
-    (num, remainder) = decode::usize(remainder)?;
-    let num_columns = num;
-
-    (num, remainder) = decode::usize(remainder)?;
-    let num_rows = num;
-
-    for _ in 0..num_columns {
-        (num, remainder) = decode::usize(remainder)?;
-        let name = unsafe { str::from_utf8_unchecked(&remainder[..num]) };
-        remainder = &remainder[num..];
-
-        (num, remainder) = decode::usize(remainder)?;
-        let type_name = &remainder[..num];
-        let readable_name = unsafe { str::from_utf8_unchecked(type_name) };
-        remainder = &remainder[num..];
-
-        println!("--- {num_rows} {num_columns} {name:?}, {readable_name:?}");
-        let typ = types::Type::from_bytes(type_name)?;
-
-        let (marker, len) = typ.transcode_remainder(remainder, num_rows)?;
-        remainder = &remainder[len..];
-        markers.push(marker);
-    }
-
-    println!("parse_block remainder {:?}", remainder);
-
-    Ok(())
+pub struct ParsedBlock<'a> {
+    pub markers: Vec<Marker<'a>>,
+    pub index: usize,
+    pub col_names: Vec<&'a str>,
+    pub num_rows: usize,
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Read;
+pub mod common {
+    use log::LevelFilter;
+    use once_cell::sync::OnceCell;
 
-    #[test]
-    fn it_works() -> Result<()> {
-        let mut file = std::fs::File::open("./sample.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
+    static INIT: OnceCell<()> = OnceCell::new();
 
-        parse_block(&buf)?;
-
-        Ok(())
-    }
-
-    #[test]
-    fn array() -> Result<()> {
-        let mut file = std::fs::File::open("./array.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
-        parse_block(&buf)?;
-
-        Ok(())
-    }
-
-    #[test]
-    fn tuple() -> Result<()> {
-        let mut file = std::fs::File::open("./tuple.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
-        parse_block(&buf)?;
-
-        Ok(())
-    }
-
-    #[test]
-    fn variant() -> Result<()> {
-        let mut file = std::fs::File::open("./variant.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
-        parse_block(&buf).unwrap();
-
-        Ok(())
-    }
-
-    #[test]
-    fn dynamic() -> Result<()> {
-        let mut file = std::fs::File::open("./dynamic.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
-        parse_block(&buf).unwrap();
-
-        Ok(())
-    }
-
-    #[test]
-    fn nullable_string() -> Result<()> {
-        let mut file = std::fs::File::open("./nullable_string.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
-        parse_block(&buf).unwrap();
-
-        Ok(())
-    }
-
-    #[test]
-    fn json() -> Result<()> {
-        let mut file = std::fs::File::open("./json.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
-        parse_block(&buf).unwrap();
-
-        Ok(())
-    }
-
-    #[test]
-    fn array_nullable_int64() -> Result<()> {
-        let mut file = std::fs::File::open("./array_nullable_int64.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
-        parse_block(&buf).unwrap();
-
-        Ok(())
-    }
-
-    #[test]
-    fn array_lc_string() -> Result<()> {
-        let mut file = std::fs::File::open("./array_lc_string.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
-        parse_block(&buf).unwrap();
-
-        Ok(())
-    }
-
-    #[test]
-    fn array_lc_nullable_string() -> Result<()> {
-        let mut file = std::fs::File::open("./array_lc_nullable_string.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
-        parse_block(&buf).unwrap();
-
-        Ok(())
-    }
-
-    #[test]
-    fn array_string() -> Result<()> {
-        let mut file = std::fs::File::open("./array_string.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
-        parse_block(&buf).unwrap();
-
-        Ok(())
+    pub fn init_logger() {
+        INIT.get_or_init(|| {
+            env_logger::builder()
+                .filter_level(LevelFilter::Debug)
+                .is_test(true)
+                .init();
+        });
     }
 }
-
