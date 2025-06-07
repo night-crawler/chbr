@@ -8,6 +8,30 @@ use zerocopy::little_endian::U64;
 
 pub type Offsets<'a> = ByteView<'a, U64>;
 
+pub(crate) trait OffsetIndexPair {
+    fn offset_indices(&self, index: usize) -> Option<(usize, usize)>;
+    fn get_usize(&self, index: usize) -> Option<usize>;
+}
+
+impl OffsetIndexPair for Offsets<'_> {
+    fn offset_indices(&self, index: usize) -> Option<(usize, usize)> {
+        let start = self.get_usize(index.saturating_sub(1))?;
+        let end = self.get_usize(index)?;
+        Some((start, end))
+    }
+
+    fn get_usize(&self, index: usize) -> Option<usize> {
+        let value = self.get(index)?.get();
+        match usize::try_from(value) {
+            Ok(value) => Some(value),
+            Err(err) => {
+                log::error!("Failed to convert offset to usize: {err}");
+                None
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type<'a> {
     Bool,
@@ -119,6 +143,7 @@ pub struct Field<'a> {
 
 impl<'a> Type<'a> {
     pub fn size(&self) -> Option<usize> {
+        #[allow(clippy::match_same_arms)]
         match self {
             Self::Bool => Some(1),
             Self::Int8 => Some(1),
@@ -199,7 +224,7 @@ impl<'a> Type<'a> {
     }
 
     pub fn into_fixed_size_marker(self, data: &'a [u8]) -> crate::Result<Mark<'a>> {
-        let q = match self {
+        let mark = match self {
             Type::Bool => Mark::Bool(data),
             Type::Int8 => Mark::Int8(ByteView::try_from(data)?),
             Type::Int16 => Mark::Int16(ByteView::try_from(data)?),
@@ -230,15 +255,13 @@ impl<'a> Type<'a> {
             Type::Ipv6 => Mark::Ipv6(data),
             Type::Point => Mark::Point(data),
 
-            Type::Tuple(inner) => Mark::FixTuple(Type::Tuple(inner), data),
-
             Type::Enum8(values) => Mark::Enum8(values, data),
             Type::Enum16(values) => Mark::Enum16(values, data),
 
             _ => unimplemented!("Const size is not implemented for type: {:?}", self),
         };
 
-        Ok(q)
+        Ok(mark)
     }
 }
 

@@ -22,7 +22,6 @@ mod value;
     zerocopy::FromBytes,
     zerocopy::Unaligned,
 )]
-#[allow(non_camel_case_types)]
 pub struct i256(pub [u8; 32]);
 
 #[repr(C)]
@@ -39,7 +38,6 @@ pub struct i256(pub [u8; 32]);
     zerocopy::FromBytes,
     zerocopy::Unaligned,
 )]
-#[allow(non_camel_case_types)]
 pub struct u256(pub [u8; 32]);
 
 pub type Result<T> = std::result::Result<T, error::Error>;

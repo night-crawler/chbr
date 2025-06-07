@@ -7,7 +7,7 @@ use nom::branch::alt;
 use nom::bytes::complete::take_while1;
 use nom::character::complete::{alphanumeric1, char, digit1, multispace0, multispace1};
 use nom::combinator::{map, map_res, recognize};
-use nom::error::{ErrorKind, FromExternalError, ParseError};
+use nom::error::{ErrorKind, FromExternalError as _, ParseError};
 use nom::multi::{many0, separated_list1};
 use nom::sequence::{delimited, pair, preceded, separated_pair};
 use nom::{IResult, Parser, bytes::complete::tag};

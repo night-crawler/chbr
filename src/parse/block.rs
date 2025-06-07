@@ -86,7 +86,7 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
         debug!("column type parsed: {:?}", typ);
 
         let ctx = parse_context.fork(input);
-        (input, _) = typ.decode_prefix(ctx.clone())?;
+        (input, ()) = typ.decode_prefix(ctx.clone())?;
 
         let marker;
         (input, marker) = typ.decode(ctx.fork(input))?;
@@ -112,7 +112,7 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
 mod tests {
     use super::*;
     use crate::common::init_logger;
-    use std::io::Read;
+    use std::io::Read as _;
     use testresult::TestResult;
 
     #[test]

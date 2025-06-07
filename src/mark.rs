@@ -2,7 +2,9 @@ use crate::slice::ByteView;
 use crate::types::{Field, JsonColumnHeader, Offsets, Type};
 use crate::{i256, u256};
 use chrono_tz::Tz;
+use core::fmt;
 use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
+use zerocopy::{FromBytes, Unaligned};
 
 pub enum Mark<'a> {
     Empty,
@@ -52,8 +54,7 @@ pub enum Mark<'a> {
         additional_keys: Option<Box<Mark<'a>>>,
     },
     Array(Offsets<'a>, Box<Mark<'a>>),
-    VarTuple(Vec<Mark<'a>>),
-    FixTuple(Type<'a>, &'a [u8]),
+    Tuple(Vec<Mark<'a>>),
     Nullable(&'a [u8], Box<Mark<'a>>),
     Map {
         offsets: Offsets<'a>,
@@ -73,10 +74,76 @@ pub enum Mark<'a> {
     },
 }
 
-use core::fmt;
-use zerocopy::{FromBytes, Unaligned};
+impl Mark<'_> {
+    pub fn size(&self) -> Option<usize> {
+        #[allow(clippy::match_same_arms)]
+        match self {
+            Self::Bool(_) => Some(1),
+            Self::Int8(_) => Some(1),
+            Self::Int16(_) => Some(2),
+            Self::Int32(_) => Some(4),
+            Self::Int64(_) => Some(8),
+            Self::Int128(_) => Some(16),
+            Self::Int256(_) => Some(32),
+            Self::UInt8(_) => Some(1),
+            Self::UInt16(_) => Some(2),
+            Self::UInt32(_) => Some(4),
+            Self::UInt64(_) => Some(8),
+            Self::UInt128(_) => Some(16),
+            Self::UInt256(_) => Some(32),
 
-impl<'a> fmt::Debug for Mark<'a> {
+            Self::Float32(_) => Some(4),
+            Self::Float64(_) => Some(8),
+            Self::BFloat16(_) => Some(2),
+
+            Self::Uuid(_) => Some(16),
+
+            Self::Decimal32(_, _) => Some(4),
+            Self::Decimal64(_, _) => Some(8),
+            Self::Decimal128(_, _) => Some(16),
+            Self::Decimal256(_, _) => Some(32),
+
+            Self::FixedString(size, _) => Some(*size),
+
+            Self::Ipv4(_) => Some(4),
+            Self::Ipv6(_) => Some(16),
+
+            Self::Date(_) => Some(2),
+            Self::Date32(_) => Some(4),
+            Self::DateTime(_, _) => Some(4),
+            Self::DateTime64(_, _, _) => Some(8),
+            Self::Enum8(_, _) => Some(1),
+            Self::Enum16(_, _) => Some(2),
+
+            // Point is represented by its X and Y coordinates, stored as a Tuple(Float64, Float64).
+            Self::Point(_) => Some(16),
+
+            // For completeness, everything below is variable in size
+            Self::Ring(_) => None,
+            Self::Polygon(_) => None,
+            Self::MultiPolygon(_) => None,
+            Self::LineString(_) => None,
+            Self::MultiLineString(_) => None,
+            Self::Map { .. } => None,
+
+            Self::Array(_, _) => None,
+
+            Self::Tuple(_) => None,
+
+            Self::Variant { .. } => None,
+            Self::Dynamic(_, _) => None,
+            Self::Json { .. } => None,
+
+            Self::Nullable(_, _) => None,
+            Self::LowCardinality { .. } => None,
+            Self::String(_, _) => None,
+            Self::Nested(_, _) => None,
+            Self::Empty => None,
+        }
+    }
+}
+
+impl fmt::Debug for Mark<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fn dbg_slice(f: &mut fmt::Formatter<'_>, name: &str, bytes: &[u8]) -> fmt::Result {
             f.debug_struct(name)
@@ -96,7 +163,13 @@ impl<'a> fmt::Debug for Mark<'a> {
                 .field("ptr", &bytes.as_ptr())
                 .finish()
         }
-        use Mark::*;
+        use Mark::{
+            Array, BFloat16, Bool, Date, Date32, DateTime, DateTime64, Decimal32, Decimal64,
+            Decimal128, Decimal256, Dynamic, Empty, Enum8, Enum16, FixedString, Float32, Float64,
+            Int8, Int16, Int32, Int64, Int128, Int256, Ipv4, Ipv6, Json, LineString,
+            LowCardinality, Map, MultiLineString, MultiPolygon, Nested, Nullable, Point, Polygon,
+            Ring, String, Tuple, UInt8, UInt16, UInt32, UInt64, UInt128, UInt256, Uuid, Variant,
+        };
         match self {
             Empty => f.write_str("Empty"),
 
@@ -214,8 +287,7 @@ impl<'a> fmt::Debug for Mark<'a> {
                 .field("values", inner)
                 .finish(),
 
-            VarTuple(items) => f.debug_tuple("VarTuple").field(items).finish(),
-            FixTuple(t, bytes) => dbg_slice(f, "FixTuple", bytes).and_then(|_| t.fmt(f)),
+            Tuple(items) => f.debug_tuple("VarTuple").field(items).finish(),
 
             Nullable(nulls, col) => f
                 .debug_struct("Nullable")

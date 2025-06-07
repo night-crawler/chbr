@@ -1,5 +1,5 @@
+use core::ops::{Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive};
 use core::{marker::PhantomData, ops::Index};
-
 use zerocopy::{FromBytes, Unaligned};
 
 #[repr(transparent)]
@@ -50,9 +50,14 @@ impl<'a, T: Unaligned + FromBytes + Copy> ByteView<'a, T> {
     pub fn as_bytes(&self) -> &'a [u8] {
         self.bytes
     }
+
+    pub fn as_slice(&self) -> &'a [T] {
+        let n_elements = self.len();
+        unsafe { core::slice::from_raw_parts(self.bytes.as_ptr().cast::<T>(), n_elements) }
+    }
 }
 
-impl<'a, T: Unaligned + FromBytes + Copy + Default> ByteView<'a, T> {
+impl<T: Unaligned + FromBytes + Copy + Default> ByteView<'_, T> {
     pub fn last_or_default(&self) -> T {
         if let Some(last) = self.last() {
             *last
@@ -62,7 +67,7 @@ impl<'a, T: Unaligned + FromBytes + Copy + Default> ByteView<'a, T> {
     }
 }
 
-impl<'a, T: Unaligned + FromBytes + Copy> Index<usize> for ByteView<'a, T> {
+impl<T: Unaligned + FromBytes + Copy> Index<usize> for ByteView<'_, T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -79,7 +84,7 @@ impl<'a, T: Unaligned + FromBytes + Copy> Index<usize> for ByteView<'a, T> {
 
 use core::{any::type_name, fmt, mem::size_of};
 
-impl<'a, T> fmt::Debug for ByteView<'a, T>
+impl<T> fmt::Debug for ByteView<'_, T>
 where
     T: Unaligned + FromBytes + Copy,
 {
@@ -92,6 +97,29 @@ where
             .finish()
     }
 }
+
+macro_rules! impl_slice_index {
+    ($range:ty) => {
+        impl<'a, T> Index<$range> for ByteView<'a, T>
+        where
+            T: Unaligned + FromBytes + Copy,
+        {
+            type Output = [T];
+
+            #[inline]
+            fn index(&self, idx: $range) -> &Self::Output {
+                &self.as_slice()[idx]
+            }
+        }
+    };
+}
+
+impl_slice_index!(Range<usize>);
+impl_slice_index!(RangeFrom<usize>);
+impl_slice_index!(RangeTo<usize>);
+impl_slice_index!(RangeInclusive<usize>);
+impl_slice_index!(RangeToInclusive<usize>);
+impl_slice_index!(RangeFull);
 
 #[cfg(test)]
 mod tests {

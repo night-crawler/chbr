@@ -16,7 +16,7 @@ impl<'a> Type<'a> {
         info!("Decoding prefix for type: {:?}", self);
         match self {
             Type::Nullable(inner) => {
-                let (input, _) = inner.decode_prefix(ctx.clone())?;
+                let (input, ()) = inner.decode_prefix(ctx.clone())?;
                 return Ok((input, ()));
             }
             Type::Tuple(inner) => {
@@ -29,7 +29,7 @@ impl<'a> Type<'a> {
             }
             Type::Map(key, val) => {
                 let inner_tuple = t!(Tuple(vec![*key.clone(), *val.clone()]));
-                let (input, _) = inner_tuple.decode_prefix(ctx.clone())?;
+                let (input, ()) = inner_tuple.decode_prefix(ctx.clone())?;
                 return Ok((input, ()));
             }
             Type::Variant(inner) => {
@@ -85,6 +85,7 @@ impl<'a> Type<'a> {
         match self {
             Type::String => string(ctx),
             Type::Array(inner) => array(*inner, ctx),
+            #[allow(clippy::match_same_arms)]
             Type::Ring => t!(Array(bt!(Point))).decode(ctx),
             Type::Polygon => t!(Array(bt!(Ring))).decode(ctx),
             Type::MultiPolygon => t!(Array(bt!(Polygon))).decode(ctx),
@@ -313,12 +314,11 @@ fn tuple<'a>(inner: Vec<Type<'a>>, ctx: ParseContext<'a>) -> IResult<&'a [u8], M
         (input, marker) = typ.decode(ctx.fork(input))?;
         markers.push(marker);
     }
-    Ok((input, Mark::VarTuple(markers)))
+    Ok((input, Mark::Tuple(markers)))
 }
 
 fn array<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
     let (input, offsets) = parse_offsets(ctx.input, ctx.num_rows)?;
-    debug!("Array Offsets: {:?}", offsets.as_bytes());
     let num_rows = offsets.last_or_default().get() as usize;
     debug!("Array num_rows: {}", num_rows);
 

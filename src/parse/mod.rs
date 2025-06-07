@@ -3,7 +3,7 @@ use crate::slice::ByteView;
 use crate::types::Type;
 use log::trace;
 use nom::IResult;
-use nom::error::{ErrorKind, FromExternalError};
+use nom::error::{ErrorKind, FromExternalError as _};
 use unsigned_varint::decode;
 use zerocopy::{LittleEndian, U64};
 

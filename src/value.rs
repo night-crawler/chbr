@@ -1,12 +1,11 @@
+use crate::error::Error;
+use crate::{i256, u256};
 use chrono_tz::Tz;
 use rust_decimal::Decimal;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use uuid::Uuid;
+use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
 
-use crate::mark::Mark;
-use crate::{i256, u256};
-
-use crate::types::{Field, Offsets, Type};
 
 #[derive(Debug)]
 pub enum Value<'a> {
@@ -40,44 +39,24 @@ pub enum Value<'a> {
     Ipv4(Ipv4Addr),
     Ipv6(Ipv6Addr),
     Point((f64, f64)),
-    Ring(Box<Mark<'a>>),
-    Polygon(Box<Mark<'a>>),
-    MultiPolygon(Box<Mark<'a>>),
-    LineString(Box<Mark<'a>>),
-    MultiLineString(Box<Mark<'a>>),
 
-    Enum8(Vec<(&'a str, i8)>, &'a [u8]),
-    Enum16(Vec<(&'a str, i16)>, &'a [u8]),
-
-    LowCardinality {
-        index_type: Type<'a>,
-        indices: Box<Mark<'a>>,
-        global_dictionary: Option<Box<Mark<'a>>>,
-        additional_keys: Option<Box<Mark<'a>>>,
-    },
-    Array(Offsets<'a>, Box<Mark<'a>>),
-    Tuple(Vec<Mark<'a>>),
-    FixTuple(Type<'a>, &'a [u8]),
-    Nullable(&'a [u8], Box<Mark<'a>>),
-    Map {
-        offsets: Offsets<'a>,
-        keys: Box<Mark<'a>>,
-        values: Box<Mark<'a>>,
-    },
-    Variant {
-        discriminators: &'a [u8],
-        types: Vec<Mark<'a>>,
-    },
-    Nested(Vec<Field<'a>>, &'a [u8]),
-    Dynamic(Vec<usize>, Vec<Mark<'a>>),
-
-    Json {
-        columns: Box<Mark<'a>>,
-        data: Vec<Mark<'a>>,
-    },
+    Int8Slice(&'a [i8]),
+    Int16Slice(&'a [I16]),
+    Int32Slice(&'a [I32]),
+    Int64Slice(&'a [I64]),
+    Int128Slice(&'a [I128]),
+    Int256Slice(&'a [i256]),
+    UInt8Slice(&'a [u8]),
+    UInt16Slice(&'a [U16]),
+    UInt32Slice(&'a [U32]),
+    UInt64Slice(&'a [U64]),
+    UInt128Slice(&'a [U128]),
+    UInt256Slice(&'a [u256]),
+    Float32Slice(&'a [F32]),
+    Float64Slice(&'a [F64]),
 }
 
-impl<'a> Value<'a> {
+impl Value<'_> {
     fn as_str(&self) -> &'static str {
         match self {
             Value::Empty => "Empty",
@@ -113,7 +92,6 @@ impl<'a> Value<'a> {
     }
 }
 
-use crate::error::Error;
 macro_rules! impl_try_from_value {
     ($variant:ident, $ty:ty) => {
         impl<'a> TryFrom<Value<'a>> for $ty {
@@ -128,6 +106,8 @@ macro_rules! impl_try_from_value {
         }
     };
 }
+
+impl_try_from_value!(Int64Slice, &'a [I64]);
 
 impl_try_from_value!(Bool, bool);
 impl_try_from_value!(Int8, i8);

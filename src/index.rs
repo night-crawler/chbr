@@ -1,5 +1,7 @@
 use crate::mark::Mark;
+use crate::types::OffsetIndexPair as _;
 use crate::value::Value;
+use std::ops::Range;
 
 #[derive(Debug)]
 pub enum IndexableColumn<'a> {
@@ -9,81 +11,182 @@ pub enum IndexableColumn<'a> {
 
 impl<'a> From<Mark<'a>> for IndexableColumn<'a> {
     fn from(marker: Mark<'a>) -> Self {
-        match marker {
-            Mark::Bool(_)
-            | Mark::Int8(_)
-            | Mark::Int16(_)
-            | Mark::Int32(_)
-            | Mark::Int64(_)
-            | Mark::Int128(_)
-            | Mark::Int256(_)
-            | Mark::UInt8(_)
-            | Mark::UInt16(_)
-            | Mark::UInt32(_)
-            | Mark::UInt64(_)
-            | Mark::UInt128(_)
-            | Mark::UInt256(_)
-            | Mark::Float32(_)
-            | Mark::Float64(_)
-            | Mark::BFloat16(_)
-            | Mark::Uuid(_)
-            | Mark::Decimal32(_, _)
-            | Mark::Decimal64(_, _)
-            | Mark::Decimal128(_, _)
-            | Mark::Decimal256(_, _)
-            | Mark::FixedString(_, _)
-            | Mark::Ipv4(_)
-            | Mark::Ipv6(_)
-            | Mark::Date(_)
-            | Mark::Date32(_)
-            | Mark::DateTime(_, _)
-            | Mark::DateTime64(_, _, _)
-            | Mark::Enum8(_, _)
-            | Mark::Enum16(_, _) => IndexableColumn::Stateless(marker),
-            _ => IndexableColumn::Stateful { marker },
+        if marker.size().is_some() {
+            return IndexableColumn::Stateless(marker);
+        }
+        IndexableColumn::Stateful { marker }
+    }
+}
+
+impl<'a> Mark<'a> {
+    fn get(&'a self, index: usize) -> Option<Value<'a>> {
+        match self {
+            Mark::Empty => None,
+            Mark::Bool(bytes) => bytes.get(index).map(|&v| Value::Bool(v != 0)),
+            Mark::Int8(bc) => bc.get(index).copied().map(Value::Int8),
+            Mark::Int16(bv) => bv.get(index).map(|v| v.get()).map(Value::Int16),
+            Mark::Int32(bv) => bv.get(index).map(|v| v.get()).map(Value::Int32),
+            Mark::Int64(bv) => bv.get(index).map(|v| v.get()).map(Value::Int64),
+            Mark::Int128(bv) => bv.get(index).map(|v| v.get()).map(Value::Int128),
+            Mark::Int256(bv) => bv.get(index).copied().map(Value::Int256),
+            Mark::UInt8(bv) => bv.get(index).copied().map(Value::UInt8),
+            Mark::UInt16(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt16),
+            Mark::UInt32(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt32),
+            Mark::UInt64(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt64),
+            Mark::UInt128(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt128),
+            Mark::UInt256(bv) => bv.get(index).copied().map(Value::UInt256),
+            Mark::Float32(bv) => bv.get(index).map(|v| v.get()).map(Value::Float32),
+            Mark::Float64(bv) => bv.get(index).map(|v| v.get()).map(Value::Float64),
+            Mark::BFloat16(_) => {
+                todo!()
+            }
+            Mark::Decimal32(_, _) => todo!(),
+            Mark::Decimal64(_, _) => todo!(),
+            Mark::Decimal128(_, _) => todo!(),
+            Mark::Decimal256(_, _) => todo!(),
+            Mark::String(offsets, buf) => {
+                let offset = offsets.get(index).map(|&o| o as usize)?;
+                let next_offset = offsets
+                    .get(index + 1)
+                    .map(|&o| o as usize)
+                    .unwrap_or(buf.len());
+                let slice = &buf[offset..next_offset];
+
+                Some(Value::String(unsafe {
+                    std::str::from_utf8_unchecked(slice)
+                }))
+            }
+            Mark::FixedString(_, _) => todo!(),
+            Mark::Uuid(_) => todo!(),
+            Mark::Date(_) => todo!(),
+            Mark::Date32(_) => todo!(),
+            Mark::DateTime(_, _) => todo!(),
+            Mark::DateTime64(_, _, _) => todo!(),
+            Mark::Ipv4(_) => todo!(),
+            Mark::Ipv6(_) => todo!(),
+            Mark::Point(_) => todo!(),
+            Mark::Ring(_) => todo!(),
+            Mark::Polygon(_) => todo!(),
+            Mark::MultiPolygon(_) => todo!(),
+            Mark::LineString(_) => todo!(),
+            Mark::MultiLineString(_) => todo!(),
+            Mark::Enum8(_, _) => todo!(),
+            Mark::Enum16(_, _) => todo!(),
+            Mark::LowCardinality { .. } => todo!(),
+            Mark::Array(_, _) => todo!(),
+
+            Mark::Tuple(_) => todo!(),
+            Mark::Nullable(_, _) => todo!(),
+            Mark::Map { .. } => todo!(),
+            Mark::Variant { .. } => todo!(),
+            Mark::Nested(_, _) => todo!(),
+            Mark::Dynamic(_, _) => todo!(),
+            Mark::Json { .. } => todo!(),
+        }
+    }
+
+    fn slice(&'a self, idx: Range<usize>) -> Value<'a> {
+        match self {
+            Mark::Empty => {
+                if !idx.is_empty() {
+                    panic!("Index out of bounds for empty marker");
+                }
+                Value::Empty
+            }
+            Mark::Bool(_) => todo!(),
+            Mark::Int8(bv) => Value::Int8Slice(&bv[idx]),
+            Mark::Int16(bv) => Value::Int16Slice(&bv[idx]),
+            Mark::Int32(bv) => Value::Int32Slice(&bv[idx]),
+            Mark::Int64(bv) => Value::Int64Slice(&bv[idx]),
+            Mark::Int128(bv) => Value::Int128Slice(&bv[idx]),
+            Mark::Int256(bv) => Value::Int256Slice(&bv[idx]),
+            Mark::UInt8(bv) => Value::UInt8Slice(&bv[idx]),
+            Mark::UInt16(bv) => Value::UInt16Slice(&bv[idx]),
+            Mark::UInt32(bv) => Value::UInt32Slice(&bv[idx]),
+            Mark::UInt64(bv) => Value::UInt64Slice(&bv[idx]),
+            Mark::UInt128(bv) => Value::UInt128Slice(&bv[idx]),
+            Mark::UInt256(bv) => Value::UInt256Slice(&bv[idx]),
+            Mark::Float32(bv) => Value::Float32Slice(&bv[idx]),
+            Mark::Float64(bv) => Value::Float64Slice(&bv[idx]),
+            Mark::BFloat16(_) => todo!(),
+            Mark::Decimal32(_, _) => todo!(),
+            Mark::Decimal64(_, _) => todo!(),
+            Mark::Decimal128(_, _) => todo!(),
+            Mark::Decimal256(_, _) => todo!(),
+            Mark::String(_, _) => todo!(),
+            Mark::FixedString(_, _) => todo!(),
+            Mark::Uuid(_) => todo!(),
+            Mark::Date(_) => todo!(),
+            Mark::Date32(_) => todo!(),
+            Mark::DateTime(_, _) => todo!(),
+            Mark::DateTime64(_, _, _) => todo!(),
+            Mark::Ipv4(_) => todo!(),
+            Mark::Ipv6(_) => todo!(),
+            Mark::Point(_) => todo!(),
+            Mark::Ring(_) => todo!(),
+            Mark::Polygon(_) => todo!(),
+            Mark::MultiPolygon(_) => todo!(),
+            Mark::LineString(_) => todo!(),
+            Mark::MultiLineString(_) => todo!(),
+            Mark::Enum8(_, _) => todo!(),
+            Mark::Enum16(_, _) => todo!(),
+            Mark::LowCardinality { .. } => todo!(),
+            Mark::Array(_, _) => todo!(),
+            Mark::Tuple(_) => todo!(),
+            Mark::Nullable(_, _) => todo!(),
+            Mark::Map { .. } => todo!(),
+            Mark::Variant { .. } => todo!(),
+            Mark::Nested(_, _) => todo!(),
+            Mark::Dynamic(_, _) => todo!(),
+            Mark::Json { .. } => todo!(),
         }
     }
 }
 
 impl<'a> IndexableColumn<'a> {
-    pub fn get(&self, index: usize) -> Option<Value<'a>> {
+    pub fn get(&'a self, index: usize) -> Option<Value<'a>> {
         match self {
-            IndexableColumn::Stateless(m) => match m {
-                Mark::Empty => None,
-                Mark::Bool(values) => values.get(index).map(|&v| Value::Bool(v != 0)),
-                Mark::Int8(bc) => bc.get(index).copied().map(Value::Int8),
-                Mark::Int16(bv) => bv.get(index).map(|v| v.get()).map(Value::Int16),
-                Mark::Int32(bv) => bv.get(index).map(|v| v.get()).map(Value::Int32),
-                Mark::Int64(bv) => bv.get(index).map(|v| v.get()).map(Value::Int64),
-                Mark::Int128(bv) => bv.get(index).map(|v| v.get()).map(Value::Int128),
-                Mark::Int256(bv) => bv.get(index).copied().map(Value::Int256),
-                Mark::UInt8(bv) => bv.get(index).copied().map(Value::UInt8),
-                Mark::UInt16(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt16),
-                Mark::UInt32(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt32),
-                Mark::UInt64(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt64),
-                Mark::UInt128(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt128),
-                Mark::UInt256(bv) => bv.get(index).copied().map(Value::UInt256),
-                Mark::Float32(bv) => bv.get(index).map(|v| v.get()).map(Value::Float32),
-                Mark::Float64(bv) => bv.get(index).map(|v| v.get()).map(Value::Float64),
-                Mark::BFloat16(_) => {
-                    todo!()
+            IndexableColumn::Stateless(m) => m.get(index),
+            IndexableColumn::Stateful { marker } => match marker {
+                Mark::Array(offsets, marker) => {
+                    let (start, end) = offsets.offset_indices(index)?;
+                    Some(marker.slice(start..end))
                 }
+                _ => todo!(),
+            },
+        }
+    }
+
+    pub fn slice(&'a self, idx: Range<usize>) -> Value<'a> {
+        match self {
+            IndexableColumn::Stateless(marker) => match marker {
+                Mark::Empty => {
+                    if !idx.is_empty() {
+                        panic!("Index out of bounds for empty marker");
+                    }
+                    Value::Empty
+                }
+                Mark::Bool(_) => todo!(),
+                Mark::Int8(bv) => Value::Int8Slice(&bv[idx]),
+                Mark::Int16(bv) => Value::Int16Slice(&bv[idx]),
+                Mark::Int32(bv) => Value::Int32Slice(&bv[idx]),
+                Mark::Int64(bv) => Value::Int64Slice(&bv[idx]),
+                Mark::Int128(bv) => Value::Int128Slice(&bv[idx]),
+                Mark::Int256(bv) => Value::Int256Slice(&bv[idx]),
+                Mark::UInt8(bv) => Value::UInt8Slice(&bv[idx]),
+                Mark::UInt16(bv) => Value::UInt16Slice(&bv[idx]),
+                Mark::UInt32(bv) => Value::UInt32Slice(&bv[idx]),
+                Mark::UInt64(bv) => Value::UInt64Slice(&bv[idx]),
+                Mark::UInt128(bv) => Value::UInt128Slice(&bv[idx]),
+                Mark::UInt256(bv) => Value::UInt256Slice(&bv[idx]),
+                Mark::Float32(bv) => Value::Float32Slice(&bv[idx]),
+                Mark::Float64(bv) => Value::Float64Slice(&bv[idx]),
+                Mark::BFloat16(_) => todo!(),
                 Mark::Decimal32(_, _) => todo!(),
                 Mark::Decimal64(_, _) => todo!(),
                 Mark::Decimal128(_, _) => todo!(),
                 Mark::Decimal256(_, _) => todo!(),
-                Mark::String(offsets, buf) => {
-                    let offset = offsets.get(index).map(|&o| o as usize)?;
-                    let next_offset = offsets
-                        .get(index + 1)
-                        .map(|&o| o as usize)
-                        .unwrap_or(buf.len());
-                    let slice = &buf[offset..next_offset];
-
-                    Some(Value::String(unsafe {
-                        std::str::from_utf8_unchecked(slice)
-                    }))
-                }
+                Mark::String(_, _) => todo!(),
                 Mark::FixedString(_, _) => todo!(),
                 Mark::Uuid(_) => todo!(),
                 Mark::Date(_) => todo!(),
@@ -101,14 +204,8 @@ impl<'a> IndexableColumn<'a> {
                 Mark::Enum8(_, _) => todo!(),
                 Mark::Enum16(_, _) => todo!(),
                 Mark::LowCardinality { .. } => todo!(),
-                Mark::Array(offsets, marker) => {
-                    println!("{:?}", offsets);
-                    println!("{:?}", marker);
-
-                    todo!()
-                }
-                Mark::VarTuple(_) => todo!(),
-                Mark::FixTuple(_, _) => todo!(),
+                Mark::Array(_, _) => todo!(),
+                Mark::Tuple(_) => todo!(),
                 Mark::Nullable(_, _) => todo!(),
                 Mark::Map { .. } => todo!(),
                 Mark::Variant { .. } => todo!(),
@@ -126,13 +223,15 @@ mod tests {
     use crate::common::init_logger;
     use crate::parse::block::parse_block;
     use pretty_assertions::assert_eq;
-    use std::io::Read;
+    use std::io::Read as _;
     use testresult::TestResult;
+    use zerocopy::little_endian::I64;
+
     #[test]
     fn index() -> TestResult {
         init_logger();
         let mut file = std::fs::File::open("./array.native")?;
-        // random was a bad idea, it looks like parser broke
+        // random() for id was a bad idea, it looks like parser is broken
         // 0,[]
         // 128969003,[1]
         // 214500519,[1]
@@ -157,18 +256,36 @@ mod tests {
             .map(|v| i64::try_from(v).unwrap())
             .collect::<Vec<_>>();
 
-        assert_eq!(
-            indices,
-            vec![
-                0, 128969003, 214500519, 301458964, 475251162, 1228122092, 1873422981, 2172352370,
-                2181458171, 2793473513, 3697287021
-            ]
-        );
+        let expected_ids = [
+            0, 128969003, 214500519, 301458964, 475251162, 1228122092, 1873422981, 2172352370,
+            2181458171, 2793473513, 3697287021,
+        ];
+
+        assert_eq!(indices, expected_ids);
+
+        let expected_arrays = [
+            vec![],
+            vec![1],
+            vec![1],
+            vec![],
+            vec![],
+            vec![1, 2, 3, 4, 5],
+            vec![1, 2, 3, 4],
+            vec![1, 2, 3],
+            vec![1, 2],
+            vec![],
+            vec![1, 2, 3],
+        ];
 
         let arr_marker = &block.cols[1];
-        println!("{:?}", arr_marker);
 
-        arr_marker.get(0);
+        let mut arrays = Vec::new();
+        for index in 0..block.num_rows {
+            let v: &[I64] = arr_marker.get(index).unwrap().try_into()?;
+            arrays.push(v);
+        }
+
+        assert_eq!(arrays, expected_arrays);
 
         Ok(())
     }
