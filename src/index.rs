@@ -250,18 +250,16 @@ impl<'a> IndexableColumn<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{init_logger, load};
+    use crate::common::load;
     use crate::parse::block::parse_block;
     use crate::value::StringSliceIterator;
     use pretty_assertions::assert_eq;
-    use std::io::Read as _;
     use testresult::TestResult;
     use zerocopy::little_endian::I64;
 
     #[test]
     fn int_array() -> TestResult {
-        init_logger();
-        let mut file = std::fs::File::open("./test_data/array.native")?;
+        let buf = load("./test_data/array.native")?;
         // random() for id was a bad idea, it looks like parser is broken
         // 0,[]
         // 128969003,[1]
@@ -274,9 +272,6 @@ mod tests {
         // 2181458171,"[1, 2]"
         // 2793473513,[]
         // 3697287021,"[1, 2, 3]"
-
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
 
         let (_, block) = parse_block(&buf)?;
 
@@ -323,17 +318,13 @@ mod tests {
 
     #[test]
     fn plain_strings() -> TestResult {
-        init_logger();
-        let mut file = std::fs::File::open("./test_data/plain_strings.native")?;
+        let buf = load("./test_data/plain_strings.native")?;
         // 0,hello
         // 1,world
         // 2,clickhouse
         // 3,test
         // 4,example
         // 5,data
-
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
 
         let (_, block) = parse_block(&buf)?;
 
@@ -350,8 +341,7 @@ mod tests {
 
     #[test]
     fn plain_strings_array() -> TestResult {
-        init_logger();
-        let mut file = std::fs::File::open("./test_data/plain_strings_array.native")?;
+        let buf = load("./test_data/plain_strings_array.native")?;
 
         // 0,"['apple', 'banana', 'cherry']"
         // 1,"['date', 'elderberry']"
@@ -359,9 +349,6 @@ mod tests {
         // 3,['kiwi']
         // 4,[]
         // 5,"['lemon', 'mango']"
-
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
 
         let (_, block) = parse_block(&buf)?;
 

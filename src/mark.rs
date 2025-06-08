@@ -1,5 +1,5 @@
 use crate::slice::ByteView;
-use crate::types::{Field, JsonColumnHeader, Offsets, Type};
+use crate::types::{Field, JsonColumnHeader, Offsets};
 use crate::{i256, u256};
 use chrono_tz::Tz;
 use core::fmt;
@@ -151,14 +151,11 @@ impl fmt::Debug for Mark<'_> {
                 .field("ptr", &bytes.as_ptr())
                 .finish()
         }
-        fn dbg_bv<T: Unaligned + FromBytes + Copy>(
+        fn dbg_bv<T: Unaligned + FromBytes + Copy + Debug>(
             f: &mut fmt::Formatter<'_>,
             name: &str,
             bv: &ByteView<'_, T>,
-        ) -> fmt::Result
-        where
-            T: Debug,
-        {
+        ) -> fmt::Result {
             let bytes = bv.as_bytes();
             f.debug_struct(name)
                 .field("len", &bytes.len())
