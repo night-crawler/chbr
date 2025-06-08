@@ -1,8 +1,10 @@
 use crate::error::Error;
+use crate::mark::Mark;
 use crate::parse::parse_var_str;
 use crate::{i256, u256};
 use chrono_tz::Tz;
 use rust_decimal::Decimal;
+use std::hint::unreachable_unchecked;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use uuid::Uuid;
 use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
@@ -55,6 +57,11 @@ pub enum Value<'a> {
     UInt256Slice(&'a [u256]),
     Float32Slice(&'a [F32]),
     Float64Slice(&'a [F64]),
+
+    LowCardinalitySlice {
+        indices: Box<Value<'a>>,
+        additional_keys: &'a Mark<'a>,
+    },
 }
 
 impl Value<'_> {
@@ -213,3 +220,100 @@ macro_rules! impl_try_from_integer_value {
 impl_try_from_integer_value!(
     u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize,
 );
+
+pub struct SliceUsizeIterator<'a> {
+    value: Value<'a>,
+    index: usize,
+    len: usize,
+}
+
+impl<'a> TryFrom<Value<'a>> for SliceUsizeIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::UInt8Slice(x) => Ok(Self {
+                value,
+                index: 0,
+                len: x.len(),
+            }),
+            Value::UInt16Slice(x) => Ok(Self {
+                value,
+                index: 0,
+                len: x.len(),
+            }),
+            Value::UInt32Slice(x) => Ok(Self {
+                value,
+                index: 0,
+                len: x.len(),
+            }),
+            Value::UInt64Slice(x) => Ok(Self {
+                value,
+                index: 0,
+                len: x.len(),
+            }),
+            _ => Err(Error::MismatchedType(value.as_str(), "SliceIndexIterator")),
+        }
+    }
+}
+
+impl Iterator for SliceUsizeIterator<'_> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.len {
+            return None;
+        }
+
+        let result = match &self.value {
+            Value::UInt8Slice(bv) => bv.get(self.index).copied().map(usize::from),
+            Value::UInt16Slice(bv) => bv.get(self.index).map(|v| v.get() as usize),
+            Value::UInt32Slice(bv) => bv.get(self.index).map(|v| v.get() as usize),
+            Value::UInt64Slice(bv) => {
+                if let Some(value) = bv.get(self.index).map(|v| v.get()) {
+                    usize::try_from(value).ok()
+                } else {
+                    None
+                }
+            }
+            _ => unsafe { unreachable_unchecked() },
+        };
+
+        self.index += 1;
+        result
+    }
+}
+
+pub struct LowCardinalitySliceIterator<'a> {
+    indices: SliceUsizeIterator<'a>,
+    additional_keys: &'a Mark<'a>,
+}
+
+impl<'a> TryFrom<Value<'a>> for LowCardinalitySliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::LowCardinalitySlice {
+                indices,
+                additional_keys,
+            } => Ok(Self {
+                indices: SliceUsizeIterator::try_from(*indices)?,
+                additional_keys,
+            }),
+            other => Err(Error::MismatchedType(
+                other.as_str(),
+                "LowCardinalitySliceIterator",
+            )),
+        }
+    }
+}
+
+impl<'a> Iterator for LowCardinalitySliceIterator<'a> {
+    type Item = Value<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let index = self.indices.next()?;
+        self.additional_keys.get(index)
+    }
+}

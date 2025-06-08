@@ -20,7 +20,7 @@ impl<'a> From<Mark<'a>> for IndexableColumn<'a> {
 }
 
 impl<'a> Mark<'a> {
-    fn get(&'a self, index: usize) -> Option<Value<'a>> {
+    pub fn get(&'a self, index: usize) -> Option<Value<'a>> {
         match self {
             Mark::Empty => None,
             Mark::Bool(bytes) => bytes.get(index).map(|&v| Value::Bool(v != 0)),
@@ -88,7 +88,10 @@ impl<'a> Mark<'a> {
 
                 Some(keys.get(value_index)?)
             }
-            Mark::Array(_, _) => todo!(),
+            Mark::Array(offsets, marker) => {
+                let (start, end) = offsets.offset_indices(index).unwrap()?;
+                Some(marker.slice(start..end))
+            }
 
             Mark::Tuple(_) => todo!(),
             Mark::Nullable(_, _) => todo!(),
@@ -157,7 +160,20 @@ impl<'a> Mark<'a> {
             Mark::MultiLineString(_) => todo!(),
             Mark::Enum8(_, _) => todo!(),
             Mark::Enum16(_, _) => todo!(),
-            Mark::LowCardinality { .. } => todo!(),
+            Mark::LowCardinality {
+                indices,
+                global_dictionary: _unused,
+                additional_keys,
+            } => {
+                let Some(additional_keys) = additional_keys else {
+                    panic!("LowCardinality marker without additional keys");
+                };
+                let sliced = indices.slice(idx);
+                Value::LowCardinalitySlice {
+                    indices: sliced.into(),
+                    additional_keys,
+                }
+            }
             Mark::Array(_, _) => todo!(),
             Mark::Tuple(_) => todo!(),
             Mark::Nullable(_, _) => todo!(),
@@ -170,80 +186,17 @@ impl<'a> Mark<'a> {
     }
 }
 
+// TODO: ditch the struct if we can use Mark directly and everything is stateless
 impl<'a> IndexableColumn<'a> {
     pub fn get(&'a self, index: usize) -> Option<Value<'a>> {
         match self {
             IndexableColumn::Stateless(m) => m.get(index),
             IndexableColumn::Stateful { marker } => match marker {
-                Mark::Array(offsets, marker) => {
-                    let (start, end) = offsets.offset_indices(index).unwrap()?;
-                    Some(marker.slice(start..end))
+                Mark::Array(_, _) | Mark::String(_, _) | Mark::LowCardinality { .. } => {
+                    marker.get(index)
                 }
-
-                Mark::String(_, _) => marker.get(index),
-                Mark::LowCardinality { .. } => marker.get(index),
                 _ => todo!(),
             },
-        }
-    }
-
-    pub fn slice(&'a self, idx: Range<usize>) -> Value<'a> {
-        match self {
-            IndexableColumn::Stateless(marker) => match marker {
-                Mark::Empty => {
-                    if !idx.is_empty() {
-                        panic!("Index out of bounds for empty marker");
-                    }
-                    Value::Empty
-                }
-                Mark::Bool(_) => todo!(),
-                Mark::Int8(bv) => Value::Int8Slice(&bv[idx]),
-                Mark::Int16(bv) => Value::Int16Slice(&bv[idx]),
-                Mark::Int32(bv) => Value::Int32Slice(&bv[idx]),
-                Mark::Int64(bv) => Value::Int64Slice(&bv[idx]),
-                Mark::Int128(bv) => Value::Int128Slice(&bv[idx]),
-                Mark::Int256(bv) => Value::Int256Slice(&bv[idx]),
-                Mark::UInt8(bv) => Value::UInt8Slice(&bv[idx]),
-                Mark::UInt16(bv) => Value::UInt16Slice(&bv[idx]),
-                Mark::UInt32(bv) => Value::UInt32Slice(&bv[idx]),
-                Mark::UInt64(bv) => Value::UInt64Slice(&bv[idx]),
-                Mark::UInt128(bv) => Value::UInt128Slice(&bv[idx]),
-                Mark::UInt256(bv) => Value::UInt256Slice(&bv[idx]),
-                Mark::Float32(bv) => Value::Float32Slice(&bv[idx]),
-                Mark::Float64(bv) => Value::Float64Slice(&bv[idx]),
-                Mark::BFloat16(_) => todo!(),
-                Mark::Decimal32(_, _) => todo!(),
-                Mark::Decimal64(_, _) => todo!(),
-                Mark::Decimal128(_, _) => todo!(),
-                Mark::Decimal256(_, _) => todo!(),
-                Mark::String(_, _) => todo!(),
-                Mark::FixedString(_, _) => todo!(),
-                Mark::Uuid(_) => todo!(),
-                Mark::Date(_) => todo!(),
-                Mark::Date32(_) => todo!(),
-                Mark::DateTime(_, _) => todo!(),
-                Mark::DateTime64(_, _, _) => todo!(),
-                Mark::Ipv4(_) => todo!(),
-                Mark::Ipv6(_) => todo!(),
-                Mark::Point(_) => todo!(),
-                Mark::Ring(_) => todo!(),
-                Mark::Polygon(_) => todo!(),
-                Mark::MultiPolygon(_) => todo!(),
-                Mark::LineString(_) => todo!(),
-                Mark::MultiLineString(_) => todo!(),
-                Mark::Enum8(_, _) => todo!(),
-                Mark::Enum16(_, _) => todo!(),
-                Mark::LowCardinality { .. } => todo!(),
-                Mark::Array(_, _) => todo!(),
-                Mark::Tuple(_) => todo!(),
-                Mark::Nullable(_, _) => todo!(),
-                Mark::Map { .. } => todo!(),
-                Mark::Variant { .. } => todo!(),
-                Mark::Nested(_, _) => todo!(),
-                Mark::Dynamic(_, _) => todo!(),
-                Mark::Json { .. } => todo!(),
-            },
-            IndexableColumn::Stateful { .. } => todo!(),
         }
     }
 }
@@ -252,7 +205,7 @@ impl<'a> IndexableColumn<'a> {
 mod tests {
     use crate::common::load;
     use crate::parse::block::parse_block;
-    use crate::value::StringSliceIterator;
+    use crate::value::{LowCardinalitySliceIterator, StringSliceIterator};
     use pretty_assertions::assert_eq;
     use testresult::TestResult;
     use zerocopy::little_endian::I64;
@@ -391,6 +344,53 @@ mod tests {
         for (i, expected) in expected_strings.iter().enumerate() {
             let value: &str = strings_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn lc_array_string() -> TestResult {
+        let buf = load("./test_data/array_lc_string.native")?;
+        let (_, block) = parse_block(&buf)?;
+
+        // 0,"['apple', 'banana', 'cherry']"
+        // 1,"['date', 'elderberry']"
+        // 2,"['fig', 'grape', 'honeydew']"
+        // 3,['kiwi']
+        // 4,[]
+        // 5,"['lemon', 'mango']"
+        // 6,"['apple', 'banana', 'cherry', 'date']"
+        // 7,"['elderberry', 'fig', 'grape']"
+        // 8,"['honeydew', 'kiwi', 'lemon']"
+        // 9,"['mango', 'apple', 'banana']"
+        // 10,"['cherry', 'date', 'elderberry']"
+        // 11,"['fig', 'grape', 'honeydew', 'kiwi']"
+
+        let expected_arrays = [
+            vec!["apple", "banana", "cherry"],
+            vec!["date", "elderberry"],
+            vec!["fig", "grape", "honeydew"],
+            vec!["kiwi"],
+            vec![],
+            vec!["lemon", "mango"],
+            vec!["apple", "banana", "cherry", "date"],
+            vec!["elderberry", "fig", "grape"],
+            vec!["honeydew", "kiwi", "lemon"],
+            vec!["mango", "apple", "banana"],
+            vec!["cherry", "date", "elderberry"],
+            vec!["fig", "grape", "honeydew", "kiwi"],
+        ];
+
+        let strings_marker = &block.cols[1];
+        for (i, expected) in expected_arrays.iter().enumerate() {
+            let it: LowCardinalitySliceIterator = strings_marker.get(i).unwrap().try_into()?;
+            let mut actual = vec![];
+            for value in it {
+                let value: &str = value.try_into()?;
+                actual.push(value);
+            }
+            assert_eq!(actual, *expected, "Mismatch at index {i}");
         }
 
         Ok(())
