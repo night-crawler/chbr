@@ -55,7 +55,7 @@ fn parse_var_str_bytes(input: &[u8]) -> IResult<&[u8], &[u8]> {
     Ok((remainder, str_bytes))
 }
 
-fn parse_var_str(input: &[u8]) -> IResult<&[u8], &str> {
+pub(crate) fn parse_var_str(input: &[u8]) -> IResult<&[u8], &str> {
     let (input, len) = parse_varuint(input)?;
     if input.len() < len {
         return Err(Error::UnexpectedEndOfInput);

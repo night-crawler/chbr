@@ -18,9 +18,16 @@ pub(crate) trait OffsetIndexPair {
 
 impl OffsetIndexPair for Offsets<'_> {
     fn offset_indices(&self, index: usize) -> crate::Result<Option<(usize, usize)>> {
-        let Some(start) = self.get_cast(index.saturating_sub(1))? else {
-            return Ok(None);
+        let start = if index == 0 {
+            0
+        } else {
+            let Some(start) = self.get_cast(index.saturating_sub(1))? else {
+                return Ok(None);
+            };
+            start
         };
+        
+        
         let Some(end) = self.get_cast(index)? else {
             return Ok(None);
         };

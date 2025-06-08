@@ -1,4 +1,5 @@
 use crate::mark::Mark;
+use crate::parse::parse_var_str;
 use crate::types::OffsetIndexPair as _;
 use crate::value::Value;
 use std::ops::Range;
@@ -152,6 +153,21 @@ impl<'a> IndexableColumn<'a> {
                     let (start, end) = offsets.offset_indices(index).unwrap()?;
                     Some(marker.slice(start..end))
                 }
+
+                Mark::String(offsets, buf) => {
+                    let start = if index == 0 {
+                        0
+                    } else {
+                        offsets.get(index.saturating_sub(1)).copied()?
+                    };
+
+                    let end = offsets.get(index).copied().unwrap_or(buf.len());
+                    let slice = &buf[start..end];
+
+                    let (_, s) = parse_var_str(slice).unwrap();
+
+                    Some(Value::String(s))
+                }
                 _ => todo!(),
             },
         }
@@ -228,9 +244,9 @@ mod tests {
     use zerocopy::little_endian::I64;
 
     #[test]
-    fn index() -> TestResult {
+    fn int_array() -> TestResult {
         init_logger();
-        let mut file = std::fs::File::open("./array.native")?;
+        let mut file = std::fs::File::open("./test_data/array.native")?;
         // random() for id was a bad idea, it looks like parser is broken
         // 0,[]
         // 128969003,[1]
@@ -286,6 +302,36 @@ mod tests {
         }
 
         assert_eq!(arrays, expected_arrays);
+
+        Ok(())
+    }
+
+    #[test]
+    fn plain_strings() -> TestResult {
+        init_logger();
+        let mut file = std::fs::File::open("./test_data/plain_strings.native")?;
+        // 0,hello
+        // 1,world
+        // 2,clickhouse
+        // 3,test
+        // 4,example
+        // 5,data
+
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        let (_, block) = parse_block(&buf)?;
+
+        let expected_strings = ["hello", "world", "clickhouse", "test", "example", "data"];
+
+        let strings_marker = &block.cols[1];
+        let mut actual_strings = vec![];
+        for (i, expected) in expected_strings.iter().enumerate() {
+            let value: &str = strings_marker.get(i).unwrap().try_into()?;
+            actual_strings.push(value);
+        }
+
+        assert_eq!(actual_strings, expected_strings);
 
         Ok(())
     }

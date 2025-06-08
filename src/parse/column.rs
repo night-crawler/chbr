@@ -1,12 +1,12 @@
 use crate::error::Error;
 use crate::mark::Mark;
-use crate::parse::IResult;
+use crate::parse::{parse_var_str_bytes, IResult};
 use crate::parse::block::ParseContext;
 use crate::parse::consts::{
     HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION, NEED_GLOBAL_DICTIONARY_BIT,
     NEED_UPDATE_DICTIONARY_BIT, TUINT8, TUINT16, TUINT32, TUINT64,
 };
-use crate::parse::{parse_offsets, parse_u64, parse_var_str, parse_var_str_type, parse_varuint};
+use crate::parse::{parse_offsets, parse_u64,  parse_var_str_type, parse_varuint};
 use crate::types::{JsonColumnHeader, OffsetIndexPair as _, Type};
 use crate::{bt, t};
 use log::{debug, info};
@@ -329,16 +329,23 @@ fn array<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'
 
 fn string(ctx: ParseContext) -> IResult<&[u8], Mark> {
     let mut input = ctx.input;
-    let mut offsets = vec![0; ctx.num_rows];
+    let mut offsets = Vec::with_capacity(ctx.num_rows);
     let mut offset = 0;
+    let mut prev = ctx.input;
     for _ in 0..ctx.num_rows {
         let s;
-        (input, s) = parse_var_str(input)?;
-        offset += s.len();
-        offsets.push(offset)
+        (input, s) = parse_var_str_bytes(input)?;
+        let complete_len = s.as_ptr() as usize - prev.as_ptr() as usize + s.len();
+        
+        offset += complete_len;
+        offsets.push(offset);
+        prev = input;
     }
+    println!("{:?}", offsets);
+    
+    assert_eq!(offsets.len(), ctx.num_rows);
 
-    Ok((input, Mark::String(offsets, input)))
+    Ok((input, Mark::String(offsets, &ctx.input[..offset])))
 }
 
 fn json_column_header(ctx: ParseContext<'_>) -> IResult<&[u8], JsonColumnHeader> {
