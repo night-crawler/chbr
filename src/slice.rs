@@ -18,7 +18,7 @@ impl<'a, T: Unaligned + FromBytes + Copy> TryFrom<&'a [u8]> for ByteView<'a, T> 
                 _pd: PhantomData,
             })
         } else {
-            Err(Self::Error::LengthError(bytes.len()))
+            Err(Self::Error::Length(bytes.len()))
         }
     }
 }
@@ -54,16 +54,6 @@ impl<'a, T: Unaligned + FromBytes + Copy> ByteView<'a, T> {
     pub fn as_slice(&self) -> &'a [T] {
         let n_elements = self.len();
         unsafe { core::slice::from_raw_parts(self.bytes.as_ptr().cast::<T>(), n_elements) }
-    }
-}
-
-impl<T: Unaligned + FromBytes + Copy + Default> ByteView<'_, T> {
-    pub fn last_or_default(&self) -> T {
-        if let Some(last) = self.last() {
-            *last
-        } else {
-            T::default()
-        }
     }
 }
 
@@ -175,7 +165,7 @@ mod tests {
             Ok(_) => {
                 panic!("Expected error, but got Ok");
             }
-            Err(crate::error::Error::LengthError(e)) => {
+            Err(crate::error::Error::Length(e)) => {
                 assert_eq!(e, 115);
             }
             _ => {

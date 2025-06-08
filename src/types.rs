@@ -9,25 +9,43 @@ use zerocopy::little_endian::U64;
 pub type Offsets<'a> = ByteView<'a, U64>;
 
 pub(crate) trait OffsetIndexPair {
-    fn offset_indices(&self, index: usize) -> Option<(usize, usize)>;
-    fn get_usize(&self, index: usize) -> Option<usize>;
+    fn offset_indices(&self, index: usize) -> crate::Result<Option<(usize, usize)>>;
+    fn get_cast<T>(&self, index: usize) -> crate::Result<Option<T>>
+    where
+        T: TryFrom<u64>;
+    fn last_or_default(&self) -> crate::Result<usize>;
 }
 
 impl OffsetIndexPair for Offsets<'_> {
-    fn offset_indices(&self, index: usize) -> Option<(usize, usize)> {
-        let start = self.get_usize(index.saturating_sub(1))?;
-        let end = self.get_usize(index)?;
-        Some((start, end))
+    fn offset_indices(&self, index: usize) -> crate::Result<Option<(usize, usize)>> {
+        let Some(start) = self.get_cast(index.saturating_sub(1))? else {
+            return Ok(None);
+        };
+        let Some(end) = self.get_cast(index)? else {
+            return Ok(None);
+        };
+        Ok(Some((start, end)))
     }
 
-    fn get_usize(&self, index: usize) -> Option<usize> {
-        let value = self.get(index)?.get();
-        match usize::try_from(value) {
-            Ok(value) => Some(value),
-            Err(err) => {
-                log::error!("Failed to convert offset to usize: {err}");
-                None
-            }
+    fn get_cast<T>(&self, index: usize) -> crate::Result<Option<T>>
+    where
+        T: TryFrom<u64>,
+    {
+        let Some(value) = self.get(index).copied() else {
+            return Ok(None);
+        };
+        let value =
+            T::try_from(value.get()).map_err(|_| crate::error::Error::Overflow(value.get()))?;
+        Ok(Some(value))
+    }
+
+    fn last_or_default(&self) -> crate::Result<usize> {
+        if let Some(last) = self.last() {
+            let last = usize::try_from(last.get())
+                .map_err(|_| crate::error::Error::Overflow(last.get()))?;
+            Ok(last)
+        } else {
+            Ok(usize::default())
         }
     }
 }

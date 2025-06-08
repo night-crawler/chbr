@@ -149,7 +149,7 @@ impl<'a> IndexableColumn<'a> {
             IndexableColumn::Stateless(m) => m.get(index),
             IndexableColumn::Stateful { marker } => match marker {
                 Mark::Array(offsets, marker) => {
-                    let (start, end) = offsets.offset_indices(index)?;
+                    let (start, end) = offsets.offset_indices(index).unwrap()?;
                     Some(marker.slice(start..end))
                 }
                 _ => todo!(),

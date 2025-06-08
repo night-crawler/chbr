@@ -6,7 +6,6 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use uuid::Uuid;
 use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
 
-
 #[derive(Debug)]
 pub enum Value<'a> {
     Empty,

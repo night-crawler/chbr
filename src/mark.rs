@@ -28,7 +28,7 @@ pub enum Mark<'a> {
     Decimal64(u8, &'a [u8]),
     Decimal128(u8, &'a [u8]),
     Decimal256(u8, &'a [u8]),
-    String(Vec<u32>, &'a [u8]),
+    String(Vec<usize>, &'a [u8]),
     FixedString(usize, &'a [u8]),
     Uuid(&'a [u8]),
     Date(&'a [u8]),

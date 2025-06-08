@@ -1,15 +1,15 @@
+use crate::error::Error;
 use crate::mark::Mark;
+use crate::parse::IResult;
 use crate::parse::block::ParseContext;
 use crate::parse::consts::{
     HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION, NEED_GLOBAL_DICTIONARY_BIT,
     NEED_UPDATE_DICTIONARY_BIT, TUINT8, TUINT16, TUINT32, TUINT64,
 };
 use crate::parse::{parse_offsets, parse_u64, parse_var_str, parse_var_str_type, parse_varuint};
-use crate::types::{JsonColumnHeader, Type};
+use crate::types::{JsonColumnHeader, OffsetIndexPair as _, Type};
 use crate::{bt, t};
-use log::{debug, error, info};
-use nom::error::ErrorKind;
-use nom::{IResult, Needed};
+use log::{debug, info};
 
 impl<'a> Type<'a> {
     pub(crate) fn decode_prefix(&self, mut ctx: ParseContext<'a>) -> IResult<&'a [u8], ()> {
@@ -40,12 +40,11 @@ impl<'a> Type<'a> {
                 return Ok((ctx.input, ()));
             }
             Type::LowCardinality(_) => {
-                let (input, version) = parse_u64(ctx.input)?;
+                let (input, version) = parse_u64::<u64>(ctx.input)?;
                 info!("LowCardinality version: {version}");
                 if version != LOW_CARDINALITY_VERSION {
-                    return Err(nom::Err::Failure(nom::error::make_error(
-                        ctx.input,
-                        ErrorKind::Fail,
+                    return Err(Error::Parse(format!(
+                        "LowCardinality version {version} is not supported, only {LOW_CARDINALITY_VERSION} is allowed"
                     )));
                 }
                 return Ok((input, ()));
@@ -55,9 +54,9 @@ impl<'a> Type<'a> {
                 return Ok((input, ()));
             }
             Type::Dynamic => {
-                let (mut input, version) = parse_u64(ctx.input)?;
+                let (mut input, version) = parse_u64::<u64>(ctx.input)?;
                 if version == 1 {
-                    let legacy_columns;
+                    let legacy_columns: u64;
                     (input, legacy_columns) = parse_varuint(input)?;
                     debug!("Legacy columns: {legacy_columns}");
                 }
@@ -65,7 +64,7 @@ impl<'a> Type<'a> {
                 return Ok((input, ()));
             }
             Type::Json => {
-                let (input, version) = parse_u64(ctx.input)?;
+                let (input, version) = parse_u64::<u64>(ctx.input)?;
                 debug!("JSON version: {version}");
                 return Ok((input, ()));
             }
@@ -78,8 +77,8 @@ impl<'a> Type<'a> {
     pub(crate) fn decode(self, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
         if let Some(size) = self.size() {
             let (data, input) = ctx.input.split_at(size * ctx.num_rows);
-            let q = self.into_fixed_size_marker(data).unwrap();
-            return Ok((input, q));
+            let marker = self.into_fixed_size_marker(data)?;
+            return Ok((input, marker));
         }
 
         match self {
@@ -106,7 +105,7 @@ impl<'a> Type<'a> {
 }
 
 fn json(ctx: ParseContext) -> IResult<&[u8], Mark> {
-    let (input, num_paths_old) = parse_varuint(ctx.input)?;
+    let (input, num_paths_old) = parse_varuint::<u64>(ctx.input)?;
     debug!("num_paths_old: {num_paths_old}");
 
     let (input, num_paths) = parse_varuint(input)?;
@@ -193,7 +192,7 @@ fn nullable<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mar
 }
 
 fn lc<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
-    let (mut input, flags) = parse_u64(ctx.input)?;
+    let (mut input, flags) = parse_u64::<u64>(ctx.input)?;
     info!("LowCardinality flags: {flags:#x}");
     let has_additional_keys = flags & HAS_ADDITIONAL_KEYS_BIT != 0;
     let needs_global_dictionary = flags & NEED_GLOBAL_DICTIONARY_BIT != 0;
@@ -205,11 +204,7 @@ fn lc<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>>
         TUINT32 => Type::UInt32,
         TUINT64 => Type::UInt64,
         x => {
-            error!("LowCardinality: bad index type: {x}");
-            return Err(nom::Err::Failure(nom::error::make_error(
-                ctx.input,
-                ErrorKind::Fail,
-            )));
+            return Err(Error::Parse(format!("LowCardinality: bad index type: {x}")));
         }
     };
 
@@ -217,30 +212,33 @@ fn lc<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>>
 
     let mut global_dictionary = None;
     if needs_global_dictionary {
-        let cnt;
+        let cnt: usize;
         (input, cnt) = parse_u64(input)?;
 
         let dict_marker;
         (input, dict_marker) = base_inner
             .clone()
-            .decode(ctx.fork(input).with_num_rows(cnt as usize))?;
+            .decode(ctx.fork(input).with_num_rows(cnt))?;
         global_dictionary = Some(Box::new(dict_marker));
     }
 
     let mut additional_keys = None;
     if has_additional_keys {
-        let cnt;
+        let cnt: usize;
         (input, cnt) = parse_u64(input)?;
 
         let dict_marker;
-        (input, dict_marker) = base_inner.decode(ctx.fork(input).with_num_rows(cnt as usize))?;
+        (input, dict_marker) = base_inner.decode(ctx.fork(input).with_num_rows(cnt))?;
         additional_keys = Some(Box::new(dict_marker));
     }
 
-    let rows_here;
+    let rows_here: usize;
     (input, rows_here) = parse_u64(input)?;
-    if rows_here as usize != ctx.num_rows {
-        return Err(nom::Err::Incomplete(Needed::Unknown));
+    if rows_here != ctx.num_rows {
+        return Err(Error::Parse(format!(
+            "LowCardinality: expected {} rows, got {rows_here}",
+            ctx.num_rows
+        )));
     }
 
     let (input, indices_marker) = index_type.clone().decode(ctx.fork(input))?;
@@ -256,12 +254,11 @@ fn lc<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>>
 
 fn variant<'a>(inner: Vec<Type<'a>>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
     const NULL_DISCR: u8 = 255;
-    let (input, mode) = parse_u64(ctx.input)?;
+    let (input, mode) = parse_u64::<u64>(ctx.input)?;
 
     if mode != 0 {
-        return Err(nom::Err::Failure(nom::error::make_error(
-            ctx.input,
-            ErrorKind::Fail,
+        return Err(Error::Parse(format!(
+            "Variant mode {mode} is not supported, only 0 is allowed"
         )));
     }
 
@@ -292,7 +289,7 @@ fn variant<'a>(inner: Vec<Type<'a>>, ctx: ParseContext<'a>) -> IResult<&'a [u8],
 
 fn map<'a>(key: Type<'a>, value: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
     let (input, offsets) = parse_offsets(ctx.input, ctx.num_rows)?;
-    let n = offsets.last_or_default().get() as usize;
+    let n = offsets.last_or_default()?;
 
     let (input, keys) = key.decode(ctx.fork(input).with_num_rows(n))?;
     let (input, values) = value.decode(ctx.fork(input).with_num_rows(n))?;
@@ -319,7 +316,7 @@ fn tuple<'a>(inner: Vec<Type<'a>>, ctx: ParseContext<'a>) -> IResult<&'a [u8], M
 
 fn array<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
     let (input, offsets) = parse_offsets(ctx.input, ctx.num_rows)?;
-    let num_rows = offsets.last_or_default().get() as usize;
+    let num_rows = offsets.last_or_default()?;
     debug!("Array num_rows: {}", num_rows);
 
     if num_rows == 0 {
@@ -332,12 +329,12 @@ fn array<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'
 
 fn string(ctx: ParseContext) -> IResult<&[u8], Mark> {
     let mut input = ctx.input;
-    let mut offsets = vec![0u32; ctx.num_rows];
+    let mut offsets = vec![0; ctx.num_rows];
     let mut offset = 0;
     for _ in 0..ctx.num_rows {
         let s;
         (input, s) = parse_var_str(input)?;
-        offset += s.len() as u32;
+        offset += s.len();
         offsets.push(offset)
     }
 

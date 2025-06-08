@@ -1,13 +1,15 @@
 use crate::ParsedBlock;
 use crate::index::IndexableColumn;
+use crate::parse::IResult;
 use crate::parse::typ::parse_type;
 use crate::parse::{parse_var_str, parse_varuint};
 use log::debug;
-use nom::IResult;
 use std::ops::Deref;
 
 #[derive(Debug, Clone)]
 pub struct ParseContext<'a> {
+    pub initial: &'a [u8],
+
     pub input: &'a [u8],
     pub num_columns: usize,
     pub num_rows: usize,
@@ -27,6 +29,7 @@ impl Deref for ParseContext<'_> {
 impl<'a> ParseContext<'a> {
     pub fn fork(&self, input: &'a [u8]) -> ParseContext<'a> {
         ParseContext {
+            initial: self.initial,
             input,
             num_columns: self.num_columns,
             num_rows: self.num_rows,
@@ -48,6 +51,7 @@ impl<'a> ParseContext<'a> {
 
 pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
     let mut parse_context = ParseContext {
+        initial: input,
         input,
         num_columns: 0,
         num_rows: 0,

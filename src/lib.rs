@@ -8,6 +8,7 @@ mod slice;
 pub mod types;
 mod value;
 
+#[allow(non_camel_case_types)]
 #[repr(C)]
 #[derive(
     Clone,
@@ -24,6 +25,7 @@ mod value;
 )]
 pub struct i256(pub [u8; 32]);
 
+#[allow(non_camel_case_types)]
 #[repr(C)]
 #[derive(
     Clone,
