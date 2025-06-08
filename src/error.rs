@@ -28,6 +28,9 @@ pub enum Error {
 
     #[error("Nom: {0}")]
     Nom(String),
+
+    #[error("Conversion out of range: {0} for {1}, got {2}")]
+    ValueOutOfRange(&'static str, &'static str, String),
 }
 
 impl<T> From<nom::Err<T>> for Error

@@ -113,18 +113,8 @@ impl_try_from_value!(String, &'a str);
 impl_try_from_value!(Int64Slice, &'a [I64]);
 
 impl_try_from_value!(Bool, bool);
-impl_try_from_value!(Int8, i8);
-impl_try_from_value!(Int16, i16);
-impl_try_from_value!(Int32, i32);
-impl_try_from_value!(Int64, i64);
-impl_try_from_value!(Int128, i128);
 impl_try_from_value!(Int256, i256);
 
-impl_try_from_value!(UInt8, u8);
-impl_try_from_value!(UInt16, u16);
-impl_try_from_value!(UInt32, u32);
-impl_try_from_value!(UInt64, u64);
-impl_try_from_value!(UInt128, u128);
 impl_try_from_value!(UInt256, u256);
 
 impl_try_from_value!(Float64, f64);
@@ -170,3 +160,56 @@ impl<'a> TryFrom<Value<'a>> for StringSliceIterator<'a> {
         }
     }
 }
+
+macro_rules! impl_try_from_integer_value {
+    ($($target:ty),+ $(,)?) => {
+        $(
+            impl<'a> core::convert::TryFrom<Value<'a>> for $target {
+                type Error = Error;
+
+                fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+
+                    match value {
+                        Value::Int8(v) => <$target>::try_from(v).map_err(|_| {
+                            Error::ValueOutOfRange("i8", stringify!($target), v.to_string())
+                        }),
+                        Value::Int16(v) => <$target>::try_from(v).map_err(|_| {
+                            Error::ValueOutOfRange("i16", stringify!($target), v.to_string())
+                        }),
+                        Value::Int32(v) => <$target>::try_from(v).map_err(|_| {
+                            Error::ValueOutOfRange("i32", stringify!($target), v.to_string())
+                        }),
+                        Value::Int64(v) => <$target>::try_from(v).map_err(|_| {
+                            Error::ValueOutOfRange("i64", stringify!($target), v.to_string())
+                        }),
+                        Value::Int128(v) => <$target>::try_from(v).map_err(|_| {
+                            Error::ValueOutOfRange("i128", stringify!($target), v.to_string())
+                        }),
+
+                        Value::UInt8(v) => <$target>::try_from(v).map_err(|_| {
+                            Error::ValueOutOfRange("u8", stringify!($target), v.to_string())
+                        }),
+                        Value::UInt16(v) => <$target>::try_from(v).map_err(|_| {
+                            Error::ValueOutOfRange("u16", stringify!($target), v.to_string())
+                        }),
+                        Value::UInt32(v) => <$target>::try_from(v).map_err(|_| {
+                            Error::ValueOutOfRange("u32", stringify!($target), v.to_string())
+                        }),
+                        Value::UInt64(v) => <$target>::try_from(v).map_err(|_| {
+                            Error::ValueOutOfRange("u64", stringify!($target), v.to_string())
+                        }),
+                        Value::UInt128(v) => <$target>::try_from(v).map_err(|_| {
+                            Error::ValueOutOfRange("u128", stringify!($target), v.to_string())
+                        }),
+
+                        other => Err(Error::MismatchedType(other.as_str(), stringify!($target))),
+                    }
+                }
+            }
+        )+
+    };
+}
+
+impl_try_from_integer_value!(
+    u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize,
+);

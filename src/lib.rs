@@ -52,9 +52,11 @@ pub struct ParsedBlock<'a> {
 }
 
 #[cfg(test)]
-pub mod common {
+pub(crate) mod common {
     use log::LevelFilter;
     use once_cell::sync::OnceCell;
+    use std::io::Read as _;
+    use std::path::Path;
 
     static INIT: OnceCell<()> = OnceCell::new();
 
@@ -65,5 +67,13 @@ pub mod common {
                 .is_test(true)
                 .init();
         });
+    }
+
+    pub fn load<P: AsRef<Path>>(path: P) -> std::io::Result<Vec<u8>> {
+        init_logger();
+        let mut file = std::fs::File::open(path)?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+        Ok(buf)
     }
 }

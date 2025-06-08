@@ -193,10 +193,19 @@ fn nullable<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mar
 
 fn lc<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
     let (mut input, flags) = parse_u64::<u64>(ctx.input)?;
-    info!("LowCardinality flags: {flags:#x}");
     let has_additional_keys = flags & HAS_ADDITIONAL_KEYS_BIT != 0;
+
+    // why not supported?
+    // https://github.com/ClickHouse/clickhouse-go/blob/main/lib/column/lowcardinality.go#L191
     let needs_global_dictionary = flags & NEED_GLOBAL_DICTIONARY_BIT != 0;
-    let _needs_update_dictionary = flags & NEED_UPDATE_DICTIONARY_BIT != 0;
+    let needs_update_dictionary = flags & NEED_UPDATE_DICTIONARY_BIT != 0;
+
+    info!(
+        "LowCardinality 
+        has_additional_keys: {has_additional_keys}; 
+        needs_global_dictionary: {needs_global_dictionary}; 
+        needs_update_dictionary: {needs_update_dictionary}"
+    );
 
     let index_type = match flags & 0xff {
         TUINT8 => Type::UInt8,
@@ -241,9 +250,8 @@ fn lc<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>>
         )));
     }
 
-    let (input, indices_marker) = index_type.clone().decode(ctx.fork(input))?;
+    let (input, indices_marker) = index_type.decode(ctx.fork(input))?;
     let marker = Mark::LowCardinality {
-        index_type,
         indices: Box::new(indices_marker),
         global_dictionary,
         additional_keys,

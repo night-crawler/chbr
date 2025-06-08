@@ -75,7 +75,19 @@ impl<'a> Mark<'a> {
             Mark::MultiLineString(_) => todo!(),
             Mark::Enum8(_, _) => todo!(),
             Mark::Enum16(_, _) => todo!(),
-            Mark::LowCardinality { .. } => todo!(),
+            Mark::LowCardinality {
+                indices,
+                // https://github.com/ClickHouse/clickhouse-go/blob/main/lib/column/lowcardinality.go#L191
+                global_dictionary: _unused,
+                additional_keys,
+            } => {
+                let value_index: usize = indices.get(index)?.try_into().unwrap();
+                let Some(keys) = additional_keys else {
+                    return None;
+                };
+
+                Some(keys.get(value_index)?)
+            }
             Mark::Array(_, _) => todo!(),
 
             Mark::Tuple(_) => todo!(),
@@ -169,6 +181,7 @@ impl<'a> IndexableColumn<'a> {
                 }
 
                 Mark::String(_, _) => marker.get(index),
+                Mark::LowCardinality { .. } => marker.get(index),
                 _ => todo!(),
             },
         }
@@ -237,7 +250,7 @@ impl<'a> IndexableColumn<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::init_logger;
+    use crate::common::{init_logger, load};
     use crate::parse::block::parse_block;
     use crate::value::StringSliceIterator;
     use pretty_assertions::assert_eq;
@@ -368,6 +381,29 @@ mod tests {
             let actual = it.collect::<Vec<_>>();
 
             assert_eq!(actual, *expected, "Mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn lc_string() -> TestResult {
+        let buf = load("./test_data/plain_lc_string.native")?;
+        let (_, block) = parse_block(&buf)?;
+
+        // 0,apple
+        // 1,banana
+        // 2,cherry
+        // 3,date
+        // 4,elderberry
+        // 5,fig
+
+        let expected_strings = ["apple", "banana", "cherry", "date", "elderberry", "fig"];
+
+        let strings_marker = &block.cols[1];
+        for (i, expected) in expected_strings.iter().enumerate() {
+            let value: &str = strings_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
         }
 
         Ok(())

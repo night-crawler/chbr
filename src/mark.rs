@@ -3,6 +3,7 @@ use crate::types::{Field, JsonColumnHeader, Offsets, Type};
 use crate::{i256, u256};
 use chrono_tz::Tz;
 use core::fmt;
+use std::fmt::Debug;
 use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
 use zerocopy::{FromBytes, Unaligned};
 
@@ -48,7 +49,6 @@ pub enum Mark<'a> {
     Enum16(Vec<(&'a str, i16)>, &'a [u8]),
 
     LowCardinality {
-        index_type: Type<'a>,
         indices: Box<Mark<'a>>,
         global_dictionary: Option<Box<Mark<'a>>>,
         additional_keys: Option<Box<Mark<'a>>>,
@@ -155,12 +155,14 @@ impl fmt::Debug for Mark<'_> {
             f: &mut fmt::Formatter<'_>,
             name: &str,
             bv: &ByteView<'_, T>,
-        ) -> fmt::Result {
+        ) -> fmt::Result
+        where
+            T: Debug,
+        {
             let bytes = bv.as_bytes();
             f.debug_struct(name)
-                .field("len_bytes", &bytes.len())
-                .field("len", &bv.len())
-                .field("ptr", &bytes.as_ptr())
+                .field("len", &bytes.len())
+                .field("data", &bv.as_slice())
                 .finish()
         }
         use Mark::{
@@ -224,9 +226,8 @@ impl fmt::Debug for Mark<'_> {
 
             String(offsets, data) => f
                 .debug_struct("String")
-                .field("offsets_len", &offsets.len())
-                .field("len_bytes", &data.len())
-                .field("ptr", &data.as_ptr())
+                .field("offsets", &offsets)
+                .field("data", &data)
                 .finish(),
             FixedString(n, data) => f
                 .debug_struct("FixedString")
@@ -269,13 +270,11 @@ impl fmt::Debug for Mark<'_> {
             MultiLineString(inner) => f.debug_tuple("MultiLineString").field(inner).finish(),
 
             LowCardinality {
-                index_type,
                 indices,
                 global_dictionary,
                 additional_keys,
             } => f
                 .debug_struct("LowCardinality")
-                .field("index_type", index_type)
                 .field("indices", indices)
                 .field("global_dictionary", global_dictionary)
                 .field("additional_keys", additional_keys)
