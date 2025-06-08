@@ -108,7 +108,6 @@ macro_rules! impl_try_from_value {
 
 impl_try_from_value!(String, &'a str);
 
-
 impl_try_from_value!(Int64Slice, &'a [I64]);
 
 impl_try_from_value!(Bool, bool);

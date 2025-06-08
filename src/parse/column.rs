@@ -1,12 +1,12 @@
 use crate::error::Error;
 use crate::mark::Mark;
-use crate::parse::{parse_var_str_bytes, IResult};
 use crate::parse::block::ParseContext;
 use crate::parse::consts::{
     HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION, NEED_GLOBAL_DICTIONARY_BIT,
     NEED_UPDATE_DICTIONARY_BIT, TUINT8, TUINT16, TUINT32, TUINT64,
 };
-use crate::parse::{parse_offsets, parse_u64,  parse_var_str_type, parse_varuint};
+use crate::parse::{IResult, parse_var_str_bytes};
+use crate::parse::{parse_offsets, parse_u64, parse_var_str_type, parse_varuint};
 use crate::types::{JsonColumnHeader, OffsetIndexPair as _, Type};
 use crate::{bt, t};
 use log::{debug, info};
@@ -336,13 +336,13 @@ fn string(ctx: ParseContext) -> IResult<&[u8], Mark> {
         let s;
         (input, s) = parse_var_str_bytes(input)?;
         let complete_len = s.as_ptr() as usize - prev.as_ptr() as usize + s.len();
-        
+
         offset += complete_len;
         offsets.push(offset);
         prev = input;
     }
     println!("{:?}", offsets);
-    
+
     assert_eq!(offsets.len(), ctx.num_rows);
 
     Ok((input, Mark::String(offsets, &ctx.input[..offset])))

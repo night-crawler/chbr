@@ -46,11 +46,8 @@ impl<'a> Mark<'a> {
             Mark::Decimal128(_, _) => todo!(),
             Mark::Decimal256(_, _) => todo!(),
             Mark::String(offsets, buf) => {
-                let offset = offsets.get(index).map(|&o| o as usize)?;
-                let next_offset = offsets
-                    .get(index + 1)
-                    .map(|&o| o as usize)
-                    .unwrap_or(buf.len());
+                let offset = offsets.get(index).copied()?;
+                let next_offset = offsets.get(index + 1).copied().unwrap_or(buf.len());
                 let slice = &buf[offset..next_offset];
 
                 Some(Value::String(unsafe {

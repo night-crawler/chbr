@@ -26,8 +26,7 @@ impl OffsetIndexPair for Offsets<'_> {
             };
             start
         };
-        
-        
+
         let Some(end) = self.get_cast(index)? else {
             return Ok(None);
         };
