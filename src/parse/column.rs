@@ -341,7 +341,6 @@ fn string(ctx: ParseContext) -> IResult<&[u8], Mark> {
         offsets.push(offset);
         prev = input;
     }
-    println!("{:?}", offsets);
 
     assert_eq!(offsets.len(), ctx.num_rows);
 

@@ -46,13 +46,18 @@ impl<'a> Mark<'a> {
             Mark::Decimal128(_, _) => todo!(),
             Mark::Decimal256(_, _) => todo!(),
             Mark::String(offsets, buf) => {
-                let offset = offsets.get(index).copied()?;
-                let next_offset = offsets.get(index + 1).copied().unwrap_or(buf.len());
-                let slice = &buf[offset..next_offset];
+                let start = if index == 0 {
+                    0
+                } else {
+                    offsets.get(index.saturating_sub(1)).copied()?
+                };
 
-                Some(Value::String(unsafe {
-                    std::str::from_utf8_unchecked(slice)
-                }))
+                let end = offsets.get(index).copied().unwrap_or(buf.len());
+                let slice = &buf[start..end];
+
+                let (_, s) = parse_var_str(slice).unwrap();
+
+                Some(Value::String(s))
             }
             Mark::FixedString(_, _) => todo!(),
             Mark::Uuid(_) => todo!(),
@@ -111,7 +116,19 @@ impl<'a> Mark<'a> {
             Mark::Decimal64(_, _) => todo!(),
             Mark::Decimal128(_, _) => todo!(),
             Mark::Decimal256(_, _) => todo!(),
-            Mark::String(_, _) => todo!(),
+            Mark::String(offsets, data) => {
+                let count = idx.len();
+                let Range { start, .. } = idx;
+                let start = start.saturating_sub(1);
+
+                let data_start = if start == 0 {
+                    data
+                } else {
+                    &data[offsets[start]..]
+                };
+
+                Value::StringSlice(count, data_start)
+            }
             Mark::FixedString(_, _) => todo!(),
             Mark::Uuid(_) => todo!(),
             Mark::Date(_) => todo!(),
@@ -151,20 +168,7 @@ impl<'a> IndexableColumn<'a> {
                     Some(marker.slice(start..end))
                 }
 
-                Mark::String(offsets, buf) => {
-                    let start = if index == 0 {
-                        0
-                    } else {
-                        offsets.get(index.saturating_sub(1)).copied()?
-                    };
-
-                    let end = offsets.get(index).copied().unwrap_or(buf.len());
-                    let slice = &buf[start..end];
-
-                    let (_, s) = parse_var_str(slice).unwrap();
-
-                    Some(Value::String(s))
-                }
+                Mark::String(_, _) => marker.get(index),
                 _ => todo!(),
             },
         }
@@ -235,6 +239,7 @@ impl<'a> IndexableColumn<'a> {
 mod tests {
     use crate::common::init_logger;
     use crate::parse::block::parse_block;
+    use crate::value::StringSliceIterator;
     use pretty_assertions::assert_eq;
     use std::io::Read as _;
     use testresult::TestResult;
@@ -322,13 +327,48 @@ mod tests {
         let expected_strings = ["hello", "world", "clickhouse", "test", "example", "data"];
 
         let strings_marker = &block.cols[1];
-        let mut actual_strings = vec![];
         for (i, expected) in expected_strings.iter().enumerate() {
             let value: &str = strings_marker.get(i).unwrap().try_into()?;
-            actual_strings.push(value);
+            assert_eq!(value, *expected, "Mismatch at index {i}");
         }
 
-        assert_eq!(actual_strings, expected_strings);
+        Ok(())
+    }
+
+    #[test]
+    fn plain_strings_array() -> TestResult {
+        init_logger();
+        let mut file = std::fs::File::open("./test_data/plain_strings_array.native")?;
+
+        // 0,"['apple', 'banana', 'cherry']"
+        // 1,"['date', 'elderberry']"
+        // 2,"['fig', 'grape', 'honeydew']"
+        // 3,['kiwi']
+        // 4,[]
+        // 5,"['lemon', 'mango']"
+
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        let (_, block) = parse_block(&buf)?;
+
+        let expected_arrays = [
+            vec!["apple", "banana", "cherry"],
+            vec!["date", "elderberry"],
+            vec!["fig", "grape", "honeydew"],
+            vec!["kiwi"],
+            vec![],
+            vec!["lemon", "mango"],
+        ];
+
+        let strings_marker = &block.cols[1];
+
+        for (i, expected) in expected_arrays.iter().enumerate() {
+            let it: StringSliceIterator = strings_marker.get(i).unwrap().try_into()?;
+            let actual = it.collect::<Vec<_>>();
+
+            assert_eq!(actual, *expected, "Mismatch at index {i}");
+        }
 
         Ok(())
     }

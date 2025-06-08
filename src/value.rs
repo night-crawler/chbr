@@ -1,4 +1,5 @@
 use crate::error::Error;
+use crate::parse::parse_var_str;
 use crate::{i256, u256};
 use chrono_tz::Tz;
 use rust_decimal::Decimal;
@@ -39,6 +40,7 @@ pub enum Value<'a> {
     Ipv6(Ipv6Addr),
     Point((f64, f64)),
 
+    StringSlice(usize, &'a [u8]),
     Int8Slice(&'a [i8]),
     Int16Slice(&'a [I16]),
     Int32Slice(&'a [I32]),
@@ -133,3 +135,38 @@ impl_try_from_value!(Ipv6, Ipv6Addr);
 
 impl_try_from_value!(Uuid, Uuid);
 impl_try_from_value!(Point, (f64, f64));
+
+pub struct StringSliceIterator<'a> {
+    data: &'a [u8],
+    count: usize,
+    index: usize,
+}
+
+impl<'a> Iterator for StringSliceIterator<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.count {
+            return None;
+        }
+        let s;
+        (self.data, s) = parse_var_str(self.data).unwrap();
+        self.index += 1;
+        Some(s)
+    }
+}
+
+impl<'a> TryFrom<Value<'a>> for StringSliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::StringSlice(count, data) => Ok(Self {
+                data,
+                count,
+                index: 0,
+            }),
+            other => Err(Error::MismatchedType(other.as_str(), "StringSliceIterator")),
+        }
+    }
+}
