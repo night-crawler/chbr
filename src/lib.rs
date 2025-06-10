@@ -1,5 +1,7 @@
 use crate::index::IndexableColumn;
+use zerocopy::little_endian::U64;
 
+mod conv;
 pub mod error;
 pub mod index;
 pub mod mark;
@@ -24,6 +26,29 @@ mod value;
     zerocopy::Unaligned,
 )]
 pub struct i256(pub [u8; 32]);
+
+#[repr(C)]
+#[derive(
+    Clone,
+    Copy,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Debug,
+    Default,
+    zerocopy::FromBytes,
+    zerocopy::Unaligned,
+)]
+pub struct UuidData(pub [U64; 2]);
+
+impl From<UuidData> for uuid::Uuid {
+    fn from(data: UuidData) -> Self {
+        let [b1, b2] = data.0;
+        uuid::Uuid::from_u64_pair(b1.get(), b2.get())
+    }
+}
 
 #[allow(non_camel_case_types)]
 #[repr(C)]

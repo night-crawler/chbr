@@ -169,11 +169,13 @@ impl_try_from_value!(Int8Slice, &'a [i8]);
 impl_try_from_value!(Int16Slice, &'a [I16]);
 impl_try_from_value!(Int32Slice, &'a [I32]);
 impl_try_from_value!(Int64Slice, &'a [I64]);
+impl_try_from_value!(Int128Slice, &'a [I128]);
 
 impl_try_from_value!(UInt8Slice, &'a [u8]);
 impl_try_from_value!(UInt16Slice, &'a [U16]);
 impl_try_from_value!(UInt32Slice, &'a [U32]);
 impl_try_from_value!(UInt64Slice, &'a [U64]);
+impl_try_from_value!(UInt128Slice, &'a [U128]);
 
 impl_try_from_value!(Bool, bool);
 impl_try_from_value!(Int256, i256);
@@ -187,7 +189,30 @@ impl_try_from_value!(Ipv4, Ipv4Addr);
 impl_try_from_value!(Ipv6, Ipv6Addr);
 
 impl_try_from_value!(Uuid, Uuid);
+
 // impl_try_from_value!(Point, (f64, f64));
+
+impl TryFrom<Value<'_>> for chrono::DateTime<Tz> {
+    type Error = Error;
+
+    fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
+        match value {
+            Value::DateTime64(dt) | Value::DateTime(dt) => Ok(dt),
+            other => Err(Error::MismatchedType(other.as_str(), "DateTime")),
+        }
+    }
+}
+
+impl TryFrom<Value<'_>> for chrono::NaiveDate {
+    type Error = Error;
+
+    fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Date32(dt) | Value::Date(dt) => Ok(dt),
+            other => Err(Error::MismatchedType(other.as_str(), "DateTime")),
+        }
+    }
+}
 
 pub struct StringSliceIterator<'a> {
     data: &'a [u8],

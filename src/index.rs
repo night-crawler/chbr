@@ -1,3 +1,4 @@
+use crate::conv::{date16, date32, datetime32_tz, datetime64_tz};
 use crate::mark::Mark;
 use crate::parse::parse_var_str;
 use crate::types::OffsetIndexPair as _;
@@ -60,11 +61,33 @@ impl<'a> Mark<'a> {
                 Some(Value::String(s))
             }
             Mark::FixedString(_, _) => todo!(),
-            Mark::Uuid(_) => todo!(),
-            Mark::Date(_) => todo!(),
-            Mark::Date32(_) => todo!(),
-            Mark::DateTime(_, _) => todo!(),
-            Mark::DateTime64(_, _, _) => todo!(),
+            Mark::Uuid(bv) => {
+                let value = bv.get(index)?;
+                Some(Value::Uuid(uuid::Uuid::from(*value)))
+            }
+            Mark::Date(bv) => {
+                let value = bv.get(index)?.get();
+                Some(Value::Date(date16(value)))
+            }
+            Mark::Date32(bv) => {
+                let value = bv.get(index)?.get();
+                Some(Value::Date32(date32(value)))
+            }
+            Mark::DateTime { tz, data } => {
+                let value = data.get(index)?.get();
+                let dt = datetime32_tz(value, *tz);
+                Some(Value::DateTime(dt))
+            }
+            Mark::DateTime64 {
+                precision,
+                tz,
+                data,
+            } => {
+                let value = data.get(index)?.get();
+                let value = i64::try_from(value).ok()?;
+                let dt = datetime64_tz(value, *precision, *tz)?;
+                Some(Value::DateTime64(dt))
+            }
             Mark::Ipv4(_) => todo!(),
             Mark::Ipv6(_) => todo!(),
             Mark::Point(_) => todo!(),
@@ -170,8 +193,8 @@ impl<'a> Mark<'a> {
             Mark::Uuid(_) => todo!(),
             Mark::Date(_) => todo!(),
             Mark::Date32(_) => todo!(),
-            Mark::DateTime(_, _) => todo!(),
-            Mark::DateTime64(_, _, _) => todo!(),
+            Mark::DateTime { .. } => todo!(),
+            Mark::DateTime64 { .. } => todo!(),
             Mark::Ipv4(_) => todo!(),
             Mark::Ipv6(_) => todo!(),
             Mark::Point(_) => todo!(),
@@ -745,6 +768,90 @@ mod tests {
             }
 
             panic!("Unexpected value type at index {i}: {:?}", value);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn uuid_and_dates() -> TestResult {
+        let buf = load("./test_data/uuid_and_dates.native")?;
+        let (_, block) = parse_block(&buf)?;
+        // UUID, Date, Date32, DateTime, DateTime64
+        // 00000000-0000-0000-0000-000000000001,2023-01-01,2023-01-01,2023-01-01 12:00:00,2023-01-01T12:00:00.123Z
+        // 00000000-0000-0000-0000-000000000002,2023-02-01,2023-02-01,2023-02-01 12:00:00,2023-02-01T12:00:00.456Z
+        // 00000000-0000-0000-0000-000000000003,2023-03-01,2023-03-01,2023-03-01 12:00:00,2023-03-01T12:00:00.789Z
+        // 00000000-0000-0000-0000-000000000004,2023-03-01,1969-09-23,2023-03-01 12:00:00,2023-03-01T12:00:00.789Z
+
+        let uuid_marker = &block.cols[0];
+        let expected_uuids = [
+            uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001")?,
+            uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000002")?,
+            uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000003")?,
+            uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000004")?,
+        ];
+        for (i, expected) in expected_uuids.iter().enumerate() {
+            let value: uuid::Uuid = uuid_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        let date_marker = &block.cols[1];
+        let expected_dates = [
+            chrono::NaiveDate::from_ymd_opt(2023, 1, 1).unwrap(),
+            chrono::NaiveDate::from_ymd_opt(2023, 2, 1).unwrap(),
+            chrono::NaiveDate::from_ymd_opt(2023, 3, 1).unwrap(),
+            chrono::NaiveDate::from_ymd_opt(2023, 3, 1).unwrap(),
+        ];
+        for (i, expected) in expected_dates.iter().enumerate() {
+            let value: chrono::NaiveDate = date_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        let date32_marker = &block.cols[2];
+        let expected_date32 = [
+            chrono::NaiveDate::from_ymd_opt(2023, 1, 1).unwrap(),
+            chrono::NaiveDate::from_ymd_opt(2023, 2, 1).unwrap(),
+            chrono::NaiveDate::from_ymd_opt(2023, 3, 1).unwrap(),
+            chrono::NaiveDate::from_ymd_opt(1969, 9, 23).unwrap(),
+        ];
+        for (i, expected) in expected_date32.iter().enumerate() {
+            let value: chrono::NaiveDate = date32_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        let datetime_marker = &block.cols[3];
+        let expected_datetimes = [
+            chrono::DateTime::parse_from_rfc3339("2023-01-01T12:00:00+00:00")?
+                .with_timezone(&chrono_tz::UTC),
+            chrono::DateTime::parse_from_rfc3339("2023-02-01T12:00:00+00:00")?
+                .with_timezone(&chrono_tz::UTC),
+            chrono::DateTime::parse_from_rfc3339("2023-03-01T12:00:00+00:00")?
+                .with_timezone(&chrono_tz::UTC),
+            chrono::DateTime::parse_from_rfc3339("2023-03-01T12:00:00+00:00")?
+                .with_timezone(&chrono_tz::UTC),
+        ];
+        for (i, expected) in expected_datetimes.iter().enumerate() {
+            let value: chrono::DateTime<chrono_tz::Tz> =
+                datetime_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        let datetime64_marker = &block.cols[4];
+        let expected_datetime64 = [
+            chrono::DateTime::parse_from_rfc3339("2023-01-01T12:00:00.123+00:00")?
+                .with_timezone(&chrono_tz::UTC),
+            chrono::DateTime::parse_from_rfc3339("2023-02-01T12:00:00.456+00:00")?
+                .with_timezone(&chrono_tz::UTC),
+            chrono::DateTime::parse_from_rfc3339("2023-03-01T12:00:00.789+00:00")?
+                .with_timezone(&chrono_tz::UTC),
+            chrono::DateTime::parse_from_rfc3339("2023-03-01T12:00:00.789+00:00")?
+                .with_timezone(&chrono_tz::UTC),
+        ];
+
+        for (i, expected) in expected_datetime64.iter().enumerate() {
+            let value: chrono::DateTime<chrono_tz::Tz> =
+                datetime64_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
         }
 
         Ok(())

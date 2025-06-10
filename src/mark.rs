@@ -1,6 +1,6 @@
 use crate::slice::ByteView;
 use crate::types::{Field, JsonColumnHeader, Offsets};
-use crate::{i256, u256};
+use crate::{UuidData, i256, u256};
 use chrono_tz::Tz;
 use core::fmt;
 use std::fmt::Debug;
@@ -31,11 +31,18 @@ pub enum Mark<'a> {
     Decimal256(u8, &'a [u8]),
     String(Vec<usize>, &'a [u8]),
     FixedString(usize, &'a [u8]),
-    Uuid(&'a [u8]),
-    Date(&'a [u8]),
-    Date32(&'a [u8]),
-    DateTime(Tz, &'a [u8]),
-    DateTime64(u8, Tz, &'a [u8]),
+    Uuid(ByteView<'a, UuidData>),
+    Date(ByteView<'a, U16>),
+    Date32(ByteView<'a, I32>),
+    DateTime {
+        tz: Tz,
+        data: ByteView<'a, U32>,
+    },
+    DateTime64 {
+        precision: u8,
+        tz: Tz,
+        data: ByteView<'a, U64>,
+    },
     Ipv4(&'a [u8]),
     Ipv6(&'a [u8]),
     Point(&'a [u8]),
@@ -111,8 +118,8 @@ impl Mark<'_> {
 
             Self::Date(_) => Some(2),
             Self::Date32(_) => Some(4),
-            Self::DateTime(_, _) => Some(4),
-            Self::DateTime64(_, _, _) => Some(8),
+            Self::DateTime { .. } => Some(4),
+            Self::DateTime64 { .. } => Some(8),
             Self::Enum8(_, _) => Some(1),
             Self::Enum16(_, _) => Some(2),
 
@@ -144,7 +151,7 @@ impl Mark<'_> {
     }
 }
 
-impl fmt::Debug for Mark<'_> {
+impl Debug for Mark<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fn dbg_slice(f: &mut fmt::Formatter<'_>, name: &str, bytes: &[u8]) -> fmt::Result {
             f.debug_struct(name)
@@ -174,13 +181,16 @@ impl fmt::Debug for Mark<'_> {
             Empty => f.write_str("Empty"),
 
             // simple &[u8] cases
-            Bool(b) | Uuid(b) | Date(b) | Date32(b) | Ipv4(b) | Ipv6(b) | Point(b) => dbg_slice(
+            Bool(b) | Ipv4(b) | Ipv6(b) | Point(b) => dbg_slice(
                 f,
                 core::any::type_name::<Self>().rsplit("::").next().unwrap(),
                 b,
             ),
 
             // ByteView-backed numeric columns
+            Date32(v) => dbg_bv(f, "Date32", v),
+            Date(v) => dbg_bv(f, "Date", v),
+            Uuid(v) => dbg_bv(f, "Uuid", v),
             Int8(v) => dbg_bv(f, "Int8", v),
             Int16(v) => dbg_bv(f, "Int16", v),
             Int32(v) => dbg_bv(f, "Int32", v),
@@ -234,18 +244,20 @@ impl fmt::Debug for Mark<'_> {
                 .field("ptr", &data.as_ptr())
                 .finish(),
 
-            DateTime(tz, data) => f
+            DateTime { tz, data } => f
                 .debug_struct("DateTime")
                 .field("tz", tz)
-                .field("len_bytes", &data.len())
-                .field("ptr", &data.as_ptr())
+                .field("data", &data.as_slice())
                 .finish(),
-            DateTime64(scale, tz, data) => f
+            DateTime64 {
+                precision,
+                tz,
+                data,
+            } => f
                 .debug_struct("DateTime64")
-                .field("scale", scale)
                 .field("tz", tz)
-                .field("len_bytes", &data.len())
-                .field("ptr", &data.as_ptr())
+                .field("precision", &precision)
+                .field("data", &data.as_slice())
                 .finish(),
 
             Enum8(map, data) => f
