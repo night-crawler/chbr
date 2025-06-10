@@ -111,7 +111,15 @@ impl<'a> Mark<'a> {
                 values,
                 index,
             }),
-            Mark::Variant { .. } => todo!(),
+            Mark::Variant {
+                offsets,
+                discriminators,
+                types,
+            } => {
+                let discriminator = (*discriminators.get(index)?) as usize;
+                let in_type_index = *offsets.get(index)?;
+                types[discriminator].get(in_type_index)
+            }
             Mark::Nested(_, _) => todo!(),
             Mark::Dynamic(_, _) => todo!(),
             Mark::Json { .. } => todo!(),
@@ -227,6 +235,7 @@ impl<'a> IndexableColumn<'a> {
                 | Mark::LowCardinality { .. }
                 | Mark::Tuple(_)
                 | Mark::Map { .. }
+                | Mark::Variant { .. }
                 | Mark::Nullable(_, _) => marker.get(index),
                 _ => todo!(),
             },
@@ -240,7 +249,7 @@ mod tests {
     use crate::parse::block::parse_block;
     use crate::value::{
         ArraySliceIterator, LowCardinalitySliceIterator, MapIterator, MapSliceIterator,
-        StringSliceIterator, TupleSliceIterator,
+        StringSliceIterator, TupleSliceIterator, Value,
     };
     use pretty_assertions::assert_eq;
     use std::collections::HashMap;
@@ -688,6 +697,54 @@ mod tests {
                 actual.push((s, n));
             }
             assert_eq!(actual, *expected, "Mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn variant() -> TestResult {
+        let buf = load("./test_data/variant.native")?;
+        let (_, block) = parse_block(&buf)?;
+        // Variant(Array(Int64), Int64, String)
+        //    ┌─id─┬─var─────┐
+        // 1. │  0 │ 1       │
+        // 2. │  1 │ a       │
+        // 3. │  2 │ [1,2,3] │
+        // 4. │  3 │ 2       │
+        // 5. │  4 │ b       │
+        // 6. │  5 │ [4,5,6] │
+        // 7. │  6 │ 3       │
+        //    └────┴─────────┘
+
+        let variant_marker = &block.cols[1];
+        // it's hard to write a test for this because Value does not implement equals yet
+
+        let expected_str_repr = ["1", "a", "1, 2, 3", "2", "b", "4, 5, 6", "3"];
+
+        for (i, expected) in expected_str_repr.iter().enumerate() {
+            let value = variant_marker.get(i).unwrap();
+            if let Ok(value) = <Value<'_> as TryInto<i64>>::try_into(value.clone()) {
+                assert_eq!(format!("{value}"), *expected, "Mismatch at index {i}");
+                continue;
+            }
+
+            if let Ok(value) = <Value<'_> as TryInto<&str>>::try_into(value.clone()) {
+                assert_eq!(value, *expected, "Mismatch at index {i}");
+                continue;
+            }
+
+            if let Ok(value) = <Value<'_> as TryInto<&[I64]>>::try_into(value.clone()) {
+                let parts = value
+                    .iter()
+                    .map(|v| format!("{}", v.get()))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                assert_eq!(parts, *expected, "Mismatch at index {i}");
+                continue;
+            }
+
+            panic!("Unexpected value type at index {i}: {:?}", value);
         }
 
         Ok(())

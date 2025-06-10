@@ -11,7 +11,7 @@ use std::ops::Range;
 use uuid::Uuid;
 use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Value<'a> {
     Empty,
     Bool(bool),
@@ -277,6 +277,7 @@ impl_try_from_integer_value!(
     u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize,
 );
 
+// TODO: also isize iterator?
 pub struct SliceUsizeIterator<'a> {
     value: Value<'a>,
     index: usize,

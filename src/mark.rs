@@ -62,6 +62,7 @@ pub enum Mark<'a> {
         values: Box<Mark<'a>>,
     },
     Variant {
+        offsets: Vec<usize>,
         discriminators: &'a [u8],
         types: Vec<Mark<'a>>,
     },
@@ -304,6 +305,7 @@ impl fmt::Debug for Mark<'_> {
                 .finish(),
 
             Variant {
+                offsets,
                 discriminators,
                 types,
             } => f
@@ -311,6 +313,7 @@ impl fmt::Debug for Mark<'_> {
                 .field("disc_bytes", &discriminators.len())
                 .field("disc_ptr", &discriminators.as_ptr())
                 .field("types", types)
+                .field("offsets", offsets)
                 .finish(),
 
             Nested(fields, bytes) => f

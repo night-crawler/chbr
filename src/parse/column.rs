@@ -271,8 +271,10 @@ fn variant<'a>(inner: Vec<Type<'a>>, ctx: ParseContext<'a>) -> IResult<&'a [u8],
     }
 
     let (discriminators, mut input) = input.split_at(ctx.num_rows);
+    let mut offsets = Vec::with_capacity(ctx.num_rows);
     let mut row_counts = vec![0; inner.len()];
     for &discriminator in discriminators {
+        offsets.push(row_counts[discriminator as usize]);
         if discriminator == NULL_DISCR {
             continue;
         }
@@ -288,6 +290,7 @@ fn variant<'a>(inner: Vec<Type<'a>>, ctx: ParseContext<'a>) -> IResult<&'a [u8],
     }
 
     let marker = Mark::Variant {
+        offsets,
         discriminators,
         types: markers,
     };
