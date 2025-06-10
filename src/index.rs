@@ -195,7 +195,16 @@ impl<'a> Mark<'a> {
             },
             Mark::Tuple(_) => todo!(),
             Mark::Nullable(_, _) => todo!(),
-            Mark::Map { .. } => todo!(),
+            Mark::Map {
+                offsets,
+                keys,
+                values,
+            } => Value::MapSlice {
+                offsets,
+                keys,
+                values,
+                slice_indices: idx,
+            },
             Mark::Variant { .. } => todo!(),
             Mark::Nested(_, _) => todo!(),
             Mark::Dynamic(_, _) => todo!(),
@@ -227,7 +236,8 @@ mod tests {
     use crate::common::load;
     use crate::parse::block::parse_block;
     use crate::value::{
-        ArraySliceIterator, LowCardinalitySliceIterator, MapIterator, StringSliceIterator,
+        ArraySliceIterator, LowCardinalitySliceIterator, MapIterator, MapSliceIterator,
+        StringSliceIterator,
     };
     use pretty_assertions::assert_eq;
     use std::collections::HashMap;
@@ -548,6 +558,49 @@ mod tests {
             let map_iter: MapIterator<&str, &str> = map_value.try_into()?;
             let map = map_iter.flatten().collect::<HashMap<&str, &str>>();
             assert_eq!(map, *expected, "Mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn array_map_sample() -> TestResult {
+        let buf = load("./test_data/array_map_sample.native")?;
+        let (_, block) = parse_block(&buf)?;
+
+        // 0,"[{'a': 'apple', 'b': 'banana'}, {'c': 'cherry'}]"
+        // 1,"[{'d': 'date'}, {'e': 'elderberry', 'f': 'fig'}]"
+        // 2,"[{'g': 'grape', 'h': 'honeydew'}]"
+        // 3,[{'i': 'kiwi'}]
+        // 4,[]
+        // 5,"[{'j': 'lemon', 'k': 'mango'}]"
+
+        let expected = [
+            vec![
+                HashMap::from([("a", "apple"), ("b", "banana")]),
+                HashMap::from([("c", "cherry")]),
+            ],
+            vec![
+                HashMap::from([("d", "date")]),
+                HashMap::from([("e", "elderberry"), ("f", "fig")]),
+            ],
+            vec![HashMap::from([("g", "grape"), ("h", "honeydew")])],
+            vec![HashMap::from([("i", "kiwi")])],
+            vec![],
+            vec![HashMap::from([("j", "lemon"), ("k", "mango")])],
+        ];
+
+        let map_marker = &block.cols[1];
+        for (i, expected) in expected.iter().enumerate() {
+            let map_slice_iterator: MapSliceIterator<&str, &str> =
+                map_marker.get(i).unwrap().try_into()?;
+            let mut actual = vec![];
+
+            for map in map_slice_iterator.flatten() {
+                let map = map.flatten().collect::<HashMap<&str, &str>>();
+                actual.push(map);
+            }
+            assert_eq!(actual, *expected, "Mismatch at index {i}");
         }
 
         Ok(())

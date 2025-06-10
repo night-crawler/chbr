@@ -1,4 +1,5 @@
 use core::ops::{Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive};
+use core::{fmt, mem::size_of};
 use core::{marker::PhantomData, ops::Index};
 use zerocopy::{FromBytes, Unaligned};
 
@@ -72,18 +73,14 @@ impl<T: Unaligned + FromBytes + Copy> Index<usize> for ByteView<'_, T> {
     }
 }
 
-use core::{any::type_name, fmt, mem::size_of};
-
 impl<T> fmt::Debug for ByteView<'_, T>
 where
-    T: Unaligned + FromBytes + Copy,
+    T: Unaligned + FromBytes + Copy + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ByteView")
-            .field("T", &type_name::<T>())
-            .field("size_of_T", &size_of::<T>())
-            .field("len_T", &self.len())
             .field("len_bytes", &self.bytes.len())
+            .field("data", &self.as_slice())
             .finish()
     }
 }

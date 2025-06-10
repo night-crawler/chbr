@@ -78,6 +78,13 @@ pub enum Value<'a> {
         values: &'a Mark<'a>,
         index: usize,
     },
+    
+    MapSlice {
+        offsets: &'a Offsets<'a>,
+        keys: &'a Mark<'a>,
+        values: &'a Mark<'a>,
+        slice_indices: Range<usize>,
+    }
 }
 
 impl Value<'_> {
@@ -516,4 +523,60 @@ where
     K: TryFrom<Value<'a>, Error = Error>,
     V: TryFrom<Value<'a>, Error = Error>,
 {
+}
+
+
+
+pub struct MapSliceIterator<'a, K, V> {
+    offsets: &'a Offsets<'a>,
+    keys: &'a Mark<'a>,
+    values: &'a Mark<'a>,
+    slice_indices: Range<usize>,
+    _marker: PhantomData<(K, V)>,
+}
+
+impl<'a, K, V> TryFrom<Value<'a>> for MapSliceIterator<'a, K, V>
+where
+    K: TryFrom<Value<'a>, Error = Error>,
+    V: TryFrom<Value<'a>, Error = Error>,
+{
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::MapSlice {
+                offsets,
+                keys,
+                values,
+                slice_indices,
+            } => Ok(Self {
+                offsets,
+                keys,
+                values,
+                slice_indices,
+                _marker: PhantomData,
+            }),
+            other => Err(Error::MismatchedType(other.as_str(), "MapSliceIterator")),
+        }
+    }
+}
+
+impl<'a, K, V> Iterator for MapSliceIterator<'a, K, V>
+where
+    K: TryFrom<Value<'a>, Error = Error>,
+    V: TryFrom<Value<'a>, Error = Error>,
+{
+    type Item = Result<MapIterator<'a, K, V>, Error>;
+    
+    fn next(&mut self) -> Option<Self::Item> {
+        let slice_idx = self.slice_indices.next()?;
+        let (start, end) = self.offsets.offset_indices(slice_idx).unwrap()?;
+
+        Some(Ok(MapIterator {
+            keys: self.keys,
+            values: self.values,
+            range: start..end,
+            _marker: PhantomData,
+        }))
+    }
 }
