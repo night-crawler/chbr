@@ -78,13 +78,13 @@ pub enum Value<'a> {
         values: &'a Mark<'a>,
         index: usize,
     },
-    
+
     MapSlice {
         offsets: &'a Offsets<'a>,
         keys: &'a Mark<'a>,
         values: &'a Mark<'a>,
         slice_indices: Range<usize>,
-    }
+    },
 }
 
 impl Value<'_> {
@@ -118,7 +118,26 @@ impl Value<'_> {
             Value::Ipv4(_) => "Ipv4",
             Value::Ipv6(_) => "Ipv6",
             Value::Point(_) => "Point",
-            _ => todo!(),
+            Value::StringSlice(_, _) => "StringSlice",
+            Value::Int8Slice(_) => "Int8Slice",
+            Value::Int16Slice(_) => "Int16Slice",
+            Value::Int32Slice(_) => "Int32Slice",
+            Value::Int64Slice(_) => "Int64Slice",
+            Value::Int128Slice(_) => "Int128Slice",
+            Value::Int256Slice(_) => "Int256Slice",
+            Value::UInt8Slice(_) => "UInt8Slice",
+            Value::UInt16Slice(_) => "UInt16Slice",
+            Value::UInt32Slice(_) => "UInt32Slice",
+            Value::UInt64Slice(_) => "UInt64Slice",
+            Value::UInt128Slice(_) => "UInt128Slice",
+            Value::UInt256Slice(_) => "UInt256Slice",
+            Value::Float32Slice(_) => "Float32Slice",
+            Value::Float64Slice(_) => "Float64Slice",
+            Value::LowCardinalitySlice { .. } => "LowCardinalitySlice",
+            Value::ArraySlice { .. } => "ArraySlice",
+            Value::Tuple(_, _) => "Tuple",
+            Value::Map { .. } => "Map",
+            Value::MapSlice { .. } => "MapSlice",
         }
     }
 }
@@ -525,8 +544,6 @@ where
 {
 }
 
-
-
 pub struct MapSliceIterator<'a, K, V> {
     offsets: &'a Offsets<'a>,
     keys: &'a Mark<'a>,
@@ -567,7 +584,7 @@ where
     V: TryFrom<Value<'a>, Error = Error>,
 {
     type Item = Result<MapIterator<'a, K, V>, Error>;
-    
+
     fn next(&mut self) -> Option<Self::Item> {
         let slice_idx = self.slice_indices.next()?;
         let (start, end) = self.offsets.offset_indices(slice_idx).unwrap()?;
