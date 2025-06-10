@@ -85,6 +85,11 @@ pub enum Value<'a> {
         values: &'a Mark<'a>,
         slice_indices: Range<usize>,
     },
+
+    TupleSlice {
+        inner: &'a [Mark<'a>],
+        slice_indices: Range<usize>,
+    },
 }
 
 impl Value<'_> {
@@ -138,6 +143,7 @@ impl Value<'_> {
             Value::Tuple(_, _) => "Tuple",
             Value::Map { .. } => "Map",
             Value::MapSlice { .. } => "MapSlice",
+            Value::TupleSlice { .. } => "TupleSlice",
         }
     }
 }
@@ -597,3 +603,41 @@ where
         }))
     }
 }
+
+pub struct TupleSliceIterator<'a> {
+    inner: &'a [Mark<'a>],
+    slice_indices: Range<usize>,
+}
+
+impl<'a> TryFrom<Value<'a>> for TupleSliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::TupleSlice {
+                inner,
+                slice_indices,
+            } => Ok(Self {
+                inner,
+                slice_indices,
+            }),
+            other => Err(Error::MismatchedType(other.as_str(), "TupleSliceIterator")),
+        }
+    }
+}
+
+impl<'a> Iterator for TupleSliceIterator<'a> {
+    type Item = Value<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let row_idx = self.slice_indices.next()?;
+        Some(Value::Tuple(row_idx, self.inner))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.slice_indices.end - self.slice_indices.start;
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for TupleSliceIterator<'_> {}

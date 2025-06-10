@@ -193,7 +193,10 @@ impl<'a> Mark<'a> {
                 data,
                 slice_indices: idx,
             },
-            Mark::Tuple(_) => todo!(),
+            Mark::Tuple(inner) => Value::TupleSlice {
+                inner,
+                slice_indices: idx,
+            },
             Mark::Nullable(_, _) => todo!(),
             Mark::Map {
                 offsets,
@@ -237,7 +240,7 @@ mod tests {
     use crate::parse::block::parse_block;
     use crate::value::{
         ArraySliceIterator, LowCardinalitySliceIterator, MapIterator, MapSliceIterator,
-        StringSliceIterator,
+        StringSliceIterator, TupleSliceIterator,
     };
     use pretty_assertions::assert_eq;
     use std::collections::HashMap;
@@ -647,6 +650,42 @@ mod tests {
             for (map_key, map_value) in map_iter.flatten() {
                 let inner_map = map_value.flatten().collect::<HashMap<&str, &str>>();
                 actual.insert(map_key, inner_map);
+            }
+            assert_eq!(actual, *expected, "Mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn array_of_tuples() -> TestResult {
+        let buf = load("./test_data/array_of_tuples.native")?;
+        let (_, block) = parse_block(&buf)?;
+
+        // 0,"[('apple', 1), ('banana', 2), ('cherry', 3)]"
+        // 1,"[('date', 4), ('elderberry', 5)]"
+        // 2,"[('fig', 6), ('grape', 7), ('honeydew', 8)]"
+        // 3,"[('kiwi', 9)]"
+        // 4,[]
+        // 5,"[('lemon', 10), ('mango', 11)]"
+
+        let expected_arrays = [
+            vec![("apple", 1), ("banana", 2), ("cherry", 3)],
+            vec![("date", 4), ("elderberry", 5)],
+            vec![("fig", 6), ("grape", 7), ("honeydew", 8)],
+            vec![("kiwi", 9)],
+            vec![],
+            vec![("lemon", 10), ("mango", 11)],
+        ];
+
+        let tuples_marker = &block.cols[1];
+
+        for (i, expected) in expected_arrays.iter().enumerate() {
+            let slice: TupleSliceIterator = tuples_marker.get(i).unwrap().try_into()?;
+            let mut actual = vec![];
+            for tup in slice {
+                let (s, n): (&str, i64) = tup.try_into()?;
+                actual.push((s, n));
             }
             assert_eq!(actual, *expected, "Mismatch at index {i}");
         }
