@@ -31,6 +31,9 @@ pub enum Error {
 
     #[error("Conversion out of range: {0} for {1}, got {2}")]
     ValueOutOfRange(&'static str, &'static str, String),
+
+    #[error("Index {0} out of bounds for {1}")]
+    IndexOutOfBounds(usize, &'static str),
 }
 
 impl<T> From<nom::Err<T>> for Error

@@ -1,11 +1,13 @@
 use crate::error::Error;
 use crate::mark::Mark;
 use crate::parse::parse_var_str;
+use crate::types::{OffsetIndexPair as _, Offsets};
 use crate::{i256, u256};
 use chrono_tz::Tz;
 use rust_decimal::Decimal;
 use std::hint::unreachable_unchecked;
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::ops::Range;
 use uuid::Uuid;
 use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
 
@@ -62,6 +64,20 @@ pub enum Value<'a> {
         indices: Box<Value<'a>>,
         additional_keys: &'a Mark<'a>,
     },
+
+    ArraySlice {
+        offsets: &'a Offsets<'a>,
+        data: &'a Mark<'a>,
+        slice_indices: Range<usize>,
+    },
+
+    Tuple(usize, &'a [Mark<'a>]),
+    Map {
+        offsets: &'a Offsets<'a>,
+        keys: &'a Mark<'a>,
+        values: &'a Mark<'a>,
+        index: usize,
+    },
 }
 
 impl Value<'_> {
@@ -117,7 +133,15 @@ macro_rules! impl_try_from_value {
 
 impl_try_from_value!(String, &'a str);
 
+impl_try_from_value!(Int8Slice, &'a [i8]);
+impl_try_from_value!(Int16Slice, &'a [I16]);
+impl_try_from_value!(Int32Slice, &'a [I32]);
 impl_try_from_value!(Int64Slice, &'a [I64]);
+
+impl_try_from_value!(UInt8Slice, &'a [u8]);
+impl_try_from_value!(UInt16Slice, &'a [U16]);
+impl_try_from_value!(UInt32Slice, &'a [U32]);
+impl_try_from_value!(UInt64Slice, &'a [U64]);
 
 impl_try_from_value!(Bool, bool);
 impl_try_from_value!(Int256, i256);
@@ -131,7 +155,7 @@ impl_try_from_value!(Ipv4, Ipv4Addr);
 impl_try_from_value!(Ipv6, Ipv6Addr);
 
 impl_try_from_value!(Uuid, Uuid);
-impl_try_from_value!(Point, (f64, f64));
+// impl_try_from_value!(Point, (f64, f64));
 
 pub struct StringSliceIterator<'a> {
     data: &'a [u8],
@@ -316,4 +340,180 @@ impl<'a> Iterator for LowCardinalitySliceIterator<'a> {
         let index = self.indices.next()?;
         self.additional_keys.get(index)
     }
+}
+
+pub struct ArraySliceIterator<'a> {
+    offsets: &'a Offsets<'a>,
+    data: &'a Mark<'a>,
+    slice_indices: Range<usize>,
+}
+
+impl<'a> TryFrom<Value<'a>> for ArraySliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::ArraySlice {
+                offsets,
+                data,
+                slice_indices,
+            } => Ok(Self {
+                offsets,
+                data,
+                slice_indices,
+            }),
+            other => Err(Error::MismatchedType(other.as_str(), "ArraySliceIterator")),
+        }
+    }
+}
+
+impl<'a> Iterator for ArraySliceIterator<'a> {
+    type Item = Value<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let slice_idx = self.slice_indices.next()?;
+
+        let (start, end) = self.offsets.offset_indices(slice_idx).unwrap()?;
+        Some(self.data.slice(start..end))
+    }
+}
+
+impl<'a, T> TryFrom<Value<'a>> for Option<T>
+where
+    T: TryFrom<Value<'a>, Error = Error>,
+{
+    type Error = Error;
+
+    #[inline]
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Empty => Ok(None),
+            other => T::try_from(other).map(Some),
+        }
+    }
+}
+
+macro_rules! impl_try_from_tuple {
+    ($len:literal, $( $idx:tt => $T:ident ),+ $(,)?) => {
+        impl<'a, $( $T , )+> core::convert::TryFrom<Value<'a>> for ( $( $T , )+ )
+        where
+            $( $T : core::convert::TryFrom<Value<'a>, Error = Error>, )+
+        {
+            type Error = Error;
+
+            #[inline]
+            fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+                match value {
+                    Value::Tuple(row, values) => {
+                        if values.len() != $len {
+                            return Err(Error::MismatchedType(
+                                concat!("Tuple with ", stringify!($len), " elements"),
+                                concat!("Tuple", stringify!($len)),
+                            ));
+                        }
+
+                        Ok((
+                            $(
+                                {
+                                    let field_val = values[$idx]
+                                        .get(row)
+                                        .ok_or(Error::IndexOutOfBounds(
+                                            row,
+                                            concat!("Tuple", stringify!($len)),
+                                        ))?;
+                                    <$T>::try_from(field_val)?
+                                },
+                            )+
+                        ))
+                    }
+                    other => Err(Error::MismatchedType(
+                        other.as_str(),
+                        concat!("Tuple", stringify!($len)),
+                    )),
+                }
+            }
+        }
+    };
+}
+
+impl_try_from_tuple!(1, 0 => A);
+impl_try_from_tuple!(2, 0 => A, 1 => B);
+impl_try_from_tuple!(3, 0 => A, 1 => B, 2 => C);
+impl_try_from_tuple!(4, 0 => A, 1 => B, 2 => C, 3 => D);
+impl_try_from_tuple!(5, 0 => A, 1 => B, 2 => C, 3 => D, 4 => E);
+impl_try_from_tuple!(6, 0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F);
+impl_try_from_tuple!(7, 0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G);
+impl_try_from_tuple!(8, 0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H);
+impl_try_from_tuple!(9, 0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I);
+impl_try_from_tuple!(10, 0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J);
+
+use core::convert::TryFrom;
+use core::marker::PhantomData;
+
+pub struct MapIterator<'a, K, V> {
+    keys: &'a Mark<'a>,
+    values: &'a Mark<'a>,
+    range: Range<usize>,
+    _marker: PhantomData<(K, V)>,
+}
+
+impl<'a, K, V> TryFrom<Value<'a>> for MapIterator<'a, K, V>
+where
+    K: TryFrom<Value<'a>, Error = Error>,
+    V: TryFrom<Value<'a>, Error = Error>,
+{
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Map {
+                offsets,
+                keys,
+                values,
+                index,
+            } => {
+                // Resolve (start, end) for the requested row in the Map column
+                let (start, end) = offsets
+                    .offset_indices(index)?
+                    .ok_or(Error::IndexOutOfBounds(index, "Map"))?;
+
+                Ok(Self {
+                    keys,
+                    values,
+                    range: start..end,
+                    _marker: PhantomData,
+                })
+            }
+            other => Err(Error::MismatchedType(other.as_str(), "MapIterator")),
+        }
+    }
+}
+
+impl<'a, K, V> Iterator for MapIterator<'a, K, V>
+where
+    K: TryFrom<Value<'a>, Error = Error>,
+    V: TryFrom<Value<'a>, Error = Error>,
+{
+    type Item = Result<(K, V), Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let idx = self.range.next()?;
+
+        let raw_key = self.keys.get(idx)?;
+        let raw_value = self.values.get(idx)?;
+
+        Some(K::try_from(raw_key).and_then(|k| V::try_from(raw_value).map(|v| (k, v))))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.range.end - self.range.start;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a, K, V> ExactSizeIterator for MapIterator<'a, K, V>
+where
+    K: TryFrom<Value<'a>, Error = Error>,
+    V: TryFrom<Value<'a>, Error = Error>,
+{
 }

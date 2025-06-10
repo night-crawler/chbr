@@ -23,7 +23,7 @@ impl<'a> Mark<'a> {
     pub fn get(&'a self, index: usize) -> Option<Value<'a>> {
         match self {
             Mark::Empty => None,
-            Mark::Bool(bytes) => bytes.get(index).map(|&v| Value::Bool(v != 0)),
+            Mark::Bool(is_null) => is_null.get(index).map(|&null| Value::Bool(null == 0)),
             Mark::Int8(bc) => bc.get(index).copied().map(Value::Int8),
             Mark::Int16(bv) => bv.get(index).map(|v| v.get()).map(Value::Int16),
             Mark::Int32(bv) => bv.get(index).map(|v| v.get()).map(Value::Int32),
@@ -93,9 +93,24 @@ impl<'a> Mark<'a> {
                 Some(marker.slice(start..end))
             }
 
-            Mark::Tuple(_) => todo!(),
-            Mark::Nullable(_, _) => todo!(),
-            Mark::Map { .. } => todo!(),
+            Mark::Tuple(inner) => Some(Value::Tuple(index, inner)),
+            Mark::Nullable(is_null, data) => {
+                if is_null.get(index) == Some(&1) {
+                    return Some(Value::Empty);
+                }
+
+                data.get(index)
+            }
+            Mark::Map {
+                offsets,
+                keys,
+                values,
+            } => Some(Value::Map {
+                offsets,
+                keys,
+                values,
+                index,
+            }),
             Mark::Variant { .. } => todo!(),
             Mark::Nested(_, _) => todo!(),
             Mark::Dynamic(_, _) => todo!(),
@@ -103,7 +118,7 @@ impl<'a> Mark<'a> {
         }
     }
 
-    fn slice(&'a self, idx: Range<usize>) -> Value<'a> {
+    pub fn slice(&'a self, idx: Range<usize>) -> Value<'a> {
         match self {
             Mark::Empty => {
                 if !idx.is_empty() {
@@ -134,12 +149,11 @@ impl<'a> Mark<'a> {
             Mark::String(offsets, data) => {
                 let count = idx.len();
                 let Range { start, .. } = idx;
-                let start = start.saturating_sub(1);
 
                 let data_start = if start == 0 {
                     data
                 } else {
-                    &data[offsets[start]..]
+                    &data[offsets[start - 1]..]
                 };
 
                 Value::StringSlice(count, data_start)
@@ -174,7 +188,11 @@ impl<'a> Mark<'a> {
                     additional_keys,
                 }
             }
-            Mark::Array(_, _) => todo!(),
+            Mark::Array(offsets, data) => Value::ArraySlice {
+                offsets,
+                data,
+                slice_indices: idx,
+            },
             Mark::Tuple(_) => todo!(),
             Mark::Nullable(_, _) => todo!(),
             Mark::Map { .. } => todo!(),
@@ -192,9 +210,12 @@ impl<'a> IndexableColumn<'a> {
         match self {
             IndexableColumn::Stateless(m) => m.get(index),
             IndexableColumn::Stateful { marker } => match marker {
-                Mark::Array(_, _) | Mark::String(_, _) | Mark::LowCardinality { .. } => {
-                    marker.get(index)
-                }
+                Mark::Array(_, _)
+                | Mark::String(_, _)
+                | Mark::LowCardinality { .. }
+                | Mark::Tuple(_)
+                | Mark::Map { .. }
+                | Mark::Nullable(_, _) => marker.get(index),
                 _ => todo!(),
             },
         }
@@ -205,8 +226,11 @@ impl<'a> IndexableColumn<'a> {
 mod tests {
     use crate::common::load;
     use crate::parse::block::parse_block;
-    use crate::value::{LowCardinalitySliceIterator, StringSliceIterator};
+    use crate::value::{
+        ArraySliceIterator, LowCardinalitySliceIterator, MapIterator, StringSliceIterator,
+    };
     use pretty_assertions::assert_eq;
+    use std::collections::HashMap;
     use testresult::TestResult;
     use zerocopy::little_endian::I64;
 
@@ -391,6 +415,139 @@ mod tests {
                 actual.push(value);
             }
             assert_eq!(actual, *expected, "Mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn array_in_array_in64() -> TestResult {
+        let buf = load("./test_data/array_in_array_in64.native")?;
+        let (_, block) = parse_block(&buf)?;
+
+        // 0,"[[11, 22, 22, 77, 123], [333, 41]]"
+        // 1,"[[11, 22], [7, 844, 12, 12, 0], [5, 5, 5]]"
+        // 2,"[[9], [10, 11]]"
+        // 3,"[[123, 134], [145]]"
+        // 4,[[156]]
+        // 5,[[]]
+
+        let expected_arrays = [
+            vec![vec![11, 22, 22, 77, 123], vec![333, 41]],
+            vec![vec![11, 22], vec![7, 844, 12, 12, 0], vec![5, 5, 5]],
+            vec![vec![9], vec![10, 11]],
+            vec![vec![123, 134], vec![145]],
+            vec![vec![156]],
+            vec![vec![]],
+        ];
+
+        let arrs_marker = &block.cols[1];
+
+        for (i, expected) in expected_arrays.iter().enumerate() {
+            let v = arrs_marker.get(i).unwrap();
+            let outer: ArraySliceIterator = v.try_into()?;
+            let mut actual_outer = vec![];
+            for slice in outer {
+                let slice: &[I64] = slice.try_into()?;
+                let inner = slice.iter().map(|&v| v.get()).collect::<Vec<_>>();
+                actual_outer.push(inner);
+            }
+
+            assert_eq!(actual_outer, *expected, "Mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn nullable_string() -> TestResult {
+        let buf = load("./test_data/nullable_string.native")?;
+        let (_, block) = parse_block(&buf)?;
+
+        // 0,hello
+        // 1,
+        // 2,world
+        // 3,clickhouse
+        // 4,
+        // 5,test
+        let expected_col = [
+            Some("hello"),
+            None,
+            Some("world"),
+            Some("clickhouse"),
+            None,
+            Some("test"),
+        ];
+
+        let strings_marker = &block.cols[1];
+        for (i, expected) in expected_col.iter().enumerate() {
+            let value: Option<&str> = strings_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn tuple_sample() -> TestResult {
+        let buf = load("./test_data/tuple.native")?;
+        let (_, block) = parse_block(&buf)?;
+
+        // 0,"(1, 'a')"
+        // 1,"(3, 'ab')"
+        // 2,"(7, 'ac')"
+        // 3,"(9, 'ad')"
+        // 4,"(11, 'ae')"
+        // 5,"(2, 'af')"
+        // 6,"(3, 'ag')"
+
+        let expected_tuples = [
+            (1, "a"),
+            (3, "ab"),
+            (7, "ac"),
+            (9, "ad"),
+            (11, "ae"),
+            (2, "af"),
+            (3, "ag"),
+        ];
+
+        let tuples_marker = &block.cols[1];
+
+        for (i, expected) in expected_tuples.iter().enumerate() {
+            let value: (i64, &str) = tuples_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn map_sample() -> TestResult {
+        let buf = load("./test_data/map_sample.native")?;
+        let (_, block) = parse_block(&buf)?;
+
+        // 0,"{'a': 'apple', 'b': 'banana', 'c': 'cherry'}"
+        // 1,"{'d': 'date', 'e': 'elderberry'}"
+        // 2,"{'f': 'fig', 'g': 'grape', 'h': 'honeydew'}"
+        // 3,{'i': 'kiwi'}
+        // 4,{}
+        // 5,"{'j': 'lemon', 'k': 'mango'}"
+
+        let expected = [
+            HashMap::from([("a", "apple"), ("b", "banana"), ("c", "cherry")]),
+            HashMap::from([("d", "date"), ("e", "elderberry")]),
+            HashMap::from([("f", "fig"), ("g", "grape"), ("h", "honeydew")]),
+            HashMap::from([("i", "kiwi")]),
+            HashMap::new(),
+            HashMap::from([("j", "lemon"), ("k", "mango")]),
+        ];
+
+        let map_marker = &block.cols[1];
+        for (i, expected) in expected.iter().enumerate() {
+            let map_value = map_marker.get(i).unwrap();
+            let map_iter: MapIterator<&str, &str> = map_value.try_into()?;
+            let map = map_iter.flatten().collect::<HashMap<&str, &str>>();
+            assert_eq!(map, *expected, "Mismatch at index {i}");
         }
 
         Ok(())
