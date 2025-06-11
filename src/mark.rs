@@ -1,6 +1,6 @@
 use crate::slice::ByteView;
 use crate::types::{Field, JsonColumnHeader, Offsets};
-use crate::{Ipv6Data, UuidData, i256, u256, Date16, DateTime32, DateTime64, Date32, Ipv4Data};
+use crate::{Date16, Date32, DateTime32, DateTime64, Ipv4Data, Ipv6Data, UuidData, i256, u256};
 use chrono_tz::Tz;
 use core::fmt;
 use std::fmt::Debug;

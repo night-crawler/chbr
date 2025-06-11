@@ -2,7 +2,7 @@ use crate::error::Error;
 use crate::mark::Mark;
 use crate::parse::parse_var_str;
 use crate::types::{OffsetIndexPair as _, Offsets};
-use crate::{i256, u256, Date16, Date32, DateTime32, DateTime64, Ipv4Data, Ipv6Data, UuidData};
+use crate::{Date16, Date32, DateTime32, DateTime64, Ipv4Data, Ipv6Data, UuidData, i256, u256};
 use chrono_tz::Tz;
 use core::convert::TryFrom;
 use core::marker::PhantomData;
@@ -12,7 +12,7 @@ use std::hint::unreachable_unchecked;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::ops::Range;
 use uuid::Uuid;
-use zerocopy::little_endian::{F32, F64, I128, I16, I32, I64, U128, U16, U32, U64};
+use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
 
 #[derive(Debug, Clone)]
 pub enum Value<'a> {
@@ -110,6 +110,12 @@ pub enum Value<'a> {
         inner: &'a [Mark<'a>],
         slice_indices: Range<usize>,
     },
+
+    NullableSlice {
+        is_null: &'a [u8],
+        slice_indices: Range<usize>,
+        inner: &'a Mark<'a>,
+    },
 }
 
 impl Value<'_> {
@@ -166,12 +172,13 @@ impl Value<'_> {
             Value::TupleSlice { .. } => "TupleSlice",
             Value::BoolSlice(_) => "BoolSlice",
             Value::UuidSlice(_) => "UuidSlice",
-            Value::Date16Slice(_) => "DateSlice",
+            Value::Date16Slice(_) => "Date16Slice",
             Value::Date32Slice(_) => "Date32Slice",
             Value::DateTime32Slice { .. } => "DateTime32Slice",
             Value::DateTime64Slice { .. } => "DateTime64Slice",
             Value::Ipv4Slice(_) => "Ipv4Slice",
             Value::Ipv6Slice(_) => "Ipv6Slice",
+            Value::NullableSlice { .. } => "NullableSlice",
         }
     }
 }
@@ -816,5 +823,45 @@ impl Iterator for DateTime64SliceIterator<'_> {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.slice.size_hint()
+    }
+}
+
+pub struct NullableSliceIterator<'a> {
+    is_null: &'a [u8],
+    slice_indices: Range<usize>,
+    inner: &'a Mark<'a>,
+}
+
+impl<'a> TryFrom<Value<'a>> for NullableSliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::NullableSlice {
+                is_null,
+                slice_indices,
+                inner,
+            } => Ok(Self {
+                is_null,
+                slice_indices,
+                inner,
+            }),
+            other => Err(Error::MismatchedType(
+                other.as_str(),
+                "NullableSliceIterator",
+            )),
+        }
+    }
+}
+
+impl<'a> Iterator for NullableSliceIterator<'a> {
+    type Item = Value<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let index = self.slice_indices.next()?;
+        if self.is_null.get(index).copied()? == 1 {
+            return Some(Value::Empty);
+        }
+        self.inner.get(index)
     }
 }

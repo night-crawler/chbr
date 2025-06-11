@@ -1,8 +1,8 @@
 use crate::conv::{date16, date32, datetime32, datetime32_tz, datetime64_tz};
 use crate::index::IndexableColumn;
 use chrono::NaiveDate;
-use std::net::{Ipv4Addr, Ipv6Addr};
 use chrono_tz::Tz;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use uuid::Uuid;
 use zerocopy::little_endian::{I32, I64, U16, U32, U64};
 
@@ -84,8 +84,6 @@ impl DateTime32 {
         datetime32_tz(self.0.get(), tz)
     }
 }
-
-
 
 pub type Result<T> = std::result::Result<T, error::Error>;
 

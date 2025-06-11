@@ -217,7 +217,11 @@ impl<'a> Mark<'a> {
                 tz: *tz,
                 slice: &data[idx],
             },
-            Mark::DateTime64 { precision, tz, data } => Value::DateTime64Slice {
+            Mark::DateTime64 {
+                precision,
+                tz,
+                data,
+            } => Value::DateTime64Slice {
                 precision: *precision,
                 tz: *tz,
                 slice: &data[idx],
@@ -255,7 +259,11 @@ impl<'a> Mark<'a> {
                 inner,
                 slice_indices: idx,
             },
-            Mark::Nullable(_, _) => todo!(),
+            Mark::Nullable(is_null, data) => Value::NullableSlice {
+                is_null,
+                inner: data,
+                slice_indices: idx,
+            },
             Mark::Map {
                 offsets,
                 keys,
@@ -299,7 +307,7 @@ mod tests {
     use crate::parse::block::parse_block;
     use crate::value::{
         ArraySliceIterator, BoolSliceIterator, LowCardinalitySliceIterator, MapIterator,
-        MapSliceIterator, StringSliceIterator, TupleSliceIterator, Value,
+        MapSliceIterator, NullableSliceIterator, StringSliceIterator, TupleSliceIterator, Value,
     };
     use half::bf16;
     use pretty_assertions::assert_eq;
@@ -1210,6 +1218,42 @@ mod tests {
             let mut actual = vec![];
             for b in value {
                 actual.push(b);
+            }
+            assert_eq!(actual, *expected, "Mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn nullable_string_array() -> TestResult {
+        let buf = load("./test_data/nullable_string_array.native")?;
+        let (_, block) = parse_block(&buf)?;
+
+        // 0,"['apple', 'banana', null]"
+        // 1,"[null, 'date', 'elderberry']"
+        // 2,"['fig', null, 'honeydew']"
+        // 3,[null]
+        // 4,[]
+        // 5,"['lemon', null, 'mango']"
+
+        let expected = [
+            vec![Some("apple"), Some("banana"), None],
+            vec![None, Some("date"), Some("elderberry")],
+            vec![Some("fig"), None, Some("honeydew")],
+            vec![None],
+            vec![],
+            vec![Some("lemon"), None, Some("mango")],
+        ];
+
+        let nullable_string_array_marker = &block.cols[1];
+        for (i, expected) in expected.iter().enumerate() {
+            let value: NullableSliceIterator =
+                nullable_string_array_marker.get(i).unwrap().try_into()?;
+            let mut actual = vec![];
+            for item in value {
+                let item: Option<&str> = item.try_into()?;
+                actual.push(item);
             }
             assert_eq!(actual, *expected, "Mismatch at index {i}");
         }
