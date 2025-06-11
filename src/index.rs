@@ -44,23 +44,18 @@ impl<'a> Mark<'a> {
                 Some(Value::BFloat16(value))
             }
             Mark::Decimal32(precision, data) => {
-                let value = data.get(index)?.get();
-                let value = rust_decimal::Decimal::new(i64::from(value), u32::from(*precision));
+                let value = data.get(index)?.with_precision(*precision);
                 Some(Value::Decimal32(value))
             }
             Mark::Decimal64(precision, data) => {
-                let value = data.get(index)?.get();
-                let value = rust_decimal::Decimal::new(value, u32::from(*precision));
+                let value = data.get(index)?.with_precision(*precision);
                 Some(Value::Decimal32(value))
             }
             Mark::Decimal128(precision, data) => {
-                let value = data.get(index)?.get();
-                let value =
-                    rust_decimal::Decimal::try_from_i128_with_scale(value, u32::from(*precision))
-                        .unwrap();
+                let value = data.get(index)?.with_precision(*precision).unwrap();
                 Some(Value::Decimal128(value))
             }
-            Mark::Decimal256(_, _) => todo!(),
+            Mark::Decimal256(_, _) => unimplemented!("Decimal256 is not yet supported"),
             Mark::String(offsets, buf) => {
                 let start = if index == 0 {
                     0
@@ -193,10 +188,22 @@ impl<'a> Mark<'a> {
             Mark::Float32(bv) => Value::Float32Slice(&bv[idx]),
             Mark::Float64(bv) => Value::Float64Slice(&bv[idx]),
             Mark::BFloat16(_) => todo!(),
-            Mark::Decimal32(_, _) => todo!(),
-            Mark::Decimal64(_, _) => todo!(),
-            Mark::Decimal128(_, _) => todo!(),
-            Mark::Decimal256(_, _) => todo!(),
+            Mark::Decimal32(precision, bv) => Value::Decimal32Slice {
+                precision: *precision,
+                slice: &bv[idx],
+            },
+            Mark::Decimal64(precision, bv) => Value::Decimal64Slice {
+                precision: *precision,
+                slice: &bv[idx],
+            },
+            Mark::Decimal128(precision, bv) => Value::Decimal128Slice {
+                precision: *precision,
+                slice: &bv[idx],
+            },
+            Mark::Decimal256(prevision, bv) => Value::Decimal256Slice {
+                precision: *prevision,
+                slice: &bv[idx],
+            },
             Mark::String(offsets, data) => {
                 let count = idx.len();
                 let Range { start, .. } = idx;

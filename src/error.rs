@@ -12,7 +12,7 @@ pub enum Error {
     Parse(String),
 
     #[error("Overflow: {0}")]
-    Overflow(u64),
+    Overflow(String),
 
     #[error("Unexpected end of input")]
     UnexpectedEndOfInput,

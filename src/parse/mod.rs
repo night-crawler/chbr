@@ -21,7 +21,7 @@ where
         decode::u64(input).map_err(|e| Error::Parse(format!("failed to decode u64: {e:?}")))?;
 
     let Ok(value) = T::try_from(value) else {
-        return Err(Error::Overflow(value));
+        return Err(Error::Overflow(value.to_string()));
     };
 
     Ok((rest, value))
@@ -38,7 +38,7 @@ where
     let value = u64::from_le_bytes(bytes.try_into().unwrap());
 
     let Ok(value) = T::try_from(value) else {
-        return Err(Error::Overflow(value));
+        return Err(Error::Overflow(value.to_string()));
     };
 
     Ok((rest, value))

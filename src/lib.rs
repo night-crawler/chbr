@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use chrono_tz::Tz;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use uuid::Uuid;
-use zerocopy::little_endian::{I32, I64, U16, U32, U64};
+use zerocopy::little_endian::{I32, I64, I128, U16, U32, U64};
 
 mod conv;
 pub mod error;
@@ -57,10 +57,14 @@ transparent_newtype! {
     pub UuidData([U64; 2]);
     pub Ipv4Data (U32);
     pub Ipv6Data ([u8; 16]);
-    pub Date16 (U16);
-    pub Date32 (I32);
-    pub DateTime32 (U32);
-    pub DateTime64 (I64);
+    pub Date16Data (U16);
+    pub Date32Data (I32);
+    pub DateTime32Data (U32);
+    pub DateTime64Data (I64);
+    pub Decimal32Data (I32);
+    pub Decimal64Data (I64);
+    pub Decimal128Data (I128);
+    pub Decimal256Data (i256);
 }
 
 impl_from!(Ipv6Data => Ipv6Addr, |d| Ipv6Addr::from(d.0));
@@ -69,19 +73,42 @@ impl_from!(UuidData => Uuid, |d| {
     let [hi, lo] = d.0;
     Uuid::from_u64_pair(hi.get(), lo.get())
 });
-impl_from!(Date16 => NaiveDate, |d| date16(d.0.get()));
-impl_from!(Date32 => NaiveDate, |d| date32(d.0.get()));
-impl_from!(DateTime32 => chrono::DateTime<chrono::Utc>, |d| datetime32(d.0.get()));
+impl_from!(Date16Data => NaiveDate, |d| date16(d.0.get()));
+impl_from!(Date32Data => NaiveDate, |d| date32(d.0.get()));
+impl_from!(DateTime32Data => chrono::DateTime<chrono::Utc>, |d| datetime32(d.0.get()));
 
-impl DateTime64 {
+impl DateTime64Data {
     pub fn with_tz_and_precision(&self, tz: Tz, precision: u8) -> Option<chrono::DateTime<Tz>> {
         datetime64_tz(self.0.get(), precision, tz)
     }
 }
 
-impl DateTime32 {
+impl DateTime32Data {
     pub fn with_tz(&self, tz: Tz) -> chrono::DateTime<Tz> {
         datetime32_tz(self.0.get(), tz)
+    }
+}
+
+impl Decimal32Data {
+    pub fn with_precision(&self, precision: u8) -> rust_decimal::Decimal {
+        let value = self.0.get();
+        rust_decimal::Decimal::new(i64::from(value), u32::from(precision))
+    }
+}
+
+impl Decimal64Data {
+    pub fn with_precision(&self, precision: u8) -> rust_decimal::Decimal {
+        let value = self.0.get();
+        rust_decimal::Decimal::new(value, u32::from(precision))
+    }
+}
+
+impl Decimal128Data {
+    pub fn with_precision(&self, precision: u8) -> Result<rust_decimal::Decimal> {
+        let value = self.0.get();
+        let value = rust_decimal::Decimal::try_from_i128_with_scale(value, u32::from(precision))
+            .map_err(|_| error::Error::Overflow(value.to_string()))?;
+        Ok(value)
     }
 }
 

@@ -1,6 +1,9 @@
 use crate::slice::ByteView;
 use crate::types::{Field, JsonColumnHeader, Offsets};
-use crate::{Date16, Date32, DateTime32, DateTime64, Ipv4Data, Ipv6Data, UuidData, i256, u256};
+use crate::{
+    Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
+    Decimal128Data, Decimal256Data, Ipv4Data, Ipv6Data, UuidData, i256, u256,
+};
 use chrono_tz::Tz;
 use core::fmt;
 use std::fmt::Debug;
@@ -25,23 +28,23 @@ pub enum Mark<'a> {
     Float32(ByteView<'a, F32>),
     Float64(ByteView<'a, F64>),
     BFloat16(ByteView<'a, [u8; 2]>),
-    Decimal32(u8, ByteView<'a, I32>),
-    Decimal64(u8, ByteView<'a, I64>),
-    Decimal128(u8, ByteView<'a, I128>),
-    Decimal256(u8, ByteView<'a, i256>),
+    Decimal32(u8, ByteView<'a, Decimal32Data>),
+    Decimal64(u8, ByteView<'a, Decimal64Data>),
+    Decimal128(u8, ByteView<'a, Decimal128Data>),
+    Decimal256(u8, ByteView<'a, Decimal256Data>),
     String(Vec<usize>, &'a [u8]),
     FixedString(usize, &'a [u8]),
     Uuid(ByteView<'a, UuidData>),
-    Date(ByteView<'a, Date16>),
-    Date32(ByteView<'a, Date32>),
+    Date(ByteView<'a, Date16Data>),
+    Date32(ByteView<'a, Date32Data>),
     DateTime {
         tz: Tz,
-        data: ByteView<'a, DateTime32>,
+        data: ByteView<'a, DateTime32Data>,
     },
     DateTime64 {
         precision: u8,
         tz: Tz,
-        data: ByteView<'a, DateTime64>,
+        data: ByteView<'a, DateTime64Data>,
     },
     Ipv4(ByteView<'a, Ipv4Data>),
     Ipv6(ByteView<'a, Ipv6Data>),

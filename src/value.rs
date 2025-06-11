@@ -2,7 +2,10 @@ use crate::error::Error;
 use crate::mark::Mark;
 use crate::parse::parse_var_str;
 use crate::types::{OffsetIndexPair as _, Offsets};
-use crate::{Date16, Date32, DateTime32, DateTime64, Ipv4Data, Ipv6Data, UuidData, i256, u256};
+use crate::{
+    Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
+    Decimal128Data, Decimal256Data, Ipv4Data, Ipv6Data, UuidData, i256, u256,
+};
 use chrono_tz::Tz;
 use core::convert::TryFrom;
 use core::marker::PhantomData;
@@ -64,17 +67,34 @@ pub enum Value<'a> {
     Float32Slice(&'a [F32]),
     Float64Slice(&'a [F64]),
 
+    Decimal32Slice {
+        precision: u8,
+        slice: &'a [Decimal32Data],
+    },
+    Decimal64Slice {
+        precision: u8,
+        slice: &'a [Decimal64Data],
+    },
+    Decimal128Slice {
+        precision: u8,
+        slice: &'a [Decimal128Data],
+    },
+    Decimal256Slice {
+        precision: u8,
+        slice: &'a [Decimal256Data],
+    },
+
     UuidSlice(&'a [UuidData]),
-    Date16Slice(&'a [Date16]),
-    Date32Slice(&'a [Date32]),
+    Date16Slice(&'a [Date16Data]),
+    Date32Slice(&'a [Date32Data]),
     DateTime32Slice {
         tz: Tz,
-        slice: &'a [DateTime32],
+        slice: &'a [DateTime32Data],
     },
     DateTime64Slice {
         tz: Tz,
         precision: u8,
-        slice: &'a [DateTime64],
+        slice: &'a [DateTime64Data],
     },
 
     Ipv4Slice(&'a [Ipv4Data]),
@@ -179,6 +199,10 @@ impl Value<'_> {
             Value::Ipv4Slice(_) => "Ipv4Slice",
             Value::Ipv6Slice(_) => "Ipv6Slice",
             Value::NullableSlice { .. } => "NullableSlice",
+            Value::Decimal32Slice { .. } => "Decimal32Slice",
+            Value::Decimal64Slice { .. } => "Decimal64Slice",
+            Value::Decimal128Slice { .. } => "Decimal128Slice",
+            Value::Decimal256Slice { .. } => "Decimal256Slice",
         }
     }
 }
@@ -213,8 +237,8 @@ impl_try_from_value!(UInt64Slice, &'a [U64]);
 impl_try_from_value!(UInt128Slice, &'a [U128]);
 
 impl_try_from_value!(UuidSlice, &'a [UuidData]);
-impl_try_from_value!(Date16Slice, &'a [Date16]);
-impl_try_from_value!(Date32Slice, &'a [Date32]);
+impl_try_from_value!(Date16Slice, &'a [Date16Data]);
+impl_try_from_value!(Date32Slice, &'a [Date32Data]);
 impl_try_from_value!(Ipv4Slice, &'a [Ipv4Data]);
 impl_try_from_value!(Ipv6Slice, &'a [Ipv6Data]);
 
@@ -752,7 +776,7 @@ impl ExactSizeIterator for BoolSliceIterator<'_> {}
 
 pub struct DateTime32SliceIterator<'a> {
     tz: Tz,
-    slice: std::slice::Iter<'a, DateTime32>,
+    slice: std::slice::Iter<'a, DateTime32Data>,
 }
 
 impl<'a> TryFrom<Value<'a>> for DateTime32SliceIterator<'a> {
@@ -787,7 +811,7 @@ impl Iterator for DateTime32SliceIterator<'_> {
 pub struct DateTime64SliceIterator<'a> {
     tz: Tz,
     precision: u8,
-    slice: std::slice::Iter<'a, DateTime64>,
+    slice: std::slice::Iter<'a, DateTime64Data>,
 }
 
 impl<'a> TryFrom<Value<'a>> for DateTime64SliceIterator<'a> {
@@ -863,5 +887,114 @@ impl<'a> Iterator for NullableSliceIterator<'a> {
             return Some(Value::Empty);
         }
         self.inner.get(index)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.slice_indices.end - self.slice_indices.start;
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for NullableSliceIterator<'_> {}
+
+pub struct Decimal32SliceIterator<'a> {
+    precision: u8,
+    slice: std::slice::Iter<'a, Decimal32Data>,
+}
+
+impl<'a> TryFrom<Value<'a>> for Decimal32SliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Decimal32Slice { precision, slice } => Ok(Self {
+                precision,
+                slice: slice.iter(),
+            }),
+            other => Err(Error::MismatchedType(
+                other.as_str(),
+                "Decimal32SliceIterator",
+            )),
+        }
+    }
+}
+
+impl Iterator for Decimal32SliceIterator<'_> {
+    type Item = Decimal;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.slice.next().map(|v| v.with_precision(self.precision))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.slice.size_hint()
+    }
+}
+
+pub struct Decimal64SliceIterator<'a> {
+    precision: u8,
+    slice: std::slice::Iter<'a, Decimal64Data>,
+}
+
+impl<'a> TryFrom<Value<'a>> for Decimal64SliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Decimal64Slice { precision, slice } => Ok(Self {
+                precision,
+                slice: slice.iter(),
+            }),
+            other => Err(Error::MismatchedType(
+                other.as_str(),
+                "Decimal64SliceIterator",
+            )),
+        }
+    }
+}
+
+impl Iterator for Decimal64SliceIterator<'_> {
+    type Item = Decimal;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.slice.next().map(|v| v.with_precision(self.precision))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.slice.size_hint()
+    }
+}
+
+pub struct Decimal128SliceIterator<'a> {
+    precision: u8,
+    slice: std::slice::Iter<'a, Decimal128Data>,
+}
+
+impl<'a> TryFrom<Value<'a>> for Decimal128SliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Decimal128Slice { precision, slice } => Ok(Self {
+                precision,
+                slice: slice.iter(),
+            }),
+            other => Err(Error::MismatchedType(
+                other.as_str(),
+                "Decimal128SliceIterator",
+            )),
+        }
+    }
+}
+
+impl Iterator for Decimal128SliceIterator<'_> {
+    type Item = crate::Result<Decimal>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.slice.next().map(|v| v.with_precision(self.precision))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.slice.size_hint()
     }
 }
