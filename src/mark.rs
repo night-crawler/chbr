@@ -25,10 +25,10 @@ pub enum Mark<'a> {
     Float32(ByteView<'a, F32>),
     Float64(ByteView<'a, F64>),
     BFloat16(ByteView<'a, U16>),
-    Decimal32(u8, &'a [u8]),
-    Decimal64(u8, &'a [u8]),
-    Decimal128(u8, &'a [u8]),
-    Decimal256(u8, &'a [u8]),
+    Decimal32(u8, ByteView<'a, I32>),
+    Decimal64(u8, ByteView<'a, I64>),
+    Decimal128(u8, ByteView<'a, I128>),
+    Decimal256(u8, ByteView<'a, i256>),
     String(Vec<usize>, &'a [u8]),
     FixedString(usize, &'a [u8]),
     Uuid(ByteView<'a, UuidData>),
@@ -210,26 +210,22 @@ impl Debug for Mark<'_> {
             Decimal32(scale, b) => f
                 .debug_struct("Decimal32")
                 .field("scale", scale)
-                .field("len_bytes", &b.len())
-                .field("ptr", &b.as_ptr())
+                .field("data", &b.as_slice())
                 .finish(),
             Decimal64(scale, b) => f
                 .debug_struct("Decimal64")
                 .field("scale", scale)
-                .field("len_bytes", &b.len())
-                .field("ptr", &b.as_ptr())
+                .field("data", &b.as_slice())
                 .finish(),
             Decimal128(scale, b) => f
                 .debug_struct("Decimal128")
                 .field("scale", scale)
-                .field("len_bytes", &b.len())
-                .field("ptr", &b.as_ptr())
+                .field("data", &b.as_slice())
                 .finish(),
             Decimal256(scale, b) => f
                 .debug_struct("Decimal256")
                 .field("scale", scale)
-                .field("len_bytes", &b.len())
-                .field("ptr", &b.as_ptr())
+                .field("data", &b.as_slice())
                 .finish(),
 
             String(offsets, data) => f

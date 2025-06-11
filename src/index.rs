@@ -42,9 +42,23 @@ impl<'a> Mark<'a> {
             Mark::BFloat16(_) => {
                 todo!()
             }
-            Mark::Decimal32(_, _) => todo!(),
-            Mark::Decimal64(_, _) => todo!(),
-            Mark::Decimal128(_, _) => todo!(),
+            Mark::Decimal32(precision, data) => {
+                let value = data.get(index)?.get();
+                let value = rust_decimal::Decimal::new(i64::from(value), u32::from(*precision));
+                Some(Value::Decimal32(value))
+            }
+            Mark::Decimal64(precision, data) => {
+                let value = data.get(index)?.get();
+                let value = rust_decimal::Decimal::new(value, u32::from(*precision));
+                Some(Value::Decimal32(value))
+            }
+            Mark::Decimal128(precision, data) => {
+                let value = data.get(index)?.get();
+                let value =
+                    rust_decimal::Decimal::try_from_i128_with_scale(value, u32::from(*precision))
+                        .unwrap();
+                Some(Value::Decimal128(value))
+            }
             Mark::Decimal256(_, _) => todo!(),
             Mark::String(offsets, buf) => {
                 let start = if index == 0 {
@@ -853,6 +867,54 @@ mod tests {
                 datetime64_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Mismatch at index {i}");
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn decimal_sample() -> TestResult {
+        let buf = load("./test_data/decimal_sample.native")?;
+        let (_, block) = parse_block(&buf)?;
+
+        // 0,1.234,1.234567,1.234567890123,1.234567890123456556104338
+        // 1,2.345,2.345678,2.345678901234,2.345678901234567875661641
+        // 2,3.456,3.456789,3.456789012345,3.456789012345678555325440
+
+        let expected_d32 = [
+            rust_decimal::Decimal::new(1234, 3),
+            rust_decimal::Decimal::new(2345, 3),
+            rust_decimal::Decimal::new(3456, 3),
+        ];
+        let decimal32_marker = &block.cols[1];
+        for (i, expected) in expected_d32.iter().enumerate() {
+            let value: rust_decimal::Decimal = decimal32_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        let expected_d64 = [
+            rust_decimal::Decimal::new(1234567, 6),
+            rust_decimal::Decimal::new(2345678, 6),
+            rust_decimal::Decimal::new(3456789, 6),
+        ];
+
+        let decimal64_marker = &block.cols[2];
+        for (i, expected) in expected_d64.iter().enumerate() {
+            let value: rust_decimal::Decimal = decimal64_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        let expected_d128 = [
+            rust_decimal::Decimal::new(1234567890123, 12),
+            rust_decimal::Decimal::new(2345678901234, 12),
+            rust_decimal::Decimal::new(3456789012345, 12),
+        ];
+        let decimal128_marker = &block.cols[3];
+        for (i, expected) in expected_d128.iter().enumerate() {
+            let value: rust_decimal::Decimal = decimal128_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        // expect panic for decimal256, it's not implemented
 
         Ok(())
     }

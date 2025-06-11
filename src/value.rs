@@ -667,3 +667,17 @@ impl<'a> Iterator for TupleSliceIterator<'a> {
 }
 
 impl ExactSizeIterator for TupleSliceIterator<'_> {}
+
+impl<'a> TryFrom<Value<'a>> for Decimal {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Decimal32(v)
+            | Value::Decimal64(v)
+            | Value::Decimal128(v)
+            | Value::Decimal256(v) => Ok(v),
+            other => Err(Error::MismatchedType(other.as_str(), "Decimal")),
+        }
+    }
+}
