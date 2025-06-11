@@ -45,6 +45,7 @@ pub enum Value<'a> {
     Point((f64, f64)),
 
     StringSlice(usize, &'a [u8]),
+    BoolSlice(&'a [u8]),
     Int8Slice(&'a [i8]),
     Int16Slice(&'a [I16]),
     Int32Slice(&'a [I32]),
@@ -144,6 +145,7 @@ impl Value<'_> {
             Value::Map { .. } => "Map",
             Value::MapSlice { .. } => "MapSlice",
             Value::TupleSlice { .. } => "TupleSlice",
+            Value::BoolSlice(_) => "BoolSlice",
         }
     }
 }
@@ -683,3 +685,32 @@ impl<'a> TryFrom<Value<'a>> for Decimal {
         }
     }
 }
+
+pub struct BoolSliceIterator<'a> {
+    data: std::slice::Iter<'a, u8>,
+}
+
+impl<'a> TryFrom<Value<'a>> for BoolSliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::BoolSlice(data) => Ok(BoolSliceIterator { data: data.iter() }),
+            other => Err(Error::MismatchedType(other.as_str(), "BoolSliceIterator")),
+        }
+    }
+}
+
+impl Iterator for BoolSliceIterator<'_> {
+    type Item = bool;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.data.next().map(|&byte| byte != 0)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.data.size_hint()
+    }
+}
+
+impl ExactSizeIterator for BoolSliceIterator<'_> {}

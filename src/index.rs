@@ -182,7 +182,7 @@ impl<'a> Mark<'a> {
                 }
                 Value::Empty
             }
-            Mark::Bool(_) => todo!(),
+            Mark::Bool(bv) => Value::BoolSlice(&bv[idx]),
             Mark::Int8(bv) => Value::Int8Slice(&bv[idx]),
             Mark::Int16(bv) => Value::Int16Slice(&bv[idx]),
             Mark::Int32(bv) => Value::Int32Slice(&bv[idx]),
@@ -296,8 +296,8 @@ mod tests {
     use crate::common::load;
     use crate::parse::block::parse_block;
     use crate::value::{
-        ArraySliceIterator, LowCardinalitySliceIterator, MapIterator, MapSliceIterator,
-        StringSliceIterator, TupleSliceIterator, Value,
+        ArraySliceIterator, BoolSliceIterator, LowCardinalitySliceIterator, MapIterator,
+        MapSliceIterator, StringSliceIterator, TupleSliceIterator, Value,
     };
     use half::bf16;
     use pretty_assertions::assert_eq;
@@ -1177,6 +1177,39 @@ mod tests {
         for (i, expected) in expected_bf16.iter().enumerate() {
             let value: bf16 = bf16_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn bool_array_sample() -> TestResult {
+        let buf = load("./test_data/bool_array_sample.native")?;
+        let (_, block) = parse_block(&buf)?;
+
+        // 0,"[true, false, true]"
+        // 1,"[false, false, true]"
+        // 2,"[true, true, false]"
+        // 3,"[false, true, false]"
+        // 4,[]
+        // 5,[true]
+
+        let expected = [
+            vec![true, false, true],
+            vec![false, false, true],
+            vec![true, true, false],
+            vec![false, true, false],
+            vec![],
+            vec![true],
+        ];
+        let bool_array_marker = &block.cols[1];
+        for (i, expected) in expected.iter().enumerate() {
+            let value: BoolSliceIterator = bool_array_marker.get(i).unwrap().try_into()?;
+            let mut actual = vec![];
+            for b in value {
+                actual.push(b);
+            }
+            assert_eq!(actual, *expected, "Mismatch at index {i}");
         }
 
         Ok(())
