@@ -39,8 +39,10 @@ impl<'a> Mark<'a> {
             Mark::UInt256(bv) => bv.get(index).copied().map(Value::UInt256),
             Mark::Float32(bv) => bv.get(index).map(|v| v.get()).map(Value::Float32),
             Mark::Float64(bv) => bv.get(index).map(|v| v.get()).map(Value::Float64),
-            Mark::BFloat16(_) => {
-                todo!()
+            Mark::BFloat16(bv) => {
+                let value = *bv.get(index)?;
+                let value = half::bf16::from_le_bytes(value);
+                Some(Value::BFloat16(value))
             }
             Mark::Decimal32(precision, data) => {
                 let value = data.get(index)?.get();
@@ -111,12 +113,14 @@ impl<'a> Mark<'a> {
                 let value = *data.get(index)?;
                 Some(Value::Ipv6(value.into()))
             }
-            Mark::Point(_) => todo!(),
-            Mark::Ring(_) => todo!(),
-            Mark::Polygon(_) => todo!(),
-            Mark::MultiPolygon(_) => todo!(),
-            Mark::LineString(_) => todo!(),
-            Mark::MultiLineString(_) => todo!(),
+            Mark::Point(_) => unreachable!("Point should be covered by Tuple(f64, f64)"),
+            Mark::Ring(_)
+            | Mark::Polygon(_)
+            | Mark::MultiPolygon(_)
+            | Mark::LineString(_)
+            | Mark::MultiLineString(_) => {
+                unreachable!("Geometric types should be covered by arrays)")
+            }
             Mark::Enum8(_, _) => todo!(),
             Mark::Enum16(_, _) => todo!(),
             Mark::LowCardinality {
@@ -218,12 +222,12 @@ impl<'a> Mark<'a> {
             Mark::DateTime64 { .. } => todo!(),
             Mark::Ipv4(_) => todo!(),
             Mark::Ipv6(_) => todo!(),
-            Mark::Point(_) => todo!(),
-            Mark::Ring(_) => todo!(),
-            Mark::Polygon(_) => todo!(),
-            Mark::MultiPolygon(_) => todo!(),
-            Mark::LineString(_) => todo!(),
-            Mark::MultiLineString(_) => todo!(),
+            Mark::Point(_)
+            | Mark::Ring(_)
+            | Mark::Polygon(_)
+            | Mark::MultiPolygon(_)
+            | Mark::LineString(_)
+            | Mark::MultiLineString(_) => unreachable!("must be covered by array marker already"),
             Mark::Enum8(_, _) => todo!(),
             Mark::Enum16(_, _) => todo!(),
             Mark::LowCardinality {
@@ -295,6 +299,7 @@ mod tests {
         ArraySliceIterator, LowCardinalitySliceIterator, MapIterator, MapSliceIterator,
         StringSliceIterator, TupleSliceIterator, Value,
     };
+    use half::bf16;
     use pretty_assertions::assert_eq;
     use std::collections::HashMap;
     use std::str::FromStr as _;
@@ -956,6 +961,221 @@ mod tests {
         ];
         for (i, expected) in expected_ipv6.iter().enumerate() {
             let value: std::net::Ipv6Addr = ipv6_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn geo_sample() -> TestResult {
+        let buf = load("./test_data/geo_sample.native")?;
+        let (_, block) = parse_block(&buf)?;
+
+        let expected_points = [(10.0, 10.0), (5.0, 5.0), (0.0, 0.0), (100.0, 100.0)];
+        let points_marker = &block.cols[1];
+        for (i, expected) in expected_points.iter().enumerate() {
+            let value: (f64, f64) = points_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Point mismatch at index {i}");
+        }
+
+        let expected_rings: [Vec<(f64, f64)>; 4] = [
+            vec![(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)],
+            vec![(0.0, 0.0), (10.0, 0.0), (5.0, 8.0)],
+            vec![(0.0, 0.0), (3.0, 0.0), (3.0, 3.0), (0.0, 3.0)],
+            vec![
+                (100.0, 100.0),
+                (110.0, 100.0),
+                (110.0, 110.0),
+                (100.0, 110.0),
+            ],
+        ];
+        let rings_marker = &block.cols[2];
+        for (i, expected) in expected_rings.iter().enumerate() {
+            let value: TupleSliceIterator = rings_marker.get(i).unwrap().try_into()?;
+            let mut actual = Vec::with_capacity(expected.len());
+            for point in value {
+                let (x, y): (f64, f64) = point.try_into()?;
+                actual.push((x, y));
+            }
+            assert_eq!(actual, *expected, "Ring mismatch at index {i}");
+        }
+
+        let expected_polygons = [
+            vec![vec![(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)]],
+            vec![vec![(0.0, 0.0), (10.0, 0.0), (5.0, 8.0)]],
+            vec![vec![(0.0, 0.0), (3.0, 0.0), (3.0, 3.0), (0.0, 3.0)]],
+            vec![vec![
+                (100.0, 100.0),
+                (110.0, 100.0),
+                (110.0, 110.0),
+                (100.0, 110.0),
+            ]],
+        ];
+        let polygons_marker = &block.cols[3];
+        for (i, expected) in expected_polygons.iter().enumerate() {
+            let value: ArraySliceIterator = polygons_marker.get(i).unwrap().try_into()?;
+            let mut actual = Vec::with_capacity(expected.len());
+            for slice in value {
+                let points: TupleSliceIterator = slice.try_into()?;
+                let mut ring = Vec::with_capacity(expected[0].len());
+                for p in points {
+                    let (x, y): (f64, f64) = p.try_into()?;
+                    ring.push((x, y));
+                }
+                actual.push(ring);
+            }
+            assert_eq!(actual, *expected, "Polygon mismatch at index {i}");
+        }
+
+        let expected_multipolygons = [
+            vec![
+                vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)],
+                vec![(15.0, 15.0), (25.0, 15.0), (25.0, 25.0), (15.0, 25.0)],
+            ],
+            vec![
+                vec![(0.0, 0.0), (10.0, 0.0), (5.0, 8.0)],
+                vec![(4.0, 2.0), (6.0, 2.0), (5.0, 4.0)],
+            ],
+            vec![
+                vec![(0.0, 0.0), (3.0, 0.0), (3.0, 3.0), (0.0, 3.0)],
+                vec![(5.0, 5.0), (9.0, 5.0), (9.0, 9.0), (5.0, 9.0)],
+                vec![(6.0, 6.0), (8.0, 6.0), (8.0, 8.0), (6.0, 8.0)],
+            ],
+            vec![
+                vec![
+                    (100.0, 100.0),
+                    (105.0, 100.0),
+                    (105.0, 105.0),
+                    (100.0, 105.0),
+                ],
+                vec![
+                    (108.0, 108.0),
+                    (112.0, 108.0),
+                    (112.0, 112.0),
+                    (108.0, 112.0),
+                ],
+            ],
+        ];
+        let multipolygons_marker = &block.cols[4];
+        for (i, expected) in expected_multipolygons.iter().enumerate() {
+            let polygons: ArraySliceIterator = multipolygons_marker.get(i).unwrap().try_into()?;
+            let mut actual = Vec::new();
+
+            for polygon in polygons {
+                let rings: ArraySliceIterator = polygon.try_into()?;
+                for ring in rings {
+                    let pts: TupleSliceIterator = ring.try_into()?;
+                    let mut flat_ring = Vec::new();
+                    for pt in pts {
+                        let (x, y): (f64, f64) = pt.try_into()?;
+                        flat_ring.push((x, y));
+                    }
+                    actual.push(flat_ring);
+                }
+            }
+            assert_eq!(actual, *expected, "Multi-polygon mismatch at index {i}");
+        }
+
+        let expected_linestrings = [
+            vec![(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)],
+            vec![(0.0, 0.0), (10.0, 0.0), (5.0, 8.0)],
+            vec![(0.0, 0.0), (3.0, 3.0), (6.0, 0.0)],
+            vec![(100.0, 100.0), (110.0, 110.0), (120.0, 100.0)],
+        ];
+        let linestrings_marker = &block.cols[5];
+        for (i, expected) in expected_linestrings.iter().enumerate() {
+            let value: TupleSliceIterator = linestrings_marker.get(i).unwrap().try_into()?;
+            let mut actual = Vec::with_capacity(expected.len());
+            for point in value {
+                let (x, y): (f64, f64) = point.try_into()?;
+                actual.push((x, y));
+            }
+            assert_eq!(actual, *expected, "LineString mismatch at index {i}");
+        }
+
+        let expected_multilinestrings = [
+            vec![
+                vec![(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)],
+                vec![(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)],
+            ],
+            vec![
+                vec![(0.0, 0.0), (10.0, 10.0)],
+                vec![(0.0, 10.0), (10.0, 0.0)],
+            ],
+            vec![
+                vec![(0.0, 0.0), (3.0, 0.0), (6.0, 0.0)],
+                vec![(0.0, 0.0), (0.0, 3.0), (0.0, 6.0)],
+            ],
+            vec![
+                vec![(100.0, 100.0), (105.0, 110.0), (110.0, 100.0)],
+                vec![(120.0, 120.0), (130.0, 130.0), (140.0, 120.0)],
+                vec![(150.0, 150.0), (160.0, 160.0)],
+            ],
+        ];
+        let multilinestrings_marker = &block.cols[6];
+        for (i, expected) in expected_multilinestrings.iter().enumerate() {
+            let lines: ArraySliceIterator = multilinestrings_marker.get(i).unwrap().try_into()?;
+            let mut actual = Vec::with_capacity(expected.len());
+
+            for slice in lines {
+                let pts: TupleSliceIterator = slice.try_into()?;
+                let mut line = Vec::with_capacity(pts.len());
+                for p in pts {
+                    let (x, y): (f64, f64) = p.try_into()?;
+                    line.push((x, y));
+                }
+                actual.push(line);
+            }
+            assert_eq!(actual, *expected, "Multi-lineString mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    //noinspection RsApproxConstant
+    #[allow(clippy::approx_constant)]
+    #[test]
+    fn float_sample() -> TestResult {
+        let buf = load("./test_data/float_sample.native")?;
+        let (_, block) = parse_block(&buf)?;
+
+        //    ┌─id─┬─────f32─┬────────────────f64─┬───────bf16─┐
+        // 1. │  0 │    3.14 │  3.141592653589793 │      3.125 │
+        // 2. │  1 │    2.71 │  2.718281828459045 │   2.703125 │
+        // 3. │  2 │    1.41 │ 1.4142135623730951 │    1.40625 │
+        // 4. │  3 │ 0.57721 │ 0.5772156649015329 │ 0.57421875 │
+        //    └────┴─────────┴────────────────────┴────────────┘
+
+        let f32_marker = &block.cols[1];
+        let expected_f32 = [3.14f32, 2.71, 1.41, 0.57721];
+
+        for (i, expected) in expected_f32.iter().enumerate() {
+            let value: f32 = f32_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        let f64_marker = &block.cols[2];
+        let expected_f64 = [
+            3.141592653589793,
+            2.718281828459045,
+            1.4142135623730951,
+            0.5772156649015329,
+        ];
+        for (i, expected) in expected_f64.iter().enumerate() {
+            let value: f64 = f64_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        let bf16_marker = &block.cols[3];
+        let expected_bf16 = [
+            bf16::from_f32(3.125f32),
+            bf16::from_f32(2.703125),
+            bf16::from_f32(1.40625),
+            bf16::from_f32(0.57421875),
+        ];
+        for (i, expected) in expected_bf16.iter().enumerate() {
+            let value: bf16 = bf16_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Mismatch at index {i}");
         }
 

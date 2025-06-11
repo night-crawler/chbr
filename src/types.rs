@@ -207,7 +207,7 @@ impl<'a> Type<'a> {
             Self::Enum16(_) => Some(2),
 
             // Point is represented by its X and Y coordinates, stored as a Tuple(Float64, Float64).
-            Self::Point => Some(16),
+            Self::Point => None,
 
             // For completeness, everything below is variable in size
             Self::Ring => None,
@@ -284,7 +284,6 @@ impl<'a> Type<'a> {
             },
             Type::Ipv4 => Mark::Ipv4(ByteView::try_from(data)?),
             Type::Ipv6 => Mark::Ipv6(ByteView::try_from(data)?),
-            Type::Point => Mark::Point(data),
 
             Type::Enum8(values) => Mark::Enum8(values, data),
             Type::Enum16(values) => Mark::Enum16(values, data),

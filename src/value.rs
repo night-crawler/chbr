@@ -29,7 +29,7 @@ pub enum Value<'a> {
     UInt256(u256),
     Float32(f32),
     Float64(f64),
-    BFloat16(f32),
+    BFloat16(bf16),
     Decimal32(Decimal),
     Decimal64(Decimal),
     Decimal128(Decimal),
@@ -184,6 +184,7 @@ impl_try_from_value!(UInt256, u256);
 
 impl_try_from_value!(Float64, f64);
 impl_try_from_value!(Float32, f32);
+impl_try_from_value!(BFloat16, bf16);
 
 impl_try_from_value!(Ipv4, Ipv4Addr);
 impl_try_from_value!(Ipv6, Ipv6Addr);
@@ -507,6 +508,7 @@ impl_try_from_tuple!(10, 0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G,
 
 use core::convert::TryFrom;
 use core::marker::PhantomData;
+use half::bf16;
 
 pub struct MapIterator<'a, K, V> {
     keys: &'a Mark<'a>,

@@ -84,6 +84,11 @@ impl<'a> Type<'a> {
         match self {
             Type::String => string(ctx),
             Type::Array(inner) => array(*inner, ctx),
+            Type::Point => {
+                // Point is represented by its X and Y coordinates, stored as a Tuple(Float64, Float64).
+                let inner = t!(Tuple(vec![t!(Float64), t!(Float64)]));
+                inner.decode(ctx)
+            }
             #[allow(clippy::match_same_arms)]
             Type::Ring => t!(Array(bt!(Point))).decode(ctx),
             Type::Polygon => t!(Array(bt!(Ring))).decode(ctx),

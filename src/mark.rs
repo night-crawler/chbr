@@ -24,7 +24,7 @@ pub enum Mark<'a> {
     UInt256(ByteView<'a, u256>),
     Float32(ByteView<'a, F32>),
     Float64(ByteView<'a, F64>),
-    BFloat16(ByteView<'a, U16>),
+    BFloat16(ByteView<'a, [u8; 2]>),
     Decimal32(u8, ByteView<'a, I32>),
     Decimal64(u8, ByteView<'a, I64>),
     Decimal128(u8, ByteView<'a, I128>),
