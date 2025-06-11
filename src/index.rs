@@ -102,8 +102,15 @@ impl<'a> Mark<'a> {
                 let dt = datetime64_tz(value, *precision, *tz)?;
                 Some(Value::DateTime64(dt))
             }
-            Mark::Ipv4(_) => todo!(),
-            Mark::Ipv6(_) => todo!(),
+            Mark::Ipv4(data) => {
+                let value = data.get(index)?.get();
+                let value = std::net::Ipv4Addr::from(value);
+                Some(Value::Ipv4(value))
+            }
+            Mark::Ipv6(data) => {
+                let value = *data.get(index)?;
+                Some(Value::Ipv6(value.into()))
+            }
             Mark::Point(_) => todo!(),
             Mark::Ring(_) => todo!(),
             Mark::Polygon(_) => todo!(),
@@ -290,6 +297,7 @@ mod tests {
     };
     use pretty_assertions::assert_eq;
     use std::collections::HashMap;
+    use std::str::FromStr as _;
     use testresult::TestResult;
     use zerocopy::little_endian::I64;
 
@@ -915,6 +923,41 @@ mod tests {
         }
 
         // expect panic for decimal256, it's not implemented
+
+        Ok(())
+    }
+
+    #[test]
+    fn ip_sample() -> TestResult {
+        let buf = load("./test_data/ip_sample.native")?;
+        let (_, block) = parse_block(&buf)?;
+
+        // 0,100.64.0.2,2001:db8:0:0:0:ff00:42:8329
+        // 1,127.0.0.1,0:0:0:0:0:0:0:1
+        // 2,10.10.10.10,2001:db8:85a3:0:0:8a2e:370:7334
+
+        let ipv4_marker = &block.cols[1];
+        let expected_ipv4 = [
+            std::net::Ipv4Addr::new(100, 64, 0, 2),
+            std::net::Ipv4Addr::new(127, 0, 0, 1),
+            std::net::Ipv4Addr::new(10, 10, 10, 10),
+        ];
+
+        for (i, expected) in expected_ipv4.iter().enumerate() {
+            let value: std::net::Ipv4Addr = ipv4_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        let ipv6_marker = &block.cols[2];
+        let expected_ipv6 = [
+            std::net::Ipv6Addr::from_str("2001:db8:0:0:0:ff00:42:8329")?,
+            std::net::Ipv6Addr::from_str("0:0:0:0:0:0:0:1")?,
+            std::net::Ipv6Addr::from_str("2001:db8:85a3:0:0:8a2e:370:7334")?,
+        ];
+        for (i, expected) in expected_ipv6.iter().enumerate() {
+            let value: std::net::Ipv6Addr = ipv6_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
 
         Ok(())
     }

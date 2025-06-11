@@ -282,8 +282,8 @@ impl<'a> Type<'a> {
                 tz,
                 data: ByteView::try_from(data)?,
             },
-            Type::Ipv4 => Mark::Ipv4(data),
-            Type::Ipv6 => Mark::Ipv6(data),
+            Type::Ipv4 => Mark::Ipv4(ByteView::try_from(data)?),
+            Type::Ipv6 => Mark::Ipv6(ByteView::try_from(data)?),
             Type::Point => Mark::Point(data),
 
             Type::Enum8(values) => Mark::Enum8(values, data),

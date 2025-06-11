@@ -1,4 +1,5 @@
 use crate::index::IndexableColumn;
+use std::net::Ipv6Addr;
 use zerocopy::little_endian::U64;
 
 mod conv;
@@ -43,6 +44,27 @@ pub struct i256(pub [u8; 32]);
 )]
 pub struct UuidData(pub [U64; 2]);
 
+#[repr(C)]
+#[derive(
+    Clone,
+    Copy,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Debug,
+    Default,
+    zerocopy::FromBytes,
+    zerocopy::Unaligned,
+)]
+pub struct Octets(pub [u8; 16]);
+
+impl From<Octets> for Ipv6Addr {
+    fn from(data: Octets) -> Self {
+        Ipv6Addr::from(data.0)
+    }
+}
 impl From<UuidData> for uuid::Uuid {
     fn from(data: UuidData) -> Self {
         let [b1, b2] = data.0;

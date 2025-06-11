@@ -1,6 +1,6 @@
 use crate::slice::ByteView;
 use crate::types::{Field, JsonColumnHeader, Offsets};
-use crate::{UuidData, i256, u256};
+use crate::{Octets, UuidData, i256, u256};
 use chrono_tz::Tz;
 use core::fmt;
 use std::fmt::Debug;
@@ -43,8 +43,8 @@ pub enum Mark<'a> {
         tz: Tz,
         data: ByteView<'a, U64>,
     },
-    Ipv4(&'a [u8]),
-    Ipv6(&'a [u8]),
+    Ipv4(ByteView<'a, U32>),
+    Ipv6(ByteView<'a, Octets>),
     Point(&'a [u8]),
     Ring(Box<Mark<'a>>),
     Polygon(Box<Mark<'a>>),
@@ -181,13 +181,15 @@ impl Debug for Mark<'_> {
             Empty => f.write_str("Empty"),
 
             // simple &[u8] cases
-            Bool(b) | Ipv4(b) | Ipv6(b) | Point(b) => dbg_slice(
+            Bool(b) | Point(b) => dbg_slice(
                 f,
                 core::any::type_name::<Self>().rsplit("::").next().unwrap(),
                 b,
             ),
 
             // ByteView-backed numeric columns
+            Ipv4(v) => dbg_bv(f, "Ipv4", v),
+            Ipv6(v) => dbg_bv(f, "Ipv6", v),
             Date32(v) => dbg_bv(f, "Date32", v),
             Date(v) => dbg_bv(f, "Date", v),
             Uuid(v) => dbg_bv(f, "Uuid", v),
