@@ -1,4 +1,3 @@
-use crate::conv::{date16, date32, datetime32_tz, datetime64_tz};
 use crate::mark::Mark;
 use crate::parse::parse_var_str;
 use crate::types::OffsetIndexPair as _;
@@ -82,32 +81,28 @@ impl<'a> Mark<'a> {
                 Some(Value::Uuid(uuid::Uuid::from(*value)))
             }
             Mark::Date(bv) => {
-                let value = bv.get(index)?.get();
-                Some(Value::Date(date16(value)))
+                let value = *bv.get(index)?;
+                Some(Value::Date(value.into()))
             }
             Mark::Date32(bv) => {
-                let value = bv.get(index)?.get();
-                Some(Value::Date32(date32(value)))
+                let value = *bv.get(index)?;
+                Some(Value::Date32(value.into()))
             }
             Mark::DateTime { tz, data } => {
-                let value = data.get(index)?.get();
-                let dt = datetime32_tz(value, *tz);
-                Some(Value::DateTime(dt))
+                let value = data.get(index)?.with_tz(*tz);
+                Some(Value::DateTime(value))
             }
             Mark::DateTime64 {
                 precision,
                 tz,
                 data,
             } => {
-                let value = data.get(index)?.get();
-                let value = i64::try_from(value).ok()?;
-                let dt = datetime64_tz(value, *precision, *tz)?;
-                Some(Value::DateTime64(dt))
+                let value = data.get(index)?.with_tz_and_precision(*tz, *precision)?;
+                Some(Value::DateTime64(value))
             }
             Mark::Ipv4(data) => {
-                let value = data.get(index)?.get();
-                let value = std::net::Ipv4Addr::from(value);
-                Some(Value::Ipv4(value))
+                let value = *data.get(index)?;
+                Some(Value::Ipv4(value.into()))
             }
             Mark::Ipv6(data) => {
                 let value = *data.get(index)?;
@@ -215,13 +210,20 @@ impl<'a> Mark<'a> {
                 Value::StringSlice(count, data_start)
             }
             Mark::FixedString(_, _) => todo!(),
-            Mark::Uuid(_) => todo!(),
-            Mark::Date(_) => todo!(),
-            Mark::Date32(_) => todo!(),
-            Mark::DateTime { .. } => todo!(),
-            Mark::DateTime64 { .. } => todo!(),
-            Mark::Ipv4(_) => todo!(),
-            Mark::Ipv6(_) => todo!(),
+            Mark::Uuid(bv) => Value::UuidSlice(&bv[idx]),
+            Mark::Date(bv) => Value::Date16Slice(&bv[idx]),
+            Mark::Date32(bv) => Value::Date32Slice(&bv[idx]),
+            Mark::DateTime { tz, data } => Value::DateTime32Slice {
+                tz: *tz,
+                slice: &data[idx],
+            },
+            Mark::DateTime64 { precision, tz, data } => Value::DateTime64Slice {
+                precision: *precision,
+                tz: *tz,
+                slice: &data[idx],
+            },
+            Mark::Ipv4(bv) => Value::Ipv4Slice(&bv[idx]),
+            Mark::Ipv6(bv) => Value::Ipv6Slice(&bv[idx]),
             Mark::Point(_)
             | Mark::Ring(_)
             | Mark::Polygon(_)

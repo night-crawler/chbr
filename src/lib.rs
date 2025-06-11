@@ -1,6 +1,10 @@
+use crate::conv::{date16, date32, datetime32, datetime32_tz, datetime64_tz};
 use crate::index::IndexableColumn;
-use std::net::Ipv6Addr;
-use zerocopy::little_endian::U64;
+use chrono::NaiveDate;
+use std::net::{Ipv4Addr, Ipv6Addr};
+use chrono_tz::Tz;
+use uuid::Uuid;
+use zerocopy::little_endian::{I32, I64, U16, U32, U64};
 
 mod conv;
 pub mod error;
@@ -11,83 +15,77 @@ mod slice;
 pub mod types;
 mod value;
 
-#[allow(non_camel_case_types)]
-#[repr(C)]
-#[derive(
-    Clone,
-    Copy,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Debug,
-    Default,
-    zerocopy::FromBytes,
-    zerocopy::Unaligned,
-)]
-pub struct i256(pub [u8; 32]);
-
-#[repr(C)]
-#[derive(
-    Clone,
-    Copy,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Debug,
-    Default,
-    zerocopy::FromBytes,
-    zerocopy::Unaligned,
-)]
-pub struct UuidData(pub [U64; 2]);
-
-#[repr(C)]
-#[derive(
-    Clone,
-    Copy,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Debug,
-    Default,
-    zerocopy::FromBytes,
-    zerocopy::Unaligned,
-)]
-pub struct Octets(pub [u8; 16]);
-
-impl From<Octets> for Ipv6Addr {
-    fn from(data: Octets) -> Self {
-        Ipv6Addr::from(data.0)
-    }
-}
-impl From<UuidData> for uuid::Uuid {
-    fn from(data: UuidData) -> Self {
-        let [b1, b2] = data.0;
-        uuid::Uuid::from_u64_pair(b1.get(), b2.get())
-    }
+#[macro_export]
+macro_rules! transparent_newtype {
+    ( $( $vis:vis $name:ident ( $inner:ty ) ; )+ ) => {
+        $(
+            #[allow(non_camel_case_types)]
+            #[repr(transparent)]
+            #[derive(
+                Clone,
+                Copy,
+                Eq,
+                Hash,
+                Ord,
+                PartialEq,
+                PartialOrd,
+                Debug,
+                Default,
+                zerocopy::FromBytes,
+                zerocopy::Unaligned,
+            )]
+            $vis struct $name(pub $inner);
+        )+
+    };
 }
 
-#[allow(non_camel_case_types)]
-#[repr(C)]
-#[derive(
-    Clone,
-    Copy,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Debug,
-    Default,
-    zerocopy::FromBytes,
-    zerocopy::Unaligned,
-)]
-pub struct u256(pub [u8; 32]);
+#[macro_export]
+macro_rules! impl_from {
+    ( $src:ty => $dst:ty , |$v:ident| $body:expr ) => {
+        impl From<$src> for $dst {
+            #[inline]
+            fn from($v: $src) -> Self {
+                $body
+            }
+        }
+    };
+}
+
+transparent_newtype! {
+    pub i256 ([u8; 32]);
+    pub u256 ([u8; 32]);
+    pub UuidData([U64; 2]);
+    pub Ipv4Data (U32);
+    pub Ipv6Data ([u8; 16]);
+    pub Date16 (U16);
+    pub Date32 (I32);
+    pub DateTime32 (U32);
+    pub DateTime64 (I64);
+}
+
+impl_from!(Ipv6Data => Ipv6Addr, |d| Ipv6Addr::from(d.0));
+impl_from!(Ipv4Data => Ipv4Addr, |d| Ipv4Addr::from(d.0.get()));
+impl_from!(UuidData => Uuid, |d| {
+    let [hi, lo] = d.0;
+    Uuid::from_u64_pair(hi.get(), lo.get())
+});
+impl_from!(Date16 => NaiveDate, |d| date16(d.0.get()));
+impl_from!(Date32 => NaiveDate, |d| date32(d.0.get()));
+impl_from!(DateTime32 => chrono::DateTime<chrono::Utc>, |d| datetime32(d.0.get()));
+
+impl DateTime64 {
+    pub fn with_tz_and_precision(&self, tz: Tz, precision: u8) -> Option<chrono::DateTime<Tz>> {
+        datetime64_tz(self.0.get(), precision, tz)
+    }
+}
+
+impl DateTime32 {
+    pub fn with_tz(&self, tz: Tz) -> chrono::DateTime<Tz> {
+        datetime32_tz(self.0.get(), tz)
+    }
+}
+
+
 
 pub type Result<T> = std::result::Result<T, error::Error>;
 

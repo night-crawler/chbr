@@ -1,6 +1,6 @@
 use crate::slice::ByteView;
 use crate::types::{Field, JsonColumnHeader, Offsets};
-use crate::{Octets, UuidData, i256, u256};
+use crate::{Ipv6Data, UuidData, i256, u256, Date16, DateTime32, DateTime64, Date32, Ipv4Data};
 use chrono_tz::Tz;
 use core::fmt;
 use std::fmt::Debug;
@@ -32,19 +32,19 @@ pub enum Mark<'a> {
     String(Vec<usize>, &'a [u8]),
     FixedString(usize, &'a [u8]),
     Uuid(ByteView<'a, UuidData>),
-    Date(ByteView<'a, U16>),
-    Date32(ByteView<'a, I32>),
+    Date(ByteView<'a, Date16>),
+    Date32(ByteView<'a, Date32>),
     DateTime {
         tz: Tz,
-        data: ByteView<'a, U32>,
+        data: ByteView<'a, DateTime32>,
     },
     DateTime64 {
         precision: u8,
         tz: Tz,
-        data: ByteView<'a, U64>,
+        data: ByteView<'a, DateTime64>,
     },
-    Ipv4(ByteView<'a, U32>),
-    Ipv6(ByteView<'a, Octets>),
+    Ipv4(ByteView<'a, Ipv4Data>),
+    Ipv6(ByteView<'a, Ipv6Data>),
     Point(&'a [u8]),
     Ring(Box<Mark<'a>>),
     Polygon(Box<Mark<'a>>),

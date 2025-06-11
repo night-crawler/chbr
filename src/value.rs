@@ -2,14 +2,17 @@ use crate::error::Error;
 use crate::mark::Mark;
 use crate::parse::parse_var_str;
 use crate::types::{OffsetIndexPair as _, Offsets};
-use crate::{i256, u256};
+use crate::{i256, u256, Date16, Date32, DateTime32, DateTime64, Ipv4Data, Ipv6Data, UuidData};
 use chrono_tz::Tz;
+use core::convert::TryFrom;
+use core::marker::PhantomData;
+use half::bf16;
 use rust_decimal::Decimal;
 use std::hint::unreachable_unchecked;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::ops::Range;
 use uuid::Uuid;
-use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
+use zerocopy::little_endian::{F32, F64, I128, I16, I32, I64, U128, U16, U32, U64};
 
 #[derive(Debug, Clone)]
 pub enum Value<'a> {
@@ -60,6 +63,22 @@ pub enum Value<'a> {
     UInt256Slice(&'a [u256]),
     Float32Slice(&'a [F32]),
     Float64Slice(&'a [F64]),
+
+    UuidSlice(&'a [UuidData]),
+    Date16Slice(&'a [Date16]),
+    Date32Slice(&'a [Date32]),
+    DateTime32Slice {
+        tz: Tz,
+        slice: &'a [DateTime32],
+    },
+    DateTime64Slice {
+        tz: Tz,
+        precision: u8,
+        slice: &'a [DateTime64],
+    },
+
+    Ipv4Slice(&'a [Ipv4Data]),
+    Ipv6Slice(&'a [Ipv6Data]),
 
     LowCardinalitySlice {
         indices: Box<Value<'a>>,
@@ -146,6 +165,13 @@ impl Value<'_> {
             Value::MapSlice { .. } => "MapSlice",
             Value::TupleSlice { .. } => "TupleSlice",
             Value::BoolSlice(_) => "BoolSlice",
+            Value::UuidSlice(_) => "UuidSlice",
+            Value::Date16Slice(_) => "DateSlice",
+            Value::Date32Slice(_) => "Date32Slice",
+            Value::DateTime32Slice { .. } => "DateTime32Slice",
+            Value::DateTime64Slice { .. } => "DateTime64Slice",
+            Value::Ipv4Slice(_) => "Ipv4Slice",
+            Value::Ipv6Slice(_) => "Ipv6Slice",
         }
     }
 }
@@ -178,6 +204,12 @@ impl_try_from_value!(UInt16Slice, &'a [U16]);
 impl_try_from_value!(UInt32Slice, &'a [U32]);
 impl_try_from_value!(UInt64Slice, &'a [U64]);
 impl_try_from_value!(UInt128Slice, &'a [U128]);
+
+impl_try_from_value!(UuidSlice, &'a [UuidData]);
+impl_try_from_value!(Date16Slice, &'a [Date16]);
+impl_try_from_value!(Date32Slice, &'a [Date32]);
+impl_try_from_value!(Ipv4Slice, &'a [Ipv4Data]);
+impl_try_from_value!(Ipv6Slice, &'a [Ipv6Data]);
 
 impl_try_from_value!(Bool, bool);
 impl_try_from_value!(Int256, i256);
@@ -508,10 +540,6 @@ impl_try_from_tuple!(8, 0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 
 impl_try_from_tuple!(9, 0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I);
 impl_try_from_tuple!(10, 0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J);
 
-use core::convert::TryFrom;
-use core::marker::PhantomData;
-use half::bf16;
-
 pub struct MapIterator<'a, K, V> {
     keys: &'a Mark<'a>,
     values: &'a Mark<'a>,
@@ -714,3 +742,79 @@ impl Iterator for BoolSliceIterator<'_> {
 }
 
 impl ExactSizeIterator for BoolSliceIterator<'_> {}
+
+pub struct DateTime32SliceIterator<'a> {
+    tz: Tz,
+    slice: std::slice::Iter<'a, DateTime32>,
+}
+
+impl<'a> TryFrom<Value<'a>> for DateTime32SliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::DateTime32Slice { tz, slice } => Ok(Self {
+                tz,
+                slice: slice.iter(),
+            }),
+            other => Err(Error::MismatchedType(
+                other.as_str(),
+                "DateTime32SliceIterator",
+            )),
+        }
+    }
+}
+
+impl Iterator for DateTime32SliceIterator<'_> {
+    type Item = chrono::DateTime<Tz>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.slice.next().map(|dt| dt.with_tz(self.tz))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.slice.size_hint()
+    }
+}
+
+pub struct DateTime64SliceIterator<'a> {
+    tz: Tz,
+    precision: u8,
+    slice: std::slice::Iter<'a, DateTime64>,
+}
+
+impl<'a> TryFrom<Value<'a>> for DateTime64SliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::DateTime64Slice {
+                tz,
+                precision,
+                slice,
+            } => Ok(Self {
+                tz,
+                precision,
+                slice: slice.iter(),
+            }),
+            other => Err(Error::MismatchedType(
+                other.as_str(),
+                "DateTime64SliceIterator",
+            )),
+        }
+    }
+}
+
+impl Iterator for DateTime64SliceIterator<'_> {
+    type Item = Option<chrono::DateTime<Tz>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.slice
+            .next()
+            .map(|dt| dt.with_tz_and_precision(self.tz, self.precision))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.slice.size_hint()
+    }
+}
