@@ -1,5 +1,5 @@
 use crate::conv::{date16, date32, datetime32, datetime32_tz, datetime64_tz};
-use crate::index::IndexableColumn;
+use crate::mark::Mark;
 use chrono::NaiveDate;
 use chrono_tz::Tz;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -115,7 +115,7 @@ impl Decimal128Data {
 pub type Result<T> = std::result::Result<T, error::Error>;
 
 pub struct ParsedBlock<'a> {
-    pub cols: Vec<IndexableColumn<'a>>,
+    pub cols: Vec<Mark<'a>>,
     pub index: usize,
     pub col_names: Vec<&'a str>,
     pub num_rows: usize,

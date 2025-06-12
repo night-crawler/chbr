@@ -1,5 +1,4 @@
 use crate::ParsedBlock;
-use crate::index::IndexableColumn;
 use crate::parse::IResult;
 use crate::parse::typ::parse_type;
 use crate::parse::{parse_var_str, parse_varuint};
@@ -50,6 +49,18 @@ impl<'a> ParseContext<'a> {
 }
 
 pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
+    if input.is_empty() {
+        return Ok((
+            input,
+            ParsedBlock {
+                cols: Vec::new(),
+                col_names: Vec::new(),
+                index: 0,
+                num_rows: 0,
+            },
+        ));
+    }
+
     let mut parse_context = ParseContext {
         initial: input,
         input,
@@ -96,9 +107,7 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
         (input, marker) = typ.decode(ctx.fork(input))?;
         debug!("Decoded, remaining bytes: {}", input.len());
 
-        let col = IndexableColumn::from(marker);
-
-        columns.push(col);
+        columns.push(marker);
     }
 
     Ok((

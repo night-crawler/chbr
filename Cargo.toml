@@ -20,6 +20,12 @@ half = { version = "2.6", features = ["zerocopy"] }
 [dev-dependencies]
 testresult = "0.4"
 pretty_assertions = "1.4"
+clickhouse = "0.13"
+tokio = { version = "1.45", features = ["full"] }
+
+[[test]]
+name = "tests"
+path = "tests/main.rs"
 
 [lints]
 clippy.as_pointer_underscore = "deny"

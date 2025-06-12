@@ -4,21 +4,6 @@ use crate::types::OffsetIndexPair as _;
 use crate::value::Value;
 use std::ops::Range;
 
-#[derive(Debug)]
-pub enum IndexableColumn<'a> {
-    Stateless(Mark<'a>),
-    Stateful { marker: Mark<'a> },
-}
-
-impl<'a> From<Mark<'a>> for IndexableColumn<'a> {
-    fn from(marker: Mark<'a>) -> Self {
-        if marker.size().is_some() {
-            return IndexableColumn::Stateless(marker);
-        }
-        IndexableColumn::Stateful { marker }
-    }
-}
-
 impl<'a> Mark<'a> {
     pub fn get(&'a self, index: usize) -> Option<Value<'a>> {
         match self {
@@ -285,25 +270,6 @@ impl<'a> Mark<'a> {
             Mark::Nested(_, _) => todo!(),
             Mark::Dynamic(_, _) => todo!(),
             Mark::Json { .. } => todo!(),
-        }
-    }
-}
-
-// TODO: ditch the struct if we can use Mark directly and everything is stateless
-impl<'a> IndexableColumn<'a> {
-    pub fn get(&'a self, index: usize) -> Option<Value<'a>> {
-        match self {
-            IndexableColumn::Stateless(m) => m.get(index),
-            IndexableColumn::Stateful { marker } => match marker {
-                Mark::Array(_, _)
-                | Mark::String(_, _)
-                | Mark::LowCardinality { .. }
-                | Mark::Tuple(_)
-                | Mark::Map { .. }
-                | Mark::Variant { .. }
-                | Mark::Nullable(_, _) => marker.get(index),
-                _ => todo!(),
-            },
         }
     }
 }
