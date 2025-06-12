@@ -1,5 +1,6 @@
+use core::ops::{Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive};
+use core::{fmt, mem::size_of};
 use core::{marker::PhantomData, ops::Index};
-
 use zerocopy::{FromBytes, Unaligned};
 
 #[repr(transparent)]
@@ -18,7 +19,7 @@ impl<'a, T: Unaligned + FromBytes + Copy> TryFrom<&'a [u8]> for ByteView<'a, T> 
                 _pd: PhantomData,
             })
         } else {
-            Err(Self::Error::LengthError(bytes.len()))
+            Err(Self::Error::Length(bytes.len()))
         }
     }
 }
@@ -50,19 +51,14 @@ impl<'a, T: Unaligned + FromBytes + Copy> ByteView<'a, T> {
     pub fn as_bytes(&self) -> &'a [u8] {
         self.bytes
     }
-}
 
-impl<'a, T: Unaligned + FromBytes + Copy + Default> ByteView<'a, T> {
-    pub fn last_or_default(&self) -> T {
-        if let Some(last) = self.last() {
-            *last
-        } else {
-            T::default()
-        }
+    pub fn as_slice(&self) -> &'a [T] {
+        let n_elements = self.len();
+        unsafe { core::slice::from_raw_parts(self.bytes.as_ptr().cast::<T>(), n_elements) }
     }
 }
 
-impl<'a, T: Unaligned + FromBytes + Copy> Index<usize> for ByteView<'a, T> {
+impl<T: Unaligned + FromBytes + Copy> Index<usize> for ByteView<'_, T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -76,6 +72,41 @@ impl<'a, T: Unaligned + FromBytes + Copy> Index<usize> for ByteView<'a, T> {
         unsafe { &*self.bytes.as_ptr().add(index * size).cast::<T>() }
     }
 }
+
+impl<T> fmt::Debug for ByteView<'_, T>
+where
+    T: Unaligned + FromBytes + Copy + fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ByteView")
+            .field("len_bytes", &self.bytes.len())
+            .field("data", &self.as_slice())
+            .finish()
+    }
+}
+
+macro_rules! impl_slice_index {
+    ($range:ty) => {
+        impl<'a, T> Index<$range> for ByteView<'a, T>
+        where
+            T: Unaligned + FromBytes + Copy,
+        {
+            type Output = [T];
+
+            #[inline]
+            fn index(&self, idx: $range) -> &Self::Output {
+                &self.as_slice()[idx]
+            }
+        }
+    };
+}
+
+impl_slice_index!(Range<usize>);
+impl_slice_index!(RangeFrom<usize>);
+impl_slice_index!(RangeTo<usize>);
+impl_slice_index!(RangeInclusive<usize>);
+impl_slice_index!(RangeToInclusive<usize>);
+impl_slice_index!(RangeFull);
 
 #[cfg(test)]
 mod tests {
@@ -131,7 +162,7 @@ mod tests {
             Ok(_) => {
                 panic!("Expected error, but got Ok");
             }
-            Err(crate::error::Error::LengthError(e)) => {
+            Err(crate::error::Error::Length(e)) => {
                 assert_eq!(e, 115);
             }
             _ => {
