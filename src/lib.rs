@@ -6,14 +6,14 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use uuid::Uuid;
 use zerocopy::little_endian::{I32, I64, I128, U16, U32, U64};
 
-mod conv;
+pub mod conv;
 pub mod error;
 pub mod index;
 pub mod mark;
 pub mod parse;
-mod slice;
+pub mod slice;
 pub mod types;
-mod value;
+pub mod value;
 
 #[macro_export]
 macro_rules! transparent_newtype {
