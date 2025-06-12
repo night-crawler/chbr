@@ -3,11 +3,11 @@ use crate::mark::Mark;
 use crate::parse::block::ParseContext;
 use crate::parse::consts::{
     HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION, NEED_GLOBAL_DICTIONARY_BIT,
-    NEED_UPDATE_DICTIONARY_BIT, TUINT16, TUINT32, TUINT64, TUINT8,
+    NEED_UPDATE_DICTIONARY_BIT, TUINT8, TUINT16, TUINT32, TUINT64,
 };
+use crate::parse::{IResult, parse_var_str_bytes};
 use crate::parse::{parse_offsets, parse_u64, parse_var_str_type, parse_varuint};
-use crate::parse::{parse_var_str_bytes, IResult};
-use crate::types::{JsonColumnHeader, OffsetIndexPair as _, Type};
+use crate::types::{Field, JsonColumnHeader, OffsetIndexPair as _, Type};
 use crate::{bt, t};
 use log::debug;
 
@@ -102,6 +102,7 @@ impl<'a> Type<'a> {
             Type::Nullable(inner) => nullable(*inner, ctx),
             Type::Dynamic => dynamic(ctx),
             Type::Json => json(ctx),
+            Type::Nested(fields) => nested(fields, ctx),
             _ => {
                 todo!("Not implemented for {self:?}")
             }
@@ -348,6 +349,7 @@ fn array<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'
     let (input, offsets) = parse_offsets(ctx.input, ctx.num_rows)?;
     let num_rows = offsets.last_or_default()?;
     debug!("Array num_rows: {}", num_rows);
+    debug!("offsets: {:?}", offsets);
 
     if num_rows == 0 {
         return Ok((input, Mark::Array(offsets, Box::new(Mark::Empty))));
@@ -395,4 +397,27 @@ fn json_column_header(ctx: ParseContext<'_>) -> IResult<&[u8], JsonColumnHeader>
             mark: Mark::Empty,
         },
     ))
+}
+
+fn nested<'a>(fields: Vec<Field<'a>>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
+    debug!("Decoding Nested with {} fields", fields.len());
+
+    let mut inner_types = Vec::with_capacity(fields.len());
+    let mut col_names = Vec::with_capacity(fields.len());
+    for f in fields {
+        inner_types.push(f.typ);
+        col_names.push(f.name);
+    }
+
+    let tuple_type = bt!(Tuple(inner_types));
+    let array_of_tuples = t!(Array(tuple_type));
+
+    let (input, inner_mark) = array_of_tuples.decode(ctx)?;
+
+    let mark = Mark::Nested {
+        col_names,
+        array_of_tuples: Box::new(inner_mark),
+    };
+
+    Ok((input, mark))
 }

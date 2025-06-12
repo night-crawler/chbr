@@ -1,5 +1,5 @@
 use crate::slice::ByteView;
-use crate::types::{Field, JsonColumnHeader, Offsets};
+use crate::types::{JsonColumnHeader, Offsets};
 use crate::{
     Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
     Decimal128Data, Decimal256Data, Ipv4Data, Ipv6Data, UuidData, i256, u256,
@@ -76,7 +76,10 @@ pub enum Mark<'a> {
         discriminators: &'a [u8],
         types: Vec<Mark<'a>>,
     },
-    Nested(Vec<Field<'a>>, &'a [u8]),
+    Nested {
+        col_names: Vec<&'a str>,
+        array_of_tuples: Box<Mark<'a>>,
+    },
     Dynamic(Vec<usize>, Vec<Mark<'a>>),
 
     Json {
@@ -148,7 +151,7 @@ impl Mark<'_> {
             Self::Nullable(_, _) => None,
             Self::LowCardinality { .. } => None,
             Self::String(_, _) => None,
-            Self::Nested(_, _) => None,
+            Self::Nested { .. } => None,
             Self::Empty => None,
         }
     }
@@ -297,7 +300,7 @@ impl Debug for Mark<'_> {
                 .field("values", inner)
                 .finish(),
 
-            Tuple(items) => f.debug_tuple("VarTuple").field(items).finish(),
+            Tuple(items) => f.debug_tuple("Tuple").field(items).finish(),
 
             Nullable(nulls, col) => f
                 .debug_struct("Nullable")
@@ -329,11 +332,13 @@ impl Debug for Mark<'_> {
                 .field("offsets", offsets)
                 .finish(),
 
-            Nested(fields, bytes) => f
+            Nested {
+                col_names,
+                array_of_tuples,
+            } => f
                 .debug_struct("Nested")
-                .field("fields_len", &fields.len())
-                .field("len_bytes", &bytes.len())
-                .field("ptr", &bytes.as_ptr())
+                .field("col_names", col_names)
+                .field("array_of_tuples", &array_of_tuples)
                 .finish(),
 
             Dynamic(layout, cols) => f

@@ -229,4 +229,11 @@ mod tests {
         parse_block(&buf)?;
         Ok(())
     }
+
+    #[test]
+    fn array_of_nested() -> TestResult {
+        let buf = load("./test_data/array_of_nested.native")?;
+        parse_block(&buf)?;
+        Ok(())
+    }
 }

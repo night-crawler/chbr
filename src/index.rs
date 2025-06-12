@@ -143,7 +143,7 @@ impl<'a> Mark<'a> {
                 let in_type_index = *offsets.get(index)?;
                 types[discriminator].get(in_type_index)
             }
-            Mark::Nested(_, _) => todo!(),
+            Mark::Nested { .. } => todo!(),
             Mark::Dynamic(_, _) => todo!(),
             Mark::Json { .. } => todo!(),
         }
@@ -267,7 +267,7 @@ impl<'a> Mark<'a> {
                 slice_indices: idx,
             },
             Mark::Variant { .. } => todo!(),
-            Mark::Nested(_, _) => todo!(),
+            Mark::Nested { .. } => todo!(),
             Mark::Dynamic(_, _) => todo!(),
             Mark::Json { .. } => todo!(),
         }
