@@ -55,7 +55,6 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
             ParsedBlock {
                 cols: Vec::new(),
                 col_names: Vec::new(),
-                index: 0,
                 num_rows: 0,
             },
         ));
@@ -82,7 +81,7 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
     let mut col_names = Vec::with_capacity(num_columns);
 
     for index in 0..num_columns {
-        debug!("Parsing column {index} of {num_columns}");
+        debug!("Parsing column {} of {num_columns}", index + 1);
         parse_context.col_id = index;
 
         let column_name;
@@ -115,7 +114,6 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
         ParsedBlock {
             cols: columns,
             col_names,
-            index: 0,
             num_rows,
         },
     ))
@@ -124,173 +122,111 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::init_logger;
-    use std::io::Read as _;
+    use crate::common::load;
     use testresult::TestResult;
 
     #[test]
     fn a_lot_of_types() -> TestResult {
-        init_logger();
-
-        let mut file = std::fs::File::open("./test_data/sample.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
+        let buf = load("./test_data/sample.native")?;
         parse_block(&buf)?;
-
         Ok(())
     }
 
     #[test]
     fn array_lc_string() -> TestResult {
-        init_logger();
-
-        let mut file = std::fs::File::open("./test_data/array_lc_string.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
+        let buf = load("./test_data/array_lc_string.native")?;
         parse_block(&buf)?;
-
         Ok(())
     }
 
     #[test]
     fn array() -> TestResult {
-        let mut file = std::fs::File::open("./test_data/array.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
+        let buf = load("./test_data/array.native")?;
         parse_block(&buf)?;
-
         Ok(())
     }
 
     #[test]
     fn tuple() -> TestResult {
-        let mut file = std::fs::File::open("./test_data/tuple.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
+        let buf = load("./test_data/tuple.native")?;
         parse_block(&buf)?;
-
         Ok(())
     }
 
     #[test]
     fn variant() -> TestResult {
-        let mut file = std::fs::File::open("./test_data/variant.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
+        let buf = load("./test_data/variant.native")?;
         parse_block(&buf)?;
-
         Ok(())
     }
 
     #[test]
     fn dynamic() -> TestResult {
-        init_logger();
-
-        let mut file = std::fs::File::open("./test_data/dynamic.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
+        let buf = load("./test_data/dynamic.native")?;
         parse_block(&buf)?;
-
         Ok(())
     }
 
     #[test]
     fn nullable_string() -> TestResult {
-        let mut file = std::fs::File::open("./test_data/nullable_string.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
+        let buf = load("./test_data/nullable_string.native")?;
         parse_block(&buf)?;
-
         Ok(())
     }
 
     #[test]
     fn json() -> TestResult {
-        let mut file = std::fs::File::open("./test_data/json.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
+        let buf = load("./test_data/json.native")?;
         parse_block(&buf)?;
-
         Ok(())
     }
 
     #[test]
     fn array_nullable_int64() -> TestResult {
-        let mut file = std::fs::File::open("./test_data/array_nullable_int64.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
+        let buf = load("./test_data/array_nullable_int64.native")?;
         parse_block(&buf)?;
-
         Ok(())
     }
 
     #[test]
     fn array_lc_nullable_string() -> TestResult {
-        let mut file = std::fs::File::open("./test_data/array_lc_nullable_string.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
+        let buf = load("./test_data/array_lc_nullable_string.native")?;
         parse_block(&buf)?;
-
         Ok(())
     }
 
     #[test]
     fn array_string() -> TestResult {
-        let mut file = std::fs::File::open("./test_data/array_string.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
+        let buf = load("./test_data/array_string.native")?;
         parse_block(&buf)?;
-
         Ok(())
     }
 
     #[test]
     fn map_nullable_lc_string() -> TestResult {
-        init_logger();
-
-        let mut file = std::fs::File::open("./test_data/map_nullable_lc_string.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
+        let buf = load("./test_data/map_nullable_lc_string.native")?;
         parse_block(&buf)?;
-
         Ok(())
     }
 
     #[test]
     fn events() -> TestResult {
-        init_logger();
-
-        let mut file = std::fs::File::open("./test_data/events.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
+        let buf = load("./test_data/events.native")?;
         parse_block(&buf)?;
-
         Ok(())
     }
 
     #[test]
     fn plain_strings() -> TestResult {
-        init_logger();
-
-        let mut file = std::fs::File::open("./test_data/plain_strings.native")?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
+        let buf = load("./test_data/plain_strings.native")?;
         parse_block(&buf)?;
+        Ok(())
+    }
 
+    #[test]
+    fn metric_activity() -> TestResult {
+        let buf = load("./test_data/metric_activity.native")?;
+        parse_block(&buf)?;
         Ok(())
     }
 }

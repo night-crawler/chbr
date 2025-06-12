@@ -3,17 +3,17 @@ use crate::mark::Mark;
 use crate::parse::block::ParseContext;
 use crate::parse::consts::{
     HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION, NEED_GLOBAL_DICTIONARY_BIT,
-    NEED_UPDATE_DICTIONARY_BIT, TUINT8, TUINT16, TUINT32, TUINT64,
+    NEED_UPDATE_DICTIONARY_BIT, TUINT16, TUINT32, TUINT64, TUINT8,
 };
-use crate::parse::{IResult, parse_var_str_bytes};
 use crate::parse::{parse_offsets, parse_u64, parse_var_str_type, parse_varuint};
+use crate::parse::{parse_var_str_bytes, IResult};
 use crate::types::{JsonColumnHeader, OffsetIndexPair as _, Type};
 use crate::{bt, t};
-use log::{debug, info};
+use log::debug;
 
 impl<'a> Type<'a> {
     pub(crate) fn decode_prefix(&self, mut ctx: ParseContext<'a>) -> IResult<&'a [u8], ()> {
-        info!("Decoding prefix for type: {:?}", self);
+        debug!("Decoding prefix for type: {self:?}");
         match self {
             Type::Nullable(inner) => {
                 let (input, ()) = inner.decode_prefix(ctx.clone())?;
@@ -41,7 +41,7 @@ impl<'a> Type<'a> {
             }
             Type::LowCardinality(_) => {
                 let (input, version) = parse_u64::<u64>(ctx.input)?;
-                info!("LowCardinality version: {version}");
+                debug!("LowCardinality version: {version}");
                 if version != LOW_CARDINALITY_VERSION {
                     return Err(Error::Parse(format!(
                         "LowCardinality version {version} is not supported, only {LOW_CARDINALITY_VERSION} is allowed"
@@ -197,6 +197,17 @@ fn nullable<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mar
 }
 
 fn lc<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
+    if ctx.num_rows == 0 {
+        return Ok((
+            ctx.input,
+            Mark::LowCardinality {
+                indices: Box::new(Mark::Empty),
+                global_dictionary: None,
+                additional_keys: Some(Box::new(Mark::Empty)),
+            },
+        ));
+    }
+
     let (mut input, flags) = parse_u64::<u64>(ctx.input)?;
     let has_additional_keys = flags & HAS_ADDITIONAL_KEYS_BIT != 0;
 
@@ -205,11 +216,12 @@ fn lc<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>>
     let needs_global_dictionary = flags & NEED_GLOBAL_DICTIONARY_BIT != 0;
     let needs_update_dictionary = flags & NEED_UPDATE_DICTIONARY_BIT != 0;
 
-    info!(
-        "LowCardinality 
-        has_additional_keys: {has_additional_keys}; 
-        needs_global_dictionary: {needs_global_dictionary}; 
-        needs_update_dictionary: {needs_update_dictionary}"
+    debug!(
+        "LowCardinality rows: {} \
+         has_additional_keys: {has_additional_keys}; \
+         needs_global_dictionary: {needs_global_dictionary}; \
+         needs_update_dictionary: {needs_update_dictionary}",
+        ctx.num_rows
     );
 
     let index_type = match flags & 0xff {
@@ -306,6 +318,8 @@ fn variant<'a>(inner: Vec<Type<'a>>, ctx: ParseContext<'a>) -> IResult<&'a [u8],
 fn map<'a>(key: Type<'a>, value: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
     let (input, offsets) = parse_offsets(ctx.input, ctx.num_rows)?;
     let n = offsets.last_or_default()?;
+
+    debug!("Map got {n} rows");
 
     let (input, keys) = key.decode(ctx.fork(input).with_num_rows(n))?;
     let (input, values) = value.decode(ctx.fork(input).with_num_rows(n))?;

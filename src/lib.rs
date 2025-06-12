@@ -116,7 +116,6 @@ pub type Result<T> = std::result::Result<T, error::Error>;
 
 pub struct ParsedBlock<'a> {
     pub cols: Vec<Mark<'a>>,
-    pub index: usize,
     pub col_names: Vec<&'a str>,
     pub num_rows: usize,
 }
@@ -132,7 +131,19 @@ pub(crate) mod common {
 
     pub fn init_logger() {
         INIT.get_or_init(|| {
+            use std::io::Write as _;
             env_logger::builder()
+                .format(|buf, record| {
+                    writeln!(
+                        buf,
+                        "{} [{:<5}] {}:{} {}",
+                        buf.timestamp_millis(),
+                        record.level(),
+                        record.file().unwrap_or("<unknown>"),
+                        record.line().unwrap_or(0),
+                        record.args()
+                    )
+                })
                 .filter_level(LevelFilter::Debug)
                 .is_test(true)
                 .init();

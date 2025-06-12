@@ -1233,4 +1233,30 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn metric_activity() -> TestResult {
+        let data = load("./test_data/metric_activity.native")?;
+        let (_, block) = parse_block(&data)?;
+
+        for index in 0..block.num_rows {
+            for (col, name) in block.cols.iter().zip(block.col_names.iter()) {
+                if !name.contains("attrs") {
+                    continue;
+                }
+                let value = col.get(index).unwrap();
+                let value: MapIterator<&str, &str> = value.try_into()?;
+
+                let mut map = HashMap::new();
+                for (key, val) in value.flatten() {
+                    map.insert(key, val);
+                }
+                println!("{:?}", map);
+            }
+
+            println!("----");
+        }
+
+        Ok(())
+    }
 }
