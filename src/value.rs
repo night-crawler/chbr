@@ -154,6 +154,16 @@ pub enum Value<'a> {
         data: &'a [u8],
         indices: Range<usize>,
     },
+
+    Enum8Slice {
+        variants: &'a [(&'a str, i8)],
+        data: &'a [i8],
+    },
+
+    Enum16Slice {
+        variants: &'a [(&'a str, i16)],
+        data: &'a [I16],
+    },
 }
 
 impl Value<'_> {
@@ -224,6 +234,8 @@ impl Value<'_> {
             Value::Nested { .. } => "Nested",
             Value::NestedSlice { .. } => "NestedSlice",
             Value::FixedStringSlice { .. } => "FixedStringSlice",
+            Value::Enum8Slice { .. } => "Enum8SliceIterator",
+            Value::Enum16Slice { .. } => "Enum16SliceIterator",
         }
     }
 }
@@ -1182,5 +1194,77 @@ impl<'a> Iterator for FixedStringSliceIterator<'a> {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = self.slice_indices.end - self.slice_indices.start;
         (remaining, Some(remaining))
+    }
+}
+
+pub struct Enum8SliceIterator<'a> {
+    variants: &'a [(&'a str, i8)],
+    data: std::slice::Iter<'a, i8>,
+}
+
+impl<'a> TryFrom<Value<'a>> for Enum8SliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Enum8Slice { variants, data } => Ok(Self {
+                variants,
+                data: data.iter(),
+            }),
+            other => Err(Error::MismatchedType(other.as_str(), "Enum8Iterator")),
+        }
+    }
+}
+
+impl<'a> Iterator for Enum8SliceIterator<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let value = self.data.next()?;
+        if let Ok(index) = self.variants.binary_search_by_key(value, |(_, id)| *id) {
+            return Some(self.variants[index].0);
+        }
+
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.data.size_hint()
+    }
+}
+
+pub struct Enum16SliceIterator<'a> {
+    variants: &'a [(&'a str, i16)],
+    data: std::slice::Iter<'a, I16>,
+}
+
+impl<'a> TryFrom<Value<'a>> for Enum16SliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Enum16Slice { variants, data } => Ok(Self {
+                variants,
+                data: data.iter(),
+            }),
+            other => Err(Error::MismatchedType(other.as_str(), "Enum16Iterator")),
+        }
+    }
+}
+
+impl<'a> Iterator for Enum16SliceIterator<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let value = self.data.next()?.get();
+        if let Ok(index) = self.variants.binary_search_by_key(&value, |(_, id)| *id) {
+            return Some(self.variants[index].0);
+        }
+
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.data.size_hint()
     }
 }

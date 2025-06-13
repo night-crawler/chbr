@@ -6,7 +6,7 @@ use std::str::{FromStr, from_utf8};
 use nom::branch::alt;
 use nom::bytes::complete::take_while1;
 use nom::character::complete::{alphanumeric1, char, digit1, multispace0, multispace1};
-use nom::combinator::{map, map_res, recognize};
+use nom::combinator::{map, map_res, opt, recognize};
 use nom::error::{ErrorKind, FromExternalError as _, ParseError};
 use nom::multi::{many0, separated_list1};
 use nom::sequence::{delimited, pair, preceded, separated_pair};
@@ -303,7 +303,7 @@ fn parse_enum8(input: &[u8]) -> IResult<&[u8], Type> {
                     separated_pair(
                         delimited(ws(char('\'')), take_while1(|c| c != b'\''), ws(char('\''))),
                         ws(char('=')),
-                        map_res(digit1, parse_num::<i8>),
+                        map_res(recognize(pair(opt(char('-')), digit1)), parse_num::<i8>),
                     ),
                 ),
                 ws(char(')')),

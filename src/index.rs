@@ -104,8 +104,24 @@ impl<'a> Mark<'a> {
             | Mark::MultiLineString(_) => {
                 unreachable!("Geometric types should be covered by arrays)")
             }
-            Mark::Enum8(_, _) => todo!(),
-            Mark::Enum16(_, _) => todo!(),
+            Mark::Enum8(variants, data) => {
+                // is there any more efficient way to map into the enum name?
+                // we could allocate vec![<name>; 255] to store names, but it will not
+                // work for enum 16
+                let variant = *data.get(index)?;
+                if let Ok(index) = variants.binary_search_by_key(&variant, |(_, id)| *id) {
+                    return Some(Value::String(variants[index].0));
+                }
+                // actually at this point it's broken, but we trust clickhouse!
+                None
+            }
+            Mark::Enum16(variants, data) => {
+                let variant = data.get(index)?.get();
+                if let Ok(index) = variants.binary_search_by_key(&variant, |(_, id)| *id) {
+                    return Some(Value::String(variants[index].0));
+                }
+                None
+            }
             Mark::LowCardinality {
                 indices,
                 // https://github.com/ClickHouse/clickhouse-go/blob/main/lib/column/lowcardinality.go#L191
@@ -155,7 +171,7 @@ impl<'a> Mark<'a> {
                 col_names,
                 array_of_tuples,
             } => {
-                // verify index is present
+                // verify the index is present
                 let _ = array_of_tuples.get(index)?;
                 Some(Value::Nested {
                     col_names,
@@ -249,8 +265,14 @@ impl<'a> Mark<'a> {
             | Mark::MultiPolygon(_)
             | Mark::LineString(_)
             | Mark::MultiLineString(_) => unreachable!("must be covered by array marker already"),
-            Mark::Enum8(_, _) => todo!(),
-            Mark::Enum16(_, _) => todo!(),
+            Mark::Enum8(variants, data) => Value::Enum8Slice {
+                variants,
+                data: &data[idx],
+            },
+            Mark::Enum16(variants, data) => Value::Enum16Slice {
+                variants,
+                data: &data[idx],
+            },
             Mark::LowCardinality {
                 indices,
                 global_dictionary: _unused,
@@ -289,7 +311,6 @@ impl<'a> Mark<'a> {
                 values,
                 slice_indices: idx,
             },
-            Mark::Variant { .. } => todo!(),
             Mark::Nested {
                 col_names,
                 array_of_tuples,
@@ -298,6 +319,7 @@ impl<'a> Mark<'a> {
                 array_of_tuples,
                 slice_indices: idx,
             },
+            Mark::Variant { .. } => todo!(),
             Mark::Dynamic(_, _) => todo!(),
             Mark::Json { .. } => todo!(),
         }
@@ -309,9 +331,10 @@ mod tests {
     use crate::common::load;
     use crate::parse::block::parse_block;
     use crate::value::{
-        ArraySliceIterator, BoolSliceIterator, FixedStringSliceIterator,
-        LowCardinalitySliceIterator, MapIterator, MapSliceIterator, NestedIterator,
-        NestedSliceIterator, NullableSliceIterator, StringSliceIterator, TupleSliceIterator, Value,
+        ArraySliceIterator, BoolSliceIterator, Enum8SliceIterator, Enum16SliceIterator,
+        FixedStringSliceIterator, LowCardinalitySliceIterator, MapIterator, MapSliceIterator,
+        NestedIterator, NestedSliceIterator, NullableSliceIterator, StringSliceIterator,
+        TupleSliceIterator, Value,
     };
     use half::bf16;
     use pretty_assertions::assert_eq;
@@ -1443,6 +1466,89 @@ mod tests {
         for (i, expected) in expected.iter().enumerate() {
             let value: FixedStringSliceIterator =
                 fixed_string_array_marker.get(i).unwrap().try_into()?;
+            let mut actual = vec![];
+            for item in value {
+                actual.push(item);
+            }
+            assert_eq!(actual, *expected, "Mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn enums_sample() -> TestResult {
+        let data = load("./test_data/enums_sample.native")?;
+        let (_, block) = parse_block(&data)?;
+
+        // 0,Red,Foo
+        // 1,Green,Bar
+        // 2,Blue,Foo
+        // 3,Red,Bar
+        // 4,Green,Foo
+        // 5,Blue,Bar
+
+        let expected_e8 = ["Red", "Green", "Blue", "Red", "Green", "Blue"];
+
+        let e8_marker = &block.cols[1];
+        for (i, expected) in expected_e8.iter().enumerate() {
+            let value: &str = e8_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        let expected_e16 = ["Foo", "Bar", "Foo", "Bar", "Foo", "Bar"];
+        let e16_marker = &block.cols[2];
+        for (i, expected) in expected_e16.iter().enumerate() {
+            let value: &str = e16_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn enums_array_sample() -> TestResult {
+        let data = load("./test_data/enums_array_sample.native")?;
+        let (_, block) = parse_block(&data)?;
+
+        // 0,"['Red', 'Green']",['Foo']
+        // 1,"['Blue', 'Red']",['Bar']
+        // 2,['Green'],"['Foo', 'Bar']"
+        // 3,[],['Foo']
+        // 4,"['Red', 'Blue']",[]
+        // 5,"['Green', 'Red', 'Blue']",['Bar']
+
+        let expected_e8 = [
+            vec!["Red", "Green"],
+            vec!["Blue", "Red"],
+            vec!["Green"],
+            vec![],
+            vec!["Red", "Blue"],
+            vec!["Green", "Red", "Blue"],
+        ];
+
+        let e8_marker = &block.cols[1];
+        for (i, expected) in expected_e8.iter().enumerate() {
+            let value: Enum8SliceIterator = e8_marker.get(i).unwrap().try_into()?;
+            let mut actual = vec![];
+            for item in value {
+                actual.push(item);
+            }
+            assert_eq!(actual, *expected, "Mismatch at index {i}");
+        }
+
+        let expected_e16 = [
+            vec!["Foo"],
+            vec!["Bar"],
+            vec!["Foo", "Bar"],
+            vec!["Foo"],
+            vec![],
+            vec!["Bar"],
+        ];
+
+        let e16_marker = &block.cols[2];
+        for (i, expected) in expected_e16.iter().enumerate() {
+            let value: Enum16SliceIterator = e16_marker.get(i).unwrap().try_into()?;
             let mut actual = vec![];
             for item in value {
                 actual.push(item);

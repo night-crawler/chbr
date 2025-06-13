@@ -55,8 +55,8 @@ pub enum Mark<'a> {
     LineString(Box<Mark<'a>>),
     MultiLineString(Box<Mark<'a>>),
 
-    Enum8(Vec<(&'a str, i8)>, &'a [u8]),
-    Enum16(Vec<(&'a str, i16)>, &'a [u8]),
+    Enum8(Vec<(&'a str, i8)>, ByteView<'a, i8>),
+    Enum16(Vec<(&'a str, i16)>, ByteView<'a, I16>),
 
     LowCardinality {
         indices: Box<Mark<'a>>,
@@ -266,15 +266,13 @@ impl Debug for Mark<'_> {
 
             Enum8(map, data) => f
                 .debug_struct("Enum8")
-                .field("mapping_len", &map.len())
-                .field("len_bytes", &data.len())
-                .field("ptr", &data.as_ptr())
+                .field("map", &map.len())
+                .field("data", &data.as_slice())
                 .finish(),
             Enum16(map, data) => f
                 .debug_struct("Enum16")
-                .field("mapping_len", &map.len())
-                .field("len_bytes", &data.len())
-                .field("ptr", &data.as_ptr())
+                .field("map", &map)
+                .field("data", &data)
                 .finish(),
 
             Ring(inner) => f.debug_tuple("Ring").field(inner).finish(),

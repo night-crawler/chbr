@@ -285,8 +285,8 @@ impl<'a> Type<'a> {
             Type::Ipv4 => Mark::Ipv4(ByteView::try_from(data)?),
             Type::Ipv6 => Mark::Ipv6(ByteView::try_from(data)?),
 
-            Type::Enum8(values) => Mark::Enum8(values, data),
-            Type::Enum16(values) => Mark::Enum16(values, data),
+            Type::Enum8(values) => Mark::Enum8(values, ByteView::try_from(data)?),
+            Type::Enum16(values) => Mark::Enum16(values, ByteView::try_from(data)?),
 
             _ => unimplemented!("Const size is not implemented for type: {:?}", self),
         };
