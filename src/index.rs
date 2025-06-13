@@ -1,3 +1,4 @@
+use crate::ByteSliceExt as _;
 use crate::mark::Mark;
 use crate::parse::parse_var_str;
 use crate::types::OffsetIndexPair as _;
@@ -55,7 +56,14 @@ impl<'a> Mark<'a> {
 
                 Some(Value::String(s))
             }
-            Mark::FixedString(_, _) => todo!(),
+            Mark::FixedString(size, data) => {
+                let offset = size * index;
+                let slice = data[offset..offset + size].rtrim_zeros();
+
+                Some(Value::String(unsafe {
+                    std::str::from_utf8_unchecked(slice)
+                }))
+            }
             Mark::Uuid(bv) => {
                 let value = bv.get(index)?;
                 Some(Value::Uuid(uuid::Uuid::from(*value)))
@@ -212,7 +220,11 @@ impl<'a> Mark<'a> {
 
                 Value::StringSlice(count, data_start)
             }
-            Mark::FixedString(_, _) => todo!(),
+            Mark::FixedString(size, data) => Value::FixedStringSlice {
+                size: *size,
+                data,
+                indices: idx,
+            },
             Mark::Uuid(bv) => Value::UuidSlice(&bv[idx]),
             Mark::Date(bv) => Value::Date16Slice(&bv[idx]),
             Mark::Date32(bv) => Value::Date32Slice(&bv[idx]),
@@ -297,9 +309,9 @@ mod tests {
     use crate::common::load;
     use crate::parse::block::parse_block;
     use crate::value::{
-        ArraySliceIterator, BoolSliceIterator, LowCardinalitySliceIterator, MapIterator,
-        MapSliceIterator, NestedIterator, NestedSliceIterator, NullableSliceIterator,
-        StringSliceIterator, TupleSliceIterator, Value,
+        ArraySliceIterator, BoolSliceIterator, FixedStringSliceIterator,
+        LowCardinalitySliceIterator, MapIterator, MapSliceIterator, NestedIterator,
+        NestedSliceIterator, NullableSliceIterator, StringSliceIterator, TupleSliceIterator, Value,
     };
     use half::bf16;
     use pretty_assertions::assert_eq;
@@ -1373,6 +1385,69 @@ mod tests {
                 actual_nested, *expected_nested,
                 "Mismatch in nested data at top-level row {row_idx}"
             );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn fixed_string_sample() -> TestResult {
+        let data = load("./test_data/fixed_string_sample.native")?;
+        let (_, block) = parse_block(&data)?;
+
+        // 0,fixed string 1  
+        // 1,fixed string 2  
+        // 2,fixed string 3  
+        // 3,fixed string 4  
+        // 4,fixed string 5 q
+
+        let expected = [
+            "fixed string 1",
+            "fixed string 2",
+            "fixed string 3",
+            "fixed string 4",
+            "fixed string 5 q",
+        ];
+
+        let fixed_string_marker = &block.cols[1];
+        for (i, expected) in expected.iter().enumerate() {
+            let value: &str = fixed_string_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn fixed_string_array() -> TestResult {
+        let data = load("./test_data/fixed_string_array.native")?;
+        let (_, block) = parse_block(&data)?;
+
+        // 0,"['fixed string 1\u0000\u0000', 'fixed string 2\u0000\u0000']"
+        // 1,"['fixed string 3\u0000\u0000', 'fixed string 4\u0000\u0000']"
+        // 2,"['fixed string 5\u0000\u0000', 'fixed string 6\u0000\u0000']"
+        // 3,['fixed string 7\u0000\u0000']
+        // 4,[]
+        // 5,"['fixed string 8\u0000\u0000', 'fixed string 9\u0000\u0000']"
+
+        let expected = [
+            vec!["fixed string 1", "fixed string 2"],
+            vec!["fixed string 3", "fixed string 4"],
+            vec!["fixed string 5", "fixed string 6"],
+            vec!["fixed string 7"],
+            vec![],
+            vec!["fixed string 8", "fixed string 9"],
+        ];
+
+        let fixed_string_array_marker = &block.cols[1];
+        for (i, expected) in expected.iter().enumerate() {
+            let value: FixedStringSliceIterator =
+                fixed_string_array_marker.get(i).unwrap().try_into()?;
+            let mut actual = vec![];
+            for item in value {
+                actual.push(item);
+            }
+            assert_eq!(actual, *expected, "Mismatch at index {i}");
         }
 
         Ok(())

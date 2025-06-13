@@ -114,6 +114,20 @@ impl Decimal128Data {
 
 pub type Result<T> = std::result::Result<T, error::Error>;
 
+pub(crate) trait ByteSliceExt {
+    fn rtrim_zeros(&self) -> &[u8];
+}
+
+impl ByteSliceExt for [u8] {
+    fn rtrim_zeros(&self) -> &[u8] {
+        let mut end = self.len();
+        while end > 0 && self[end - 1] == 0 {
+            end -= 1;
+        }
+        &self[..end]
+    }
+}
+
 pub struct ParsedBlock<'a> {
     pub cols: Vec<Mark<'a>>,
     pub col_names: Vec<&'a str>,

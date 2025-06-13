@@ -3,8 +3,8 @@ use crate::mark::Mark;
 use crate::parse::parse_var_str;
 use crate::types::{OffsetIndexPair as _, Offsets};
 use crate::{
-    Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
-    Decimal128Data, Decimal256Data, Ipv4Data, Ipv6Data, UuidData, i256, u256,
+    ByteSliceExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data,
+    Decimal64Data, Decimal128Data, Decimal256Data, Ipv4Data, Ipv6Data, UuidData, i256, u256,
 };
 use chrono_tz::Tz;
 use core::convert::TryFrom;
@@ -148,6 +148,12 @@ pub enum Value<'a> {
         array_of_tuples: &'a Mark<'a>,
         slice_indices: Range<usize>,
     },
+
+    FixedStringSlice {
+        size: usize,
+        data: &'a [u8],
+        indices: Range<usize>,
+    },
 }
 
 impl Value<'_> {
@@ -217,6 +223,7 @@ impl Value<'_> {
             Value::Decimal256Slice { .. } => "Decimal256Slice",
             Value::Nested { .. } => "Nested",
             Value::NestedSlice { .. } => "NestedSlice",
+            Value::FixedStringSlice { .. } => "FixedStringSlice",
         }
     }
 }
@@ -1127,3 +1134,53 @@ impl<'a> Iterator for NestedSliceIterator<'a> {
 }
 
 impl ExactSizeIterator for NestedSliceIterator<'_> {}
+
+pub struct FixedStringSliceIterator<'a> {
+    data: &'a [u8],
+    size: usize,
+    slice_indices: Range<usize>,
+}
+
+impl<'a> TryFrom<Value<'a>> for FixedStringSliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::FixedStringSlice {
+                size,
+                data,
+                indices,
+            } => Ok(Self {
+                data,
+                size,
+                slice_indices: indices,
+            }),
+            other => Err(Error::MismatchedType(
+                other.as_str(),
+                "FixedStringSliceIterator",
+            )),
+        }
+    }
+}
+
+impl<'a> Iterator for FixedStringSliceIterator<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let slice_idx = self.slice_indices.next()?;
+        let start = slice_idx * self.size;
+        let end = start + self.size;
+
+        if end > self.data.len() {
+            return None;
+        }
+
+        let slice = &self.data[start..end].rtrim_zeros();
+        Some(unsafe { std::str::from_utf8_unchecked(slice) })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.slice_indices.end - self.slice_indices.start;
+        (remaining, Some(remaining))
+    }
+}
