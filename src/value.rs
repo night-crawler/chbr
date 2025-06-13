@@ -136,6 +136,12 @@ pub enum Value<'a> {
         slice_indices: Range<usize>,
         inner: &'a Mark<'a>,
     },
+
+    Nested {
+        col_names: &'a [&'a str],
+        array_of_tuples: &'a Mark<'a>,
+        index: usize,
+    },
 }
 
 impl Value<'_> {
@@ -203,6 +209,7 @@ impl Value<'_> {
             Value::Decimal64Slice { .. } => "Decimal64Slice",
             Value::Decimal128Slice { .. } => "Decimal128Slice",
             Value::Decimal256Slice { .. } => "Decimal256Slice",
+            Value::Nested { .. } => "Nested",
         }
     }
 }
@@ -996,5 +1003,64 @@ impl Iterator for Decimal128SliceIterator<'_> {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.slice.size_hint()
+    }
+}
+
+pub struct NestedIterator<'a> {
+    col_names: &'a [&'a str],
+    tuple_slice: TupleSliceIterator<'a>,
+}
+
+impl<'a> TryFrom<Value<'a>> for NestedIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Nested {
+                col_names,
+                array_of_tuples,
+                index,
+            } => {
+                let value = array_of_tuples
+                    .get(index)
+                    .ok_or(Error::IndexOutOfBounds(index, "Nested"))?;
+                let value: TupleSliceIterator = value.try_into()?;
+                Ok(Self {
+                    col_names,
+                    tuple_slice: value,
+                })
+            }
+            other => Err(Error::MismatchedType(other.as_str(), "NestedIterator")),
+        }
+    }
+}
+
+impl<'a> Iterator for NestedIterator<'a> {
+    type Item = NestedItemsIterator<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let value = self.tuple_slice.next()?;
+        let Value::Tuple(row, slice) = value else {
+            return None;
+        };
+
+        let q = slice.iter().zip(self.col_names);
+
+        Some(NestedItemsIterator { mark_ter: q, row })
+    }
+}
+
+pub struct NestedItemsIterator<'a> {
+    mark_ter: std::iter::Zip<std::slice::Iter<'a, Mark<'a>>, std::slice::Iter<'a, &'a str>>,
+    row: usize,
+}
+
+impl<'a> Iterator for NestedItemsIterator<'a> {
+    type Item = (&'a str, Value<'a>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (mark, col_name) = self.mark_ter.next()?;
+        let value = mark.get(self.row)?;
+        Some((col_name, value))
     }
 }

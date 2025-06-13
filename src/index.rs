@@ -143,7 +143,18 @@ impl<'a> Mark<'a> {
                 let in_type_index = *offsets.get(index)?;
                 types[discriminator].get(in_type_index)
             }
-            Mark::Nested { .. } => todo!(),
+            Mark::Nested {
+                col_names,
+                array_of_tuples,
+            } => {
+                // verify index is present
+                let _ = array_of_tuples.get(index)?;
+                Some(Value::Nested {
+                    col_names,
+                    array_of_tuples,
+                    index,
+                })
+            }
             Mark::Dynamic(_, _) => todo!(),
             Mark::Json { .. } => todo!(),
         }
@@ -267,7 +278,10 @@ impl<'a> Mark<'a> {
                 slice_indices: idx,
             },
             Mark::Variant { .. } => todo!(),
-            Mark::Nested { .. } => todo!(),
+            Mark::Nested {
+                col_names,
+                array_of_tuples,
+            } => todo!(),
             Mark::Dynamic(_, _) => todo!(),
             Mark::Json { .. } => todo!(),
         }
@@ -280,7 +294,8 @@ mod tests {
     use crate::parse::block::parse_block;
     use crate::value::{
         ArraySliceIterator, BoolSliceIterator, LowCardinalitySliceIterator, MapIterator,
-        MapSliceIterator, NullableSliceIterator, StringSliceIterator, TupleSliceIterator, Value,
+        MapSliceIterator, NestedIterator, NullableSliceIterator, StringSliceIterator,
+        TupleSliceIterator, Value,
     };
     use half::bf16;
     use pretty_assertions::assert_eq;
@@ -1251,10 +1266,76 @@ mod tests {
                 for (key, val) in value.flatten() {
                     map.insert(key, val);
                 }
-                println!("{:?}", map);
+            }
+        }
+
+        Ok(())
+    }
+
+    // #[test]
+    // fn array_of_nested() -> TestResult {
+    //     let data = load("./test_data/array_of_nested.native")?;
+    //     let (_, block) = parse_block(&data)?;
+    // 
+    //     //    ┌─id─┬─arr───────────────────────────┐
+    //     // 1. │  0 │ [[(1,'Alice'),(2,'Bob')]]     │
+    //     // 2. │  1 │ [[(3,'Charlie'),(4,'Diana')]] │
+    //     // 3. │  2 │ [[(5,'Eve')]]                 │
+    //     // 4. │  3 │ [[]]                          │
+    //     // 5. │  4 │ [[(6,'Frank'),(7,'Grace')]]   │
+    //     // 6. │  5 │ [[(8,'Heidi')]]               │
+    //     //    └────┴───────────────────────────────┘
+    // 
+    //     let nested_mark = &block.cols[1];
+    //     for index in 0..block.num_rows {
+    //         let value = nested_mark.get(index).unwrap();
+    //     }
+    // 
+    //     Ok(())
+    // }
+
+    #[test]
+    fn simple_nested() -> TestResult {
+        let data = load("./test_data/simple_nested.native")?;
+        let (_, block) = parse_block(&data)?;
+
+        let expected: [Vec<(i64, &str)>; 6] = [
+            vec![(1, "Alice"), (2, "Bob")],
+            vec![(3, "Charlie"), (4, "Diana")],
+            vec![(5, "Eve")],
+            vec![],
+            vec![(6, "Frank"), (7, "Grace")],
+            vec![(8, "Heidi")],
+        ];
+
+        let nested_marker = &block.cols[1];
+
+        for (row_idx, expected_nested) in expected.iter().enumerate() {
+            let nested_iter: NestedIterator = nested_marker.get(row_idx).unwrap().try_into()?;
+
+            let mut actual_nested = Vec::<(i64, &str)>::new();
+            for nested_row in nested_iter {
+                let mut id: Option<i64> = None;
+                let mut name: Option<&str> = None;
+
+                for (field_name, field_value) in nested_row {
+                    match field_name {
+                        "child_id" => id = Some(field_value.try_into()?),
+                        "child_name" => name = Some(field_value.try_into()?),
+                        _ => {}
+                    }
+                }
+
+                actual_nested.push((
+                    id.expect("missing child_id"),
+                    name.expect("missing child_name"),
+                ));
             }
 
-            println!("----");
+            assert_eq!(
+                actual_nested, *expected_nested,
+                "Mismatch in nested data at top-level row {row_idx}"
+            );
         }
 
         Ok(())
