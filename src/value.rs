@@ -142,6 +142,12 @@ pub enum Value<'a> {
         array_of_tuples: &'a Mark<'a>,
         index: usize,
     },
+
+    NestedSlice {
+        col_names: &'a [&'a str],
+        array_of_tuples: &'a Mark<'a>,
+        slice_indices: Range<usize>,
+    },
 }
 
 impl Value<'_> {
@@ -210,6 +216,7 @@ impl Value<'_> {
             Value::Decimal128Slice { .. } => "Decimal128Slice",
             Value::Decimal256Slice { .. } => "Decimal256Slice",
             Value::Nested { .. } => "Nested",
+            Value::NestedSlice { .. } => "NestedSlice",
         }
     }
 }
@@ -1064,3 +1071,59 @@ impl<'a> Iterator for NestedItemsIterator<'a> {
         Some((col_name, value))
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3.  value.rs – iterator that drives an Array(Nested(..)) nicely
+// ─────────────────────────────────────────────────────────────────────────────
+pub struct NestedSliceIterator<'a> {
+    col_names: &'a [&'a str],
+    array_of_tuples: &'a Mark<'a>,
+    slice_indices: Range<usize>,
+}
+
+impl<'a> TryFrom<Value<'a>> for NestedSliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::NestedSlice {
+                col_names,
+                array_of_tuples,
+                slice_indices,
+            } => Ok(Self {
+                col_names,
+                array_of_tuples,
+                slice_indices,
+            }),
+            other => Err(Error::MismatchedType(other.as_str(), "NestedSliceIterator")),
+        }
+    }
+}
+
+impl<'a> Iterator for NestedSliceIterator<'a> {
+    type Item = Result<NestedIterator<'a>, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let slice_idx = self.slice_indices.next()?;
+        let Some(val) = self.array_of_tuples.get(slice_idx) else {
+            return Some(Err(Error::IndexOutOfBounds(slice_idx, "NestedSlice")));
+        };
+
+        let tuple_slice: TupleSliceIterator = match val.try_into() {
+            Ok(v) => v,
+            Err(e) => return Some(Err(e)),
+        };
+
+        Some(Ok(NestedIterator {
+            col_names: self.col_names,
+            tuple_slice,
+        }))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.slice_indices.end - self.slice_indices.start;
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for NestedSliceIterator<'_> {}

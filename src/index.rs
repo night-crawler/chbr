@@ -281,7 +281,11 @@ impl<'a> Mark<'a> {
             Mark::Nested {
                 col_names,
                 array_of_tuples,
-            } => todo!(),
+            } => Value::NestedSlice {
+                col_names,
+                array_of_tuples,
+                slice_indices: idx,
+            },
             Mark::Dynamic(_, _) => todo!(),
             Mark::Json { .. } => todo!(),
         }
@@ -294,8 +298,8 @@ mod tests {
     use crate::parse::block::parse_block;
     use crate::value::{
         ArraySliceIterator, BoolSliceIterator, LowCardinalitySliceIterator, MapIterator,
-        MapSliceIterator, NestedIterator, NullableSliceIterator, StringSliceIterator,
-        TupleSliceIterator, Value,
+        MapSliceIterator, NestedIterator, NestedSliceIterator, NullableSliceIterator,
+        StringSliceIterator, TupleSliceIterator, Value,
     };
     use half::bf16;
     use pretty_assertions::assert_eq;
@@ -1272,27 +1276,62 @@ mod tests {
         Ok(())
     }
 
-    // #[test]
-    // fn array_of_nested() -> TestResult {
-    //     let data = load("./test_data/array_of_nested.native")?;
-    //     let (_, block) = parse_block(&data)?;
-    // 
-    //     //    ┌─id─┬─arr───────────────────────────┐
-    //     // 1. │  0 │ [[(1,'Alice'),(2,'Bob')]]     │
-    //     // 2. │  1 │ [[(3,'Charlie'),(4,'Diana')]] │
-    //     // 3. │  2 │ [[(5,'Eve')]]                 │
-    //     // 4. │  3 │ [[]]                          │
-    //     // 5. │  4 │ [[(6,'Frank'),(7,'Grace')]]   │
-    //     // 6. │  5 │ [[(8,'Heidi')]]               │
-    //     //    └────┴───────────────────────────────┘
-    // 
-    //     let nested_mark = &block.cols[1];
-    //     for index in 0..block.num_rows {
-    //         let value = nested_mark.get(index).unwrap();
-    //     }
-    // 
-    //     Ok(())
-    // }
+    #[test]
+    fn array_of_nested() -> TestResult {
+        use crate::value::{NestedIterator, NestedSliceIterator};
+
+        let data = load("./test_data/array_of_nested.native")?;
+        let (_, block) = parse_block(&data)?;
+
+        let expected: [Vec<Vec<(i64, &str)>>; 6] = [
+            vec![vec![(1, "Alice"), (2, "Bob")]],
+            vec![vec![(3, "Charlie"), (4, "Diana")]],
+            vec![vec![(5, "Eve")]],
+            vec![vec![]],
+            vec![vec![(6, "Frank"), (7, "Grace")]],
+            vec![vec![(8, "Heidi")]],
+        ];
+
+        let nested_mark = &block.cols[1];
+
+        for (row_idx, expected_outer) in expected.iter().enumerate() {
+            let outer_slice: NestedSliceIterator = nested_mark.get(row_idx).unwrap().try_into()?;
+
+            let mut actual_outer = Vec::<Vec<(i64, &str)>>::new();
+
+            for nested_res in outer_slice {
+                let nested_iter: NestedIterator = nested_res?;
+
+                let mut inner_rows = Vec::<(i64, &str)>::new();
+
+                for nested_row in nested_iter {
+                    let (mut id, mut name) = (None, None);
+
+                    for (field_name, field_value) in nested_row {
+                        match field_name {
+                            "child_id" => id = Some(field_value.try_into()?),
+                            "child_name" => name = Some(field_value.try_into()?),
+                            _ => {}
+                        }
+                    }
+
+                    inner_rows.push((
+                        id.expect("missing child_id"),
+                        name.expect("missing child_name"),
+                    ));
+                }
+
+                actual_outer.push(inner_rows);
+            }
+
+            assert_eq!(
+                actual_outer, *expected_outer,
+                "Mismatch in Array(Nested) at top-level row {row_idx}"
+            );
+        }
+
+        Ok(())
+    }
 
     #[test]
     fn simple_nested() -> TestResult {
