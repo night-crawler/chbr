@@ -1,7 +1,7 @@
 use crate::slice::ByteView;
 use crate::types::{JsonColumnHeader, Offsets};
 use crate::{
-    Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
+    Bf16Data, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
     Decimal128Data, Decimal256Data, Ipv4Data, Ipv6Data, UuidData, i256, u256,
 };
 use chrono_tz::Tz;
@@ -27,7 +27,7 @@ pub enum Mark<'a> {
     UInt256(ByteView<'a, u256>),
     Float32(ByteView<'a, F32>),
     Float64(ByteView<'a, F64>),
-    BFloat16(ByteView<'a, [u8; 2]>),
+    BFloat16(ByteView<'a, Bf16Data>),
     Decimal32(u8, ByteView<'a, Decimal32Data>),
     Decimal64(u8, ByteView<'a, Decimal64Data>),
     Decimal128(u8, ByteView<'a, Decimal128Data>),

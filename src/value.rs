@@ -3,8 +3,9 @@ use crate::mark::Mark;
 use crate::parse::parse_var_str;
 use crate::types::{OffsetIndexPair as _, Offsets};
 use crate::{
-    ByteSliceExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data,
-    Decimal64Data, Decimal128Data, Decimal256Data, Ipv4Data, Ipv6Data, UuidData, i256, u256,
+    Bf16Data, ByteSliceExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data,
+    Decimal32Data, Decimal64Data, Decimal128Data, Decimal256Data, Ipv4Data, Ipv6Data, UuidData,
+    i256, u256,
 };
 use chrono_tz::Tz;
 use core::convert::TryFrom;
@@ -66,6 +67,7 @@ pub enum Value<'a> {
     UInt256Slice(&'a [u256]),
     Float32Slice(&'a [F32]),
     Float64Slice(&'a [F64]),
+    BFloat16Slice(&'a [Bf16Data]),
 
     Decimal32Slice {
         precision: u8,
@@ -236,6 +238,7 @@ impl Value<'_> {
             Value::FixedStringSlice { .. } => "FixedStringSlice",
             Value::Enum8Slice { .. } => "Enum8SliceIterator",
             Value::Enum16Slice { .. } => "Enum16SliceIterator",
+            Value::BFloat16Slice(_) => "BFloat16Slice",
         }
     }
 }
@@ -283,6 +286,7 @@ impl_try_from_value!(UInt256, u256);
 impl_try_from_value!(Float64, f64);
 impl_try_from_value!(Float32, f32);
 impl_try_from_value!(BFloat16, bf16);
+impl_try_from_value!(BFloat16Slice, &'a [Bf16Data]);
 
 impl_try_from_value!(Ipv4, Ipv4Addr);
 impl_try_from_value!(Ipv6, Ipv6Addr);
