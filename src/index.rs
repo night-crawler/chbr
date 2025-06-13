@@ -1278,8 +1278,6 @@ mod tests {
 
     #[test]
     fn array_of_nested() -> TestResult {
-        use crate::value::{NestedIterator, NestedSliceIterator};
-
         let data = load("./test_data/array_of_nested.native")?;
         let (_, block) = parse_block(&data)?;
 
