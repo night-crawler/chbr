@@ -25,6 +25,15 @@ tokio = { version = "1.45", features = ["full"] }
 serde = { version = "1", features = ["default", "derive"] }
 criterion = "0.6"
 
+[profile.release]
+debug = true
+strip = "none"
+
+[profile.bench]
+# inherits = "release"  # implied
+debug = true
+strip = "none"
+
 [[test]]
 name = "tests"
 path = "tests/main.rs"

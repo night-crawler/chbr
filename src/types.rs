@@ -17,6 +17,7 @@ pub(crate) trait OffsetIndexPair {
 }
 
 impl OffsetIndexPair for Offsets<'_> {
+    #[inline(always)]
     fn offset_indices(&self, index: usize) -> crate::Result<Option<(usize, usize)>> {
         let start = if index == 0 {
             0

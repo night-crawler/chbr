@@ -1,6 +1,5 @@
 use crate::ByteSliceExt as _;
 use crate::mark::Mark;
-use crate::parse::parse_var_str;
 use crate::types::OffsetIndexPair as _;
 use crate::value::Value;
 use std::ops::Range;
@@ -34,27 +33,14 @@ impl<'a> Mark<'a> {
             }
             Mark::Decimal64(precision, data) => {
                 let value = data.get(index)?.with_precision(*precision);
-                Some(Value::Decimal32(value))
+                Some(Value::Decimal64(value))
             }
             Mark::Decimal128(precision, data) => {
                 let value = data.get(index)?.with_precision(*precision).unwrap();
                 Some(Value::Decimal128(value))
             }
             Mark::Decimal256(_, _) => unimplemented!("Decimal256 is not yet supported"),
-            Mark::String(offsets, buf) => {
-                let start = if index == 0 {
-                    0
-                } else {
-                    offsets.get(index.saturating_sub(1)).copied()?
-                };
-
-                let end = offsets.get(index).copied().unwrap_or(buf.len());
-                let slice = &buf[start..end];
-
-                let (_, s) = parse_var_str(slice).unwrap();
-
-                Some(Value::String(s))
-            }
+            Mark::String(strings) => Some(Value::String(strings.get(index)?)),
             Mark::FixedString(size, data) => {
                 let offset = size * index;
                 let slice = data[offset..offset + size].rtrim_zeros();
@@ -127,10 +113,37 @@ impl<'a> Mark<'a> {
                 global_dictionary: _unused,
                 additional_keys,
             } => {
-                let value_index: usize = indices.get(index)?.try_into().unwrap();
                 let Some(keys) = additional_keys else {
                     return None;
                 };
+
+                // fast path for LowCardinality with String keys
+                match (indices.as_ref(), keys.as_ref()) {
+                    (Mark::UInt8(indices), Mark::String(keys)) => {
+                        let value_index = indices.get(index).copied()? as usize;
+                        let value = keys.get(value_index).copied()?;
+                        return Some(Value::String(value));
+                    }
+                    (Mark::UInt16(indices), Mark::String(keys)) => {
+                        let value_index = indices.get(index)?.get() as usize;
+                        let value = keys.get(value_index).copied()?;
+                        return Some(Value::String(value));
+                    }
+                    (Mark::UInt32(indices), Mark::String(keys)) => {
+                        let value_index = indices.get(index)?.get() as usize;
+                        let value = keys.get(value_index).copied()?;
+                        return Some(Value::String(value));
+                    }
+                    (Mark::UInt64(indices), Mark::String(keys)) => {
+                        let value_index = indices.get(index)?.get() as usize;
+                        let value = keys.get(value_index).copied()?;
+                        return Some(Value::String(value));
+                    }
+
+                    _ => {}
+                }
+
+                let value_index: usize = indices.get(index)?.try_into().unwrap();
 
                 Some(keys.get(value_index)?)
             }
@@ -223,18 +236,7 @@ impl<'a> Mark<'a> {
                 precision: *prevision,
                 slice: &bv[idx],
             },
-            Mark::String(offsets, data) => {
-                let count = idx.len();
-                let Range { start, .. } = idx;
-
-                let data_start = if start == 0 {
-                    data
-                } else {
-                    &data[offsets[start - 1]..]
-                };
-
-                Value::StringSlice(count, data_start)
-            }
+            Mark::String(data) => Value::StringSlice(&data[idx]),
             Mark::FixedString(size, data) => Value::FixedStringSlice {
                 size: *size,
                 data,
@@ -333,11 +335,10 @@ mod tests {
     use crate::value::{
         ArraySliceIterator, BoolSliceIterator, Enum8SliceIterator, Enum16SliceIterator,
         FixedStringSliceIterator, LowCardinalitySliceIterator, MapIterator, MapSliceIterator,
-        NestedIterator, NestedSliceIterator, NullableSliceIterator, StringSliceIterator,
-        TupleSliceIterator, Value,
+        NestedIterator, NestedSliceIterator, NullableSliceIterator, TupleSliceIterator, Value,
     };
     use half::bf16;
-    use pretty_assertions::assert_eq;
+    // use pretty_assertions::assert_eq;
     use std::collections::HashMap;
     use std::str::FromStr as _;
     use testresult::TestResult;
@@ -450,8 +451,8 @@ mod tests {
         let strings_marker = &block.cols[1];
 
         for (i, expected) in expected_arrays.iter().enumerate() {
-            let it: StringSliceIterator = strings_marker.get(i).unwrap().try_into()?;
-            let actual = it.collect::<Vec<_>>();
+            let slice: &[&str] = strings_marker.get(i).unwrap().try_into()?;
+            let actual = slice.iter().copied().collect::<Vec<_>>();
 
             assert_eq!(actual, *expected, "Mismatch at index {i}");
         }

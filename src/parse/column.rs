@@ -361,22 +361,14 @@ fn array<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'
 
 fn string(ctx: ParseContext) -> IResult<&[u8], Mark> {
     let mut input = ctx.input;
-    let mut offsets = Vec::with_capacity(ctx.num_rows);
-    let mut offset = 0;
-    let mut prev = ctx.input;
+    let mut strings = Vec::with_capacity(ctx.num_rows);
     for _ in 0..ctx.num_rows {
         let s;
         (input, s) = parse_var_str_bytes(input)?;
-        let complete_len = s.as_ptr() as usize - prev.as_ptr() as usize + s.len();
-
-        offset += complete_len;
-        offsets.push(offset);
-        prev = input;
+        strings.push(unsafe { std::str::from_utf8_unchecked(s) });
     }
 
-    assert_eq!(offsets.len(), ctx.num_rows);
-
-    Ok((input, Mark::String(offsets, &ctx.input[..offset])))
+    Ok((input, Mark::String(strings)))
 }
 
 fn json_column_header(ctx: ParseContext<'_>) -> IResult<&[u8], JsonColumnHeader> {

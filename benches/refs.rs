@@ -160,13 +160,13 @@ impl<'a> TryFrom<BlockRow<'a>> for BenchmarkSample<'a> {
     }
 }
 
-fn ch_rs_read(mut input: &[u8]) -> TestResult {
-    while !input.is_empty() {
-        let value: BenchmarkSample = deserialize_from(&mut input)?;
-        black_box(value);
-    }
-    Ok(())
-}
+// fn ch_rs_read(mut input: &[u8]) -> TestResult {
+//     while !input.is_empty() {
+//         let value: BenchmarkSample = deserialize_from(&mut input)?;
+//         black_box(value);
+//     }
+//     Ok(())
+// }
 
 fn native_read(input: &[u8]) -> TestResult<()> {
     let blocks = parse_blocks(input)?;
@@ -186,9 +186,9 @@ fn bench_readers(c: &mut Criterion) {
     let native_data = fs::read("test_data/benchmark_sample.native")
         .expect("missing test_data/benchmark_sample.native");
 
-    c.bench_function("serde", |b| {
-        b.iter(|| ch_rs_read(black_box(&rb_data)).unwrap())
-    });
+    // c.bench_function("serde", |b| {
+    //     b.iter(|| ch_rs_read(black_box(&rb_data)).unwrap())
+    // });
 
     c.bench_function("chbr", |b| {
         b.iter(|| native_read(black_box(&native_data)).unwrap())

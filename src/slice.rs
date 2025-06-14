@@ -33,6 +33,8 @@ impl<'a, T: Unaligned + FromBytes + Copy> ByteView<'a, T> {
         self.len() == 0
     }
 
+    #[inline(always)]
+
     pub fn get(&self, index: usize) -> Option<&T> {
         if self.is_empty() || index >= self.len() {
             return None;
@@ -48,10 +50,13 @@ impl<'a, T: Unaligned + FromBytes + Copy> ByteView<'a, T> {
         }
     }
 
+    #[inline(always)]
+
     pub fn as_bytes(&self) -> &'a [u8] {
         self.bytes
     }
 
+    #[inline(always)]
     pub fn as_slice(&self) -> &'a [T] {
         let n_elements = self.len();
         unsafe { core::slice::from_raw_parts(self.bytes.as_ptr().cast::<T>(), n_elements) }

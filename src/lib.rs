@@ -82,18 +82,22 @@ impl_from!(Date32Data => NaiveDate, |d| date32(d.0.get()));
 impl_from!(DateTime32Data => chrono::DateTime<chrono::Utc>, |d| datetime32(d.0.get()));
 
 impl DateTime64Data {
+    #[inline(always)]
+
     pub fn with_tz_and_precision(&self, tz: Tz, precision: u8) -> Option<chrono::DateTime<Tz>> {
         datetime64_tz(self.0.get(), precision, tz)
     }
 }
 
 impl DateTime32Data {
+    #[inline(always)]
     pub fn with_tz(&self, tz: Tz) -> chrono::DateTime<Tz> {
         datetime32_tz(self.0.get(), tz)
     }
 }
 
 impl Decimal32Data {
+    #[inline(always)]
     pub fn with_precision(&self, precision: u8) -> rust_decimal::Decimal {
         let value = self.0.get();
         rust_decimal::Decimal::new(i64::from(value), u32::from(precision))
@@ -101,6 +105,7 @@ impl Decimal32Data {
 }
 
 impl Decimal64Data {
+    #[inline(always)]
     pub fn with_precision(&self, precision: u8) -> rust_decimal::Decimal {
         let value = self.0.get();
         rust_decimal::Decimal::new(value, u32::from(precision))
@@ -108,6 +113,7 @@ impl Decimal64Data {
 }
 
 impl Decimal128Data {
+    #[inline(always)]
     pub fn with_precision(&self, precision: u8) -> Result<rust_decimal::Decimal> {
         let value = self.0.get();
         let value = rust_decimal::Decimal::try_from_i128_with_scale(value, u32::from(precision))
@@ -123,6 +129,7 @@ pub(crate) trait ByteSliceExt {
 }
 
 impl ByteSliceExt for [u8] {
+    #[inline(always)]
     fn rtrim_zeros(&self) -> &[u8] {
         let mut end = self.len();
         while end > 0 && self[end - 1] == 0 {
@@ -165,6 +172,7 @@ pub struct BlockIterator<'a> {
 }
 
 impl<'a> BlockIterator<'a> {
+    #[inline(always)]
     pub fn new(blocks: &'a [ParsedBlock<'a>]) -> Self {
         Self {
             blocks: blocks.iter().peekable(),

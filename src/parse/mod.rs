@@ -2,8 +2,6 @@ use crate::error::Error;
 use crate::parse::typ::parse_type;
 use crate::slice::ByteView;
 use crate::types::{Offsets, Type};
-use log::trace;
-use unsigned_varint::decode;
 use zerocopy::{LittleEndian, U64};
 
 pub mod block;
@@ -17,14 +15,61 @@ fn parse_varuint<T>(input: &[u8]) -> IResult<&[u8], T>
 where
     T: TryFrom<u64>,
 {
-    let (value, rest) =
-        decode::u64(input).map_err(|e| Error::Parse(format!("failed to decode u64: {e:?}")))?;
+    let (value, rest) = get_unsigned_leb128(input)?;
 
     let Ok(value) = T::try_from(value) else {
         return Err(Error::Overflow(value.to_string()));
     };
 
     Ok((rest, value))
+}
+
+#[inline(always)]
+fn get_unsigned_leb128(input: &[u8]) -> Result<(u64, &[u8]), Error> {
+    const DATA: u8 = 0x7F;
+    const CONT: u8 = 0x80;
+
+    macro_rules! read {
+        ($idx:expr, $shift:expr, $acc:ident, $len:ident) => {{
+            if $len <= $idx {
+                return Err(Error::Length($idx));
+            }
+            let byte = input[$idx];
+            $acc |= ((byte & DATA) as u64) << $shift;
+            if byte & CONT == 0 {
+                return Ok(($acc, &input[$idx + 1..]));
+            }
+        }};
+    }
+
+    let len = input.len();
+    if len == 0 {
+        return Err(Error::Length(0));
+    }
+
+    let mut acc: u64 = 0;
+
+    read!(0, 0, acc, len);
+    read!(1, 7, acc, len);
+    read!(2, 14, acc, len);
+    read!(3, 21, acc, len);
+    read!(4, 28, acc, len);
+    read!(5, 35, acc, len);
+    read!(6, 42, acc, len);
+    read!(7, 49, acc, len);
+    read!(8, 56, acc, len);
+
+    if len <= 9 {
+        return Err(Error::Length(9));
+    }
+
+    let b9 = input[9];
+    if b9 & CONT != 0 || b9 > 1 {
+        return Err(Error::Overflow("varuint too large for u64".into()));
+    }
+
+    acc |= (b9 as u64) << 63;
+    Ok((acc, &input[10..]))
 }
 
 fn parse_u64<T>(input: &[u8]) -> IResult<&[u8], T>
@@ -49,7 +94,6 @@ fn parse_var_str_bytes(input: &[u8]) -> IResult<&[u8], &[u8]> {
     if input.len() < len {
         return Err(Error::Length(len));
     }
-    trace!("len={len}, data: {:x?}", &input[..len]);
 
     let (str_bytes, remainder) = input.split_at(len);
     Ok((remainder, str_bytes))

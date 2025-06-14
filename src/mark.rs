@@ -32,7 +32,7 @@ pub enum Mark<'a> {
     Decimal64(u8, ByteView<'a, Decimal64Data>),
     Decimal128(u8, ByteView<'a, Decimal128Data>),
     Decimal256(u8, ByteView<'a, Decimal256Data>),
-    String(Vec<usize>, &'a [u8]),
+    String(Vec<&'a str>),
     FixedString(usize, &'a [u8]),
     Uuid(ByteView<'a, UuidData>),
     Date(ByteView<'a, Date16Data>),
@@ -150,7 +150,7 @@ impl Mark<'_> {
 
             Self::Nullable(_, _) => None,
             Self::LowCardinality { .. } => None,
-            Self::String(_, _) => None,
+            Self::String(_) => None,
             Self::Nested { .. } => None,
             Self::Empty => None,
         }
@@ -236,11 +236,7 @@ impl Debug for Mark<'_> {
                 .field("data", &b.as_slice())
                 .finish(),
 
-            String(offsets, data) => f
-                .debug_struct("String")
-                .field("offsets", &offsets)
-                .field("data", &data)
-                .finish(),
+            String(data) => f.debug_struct("String").field("data", data).finish(),
             FixedString(n, data) => f
                 .debug_struct("FixedString")
                 .field("fixed_len", n)
