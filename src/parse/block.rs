@@ -119,6 +119,17 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
     ))
 }
 
+pub fn parse_blocks(mut input: &[u8]) -> Result<Vec<ParsedBlock>, crate::parse::Error> {
+    let mut blocks = Vec::new();
+    while !input.is_empty() {
+        let block;
+        (input, block) = parse_block(input)?;
+        blocks.push(block);
+    }
+
+    Ok(blocks)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

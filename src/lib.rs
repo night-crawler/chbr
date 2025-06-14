@@ -1,7 +1,9 @@
 use crate::conv::{date16, date32, datetime32, datetime32_tz, datetime64_tz};
 use crate::mark::Mark;
+use crate::value::Value;
 use chrono::NaiveDate;
 use chrono_tz::Tz;
+use std::iter::Peekable;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use uuid::Uuid;
 use zerocopy::little_endian::{I32, I64, I128, U16, U32, U64};
@@ -134,6 +136,66 @@ pub struct ParsedBlock<'a> {
     pub cols: Vec<Mark<'a>>,
     pub col_names: Vec<&'a str>,
     pub num_rows: usize,
+}
+
+pub struct BlockRow<'a> {
+    col_names: &'a [&'a str],
+    cols: &'a [Mark<'a>],
+    col_index: usize,
+    row_index: usize,
+}
+
+impl<'a> Iterator for BlockRow<'a> {
+    type Item = (&'a str, Value<'a>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let col_name = self.col_names.get(self.col_index)?;
+        let marker = self.cols.get(self.col_index)?;
+
+        let value = marker.get(self.row_index)?;
+        self.col_index += 1;
+
+        Some((col_name, value))
+    }
+}
+
+pub struct BlockIterator<'a> {
+    blocks: Peekable<std::slice::Iter<'a, ParsedBlock<'a>>>,
+    block_row: usize,
+}
+
+impl<'a> BlockIterator<'a> {
+    pub fn new(blocks: &'a [ParsedBlock<'a>]) -> Self {
+        Self {
+            blocks: blocks.iter().peekable(),
+            block_row: 0,
+        }
+    }
+}
+
+impl<'a> Iterator for BlockIterator<'a> {
+    type Item = BlockRow<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let block = self.blocks.peek()?;
+            if self.block_row >= block.num_rows {
+                self.blocks.next();
+                self.block_row = 0;
+                continue;
+            }
+
+            let block_row = BlockRow {
+                col_names: &block.col_names,
+                cols: &block.cols,
+                col_index: 0,
+                row_index: self.block_row,
+            };
+            self.block_row += 1;
+
+            break Some(block_row);
+        }
+    }
 }
 
 #[cfg(test)]
