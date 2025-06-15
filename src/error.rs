@@ -40,6 +40,9 @@ pub enum Error {
 
     #[error("Corrupted data: {0}")]
     CorruptedData(String),
+
+    #[error("TryFromIntError: {0}")]
+    TryFromIntError(#[from] std::num::TryFromIntError),
 }
 
 impl<T> From<nom::Err<T>> for Error

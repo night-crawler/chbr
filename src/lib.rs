@@ -1,7 +1,7 @@
 use crate::conv::{date16, date32, datetime32, datetime32_tz, datetime64_tz};
 use crate::mark::Mark;
 use crate::value::Value;
-use chrono::NaiveDate;
+use chrono::{NaiveDate, TimeZone};
 use chrono_tz::Tz;
 use std::iter::Peekable;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -17,6 +17,8 @@ pub mod parse;
 pub mod slice;
 pub mod types;
 pub mod value;
+
+pub use error::Error;
 
 #[macro_export]
 macro_rules! transparent_newtype {
@@ -117,12 +119,12 @@ impl Decimal128Data {
     pub fn with_precision(&self, precision: u8) -> Result<rust_decimal::Decimal> {
         let value = self.0.get();
         let value = rust_decimal::Decimal::try_from_i128_with_scale(value, u32::from(precision))
-            .map_err(|_| error::Error::Overflow(value.to_string()))?;
+            .map_err(|_| Error::Overflow(value.to_string()))?;
         Ok(value)
     }
 }
 
-pub type Result<T> = std::result::Result<T, error::Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 pub(crate) trait ByteSliceExt {
     fn rtrim_zeros(&self) -> &[u8];
@@ -159,18 +161,78 @@ pub struct ColumnAccessor<'a> {
 }
 
 impl<'a> ColumnAccessor<'a> {
+    #[inline]
     pub fn get(self) -> Value<'a> {
+        // row index is private and created by us, so it should always be valid, thus safe
+        // to unwrap
         self.marker.get(self.row_index).unwrap()
     }
 
-    pub fn get_str(self) -> Option<&'a str> {
-        self.marker.get_str(self.row_index).unwrap()
+    #[inline]
+    pub fn into_str(self) -> Result<&'a str> {
+        let str = self.marker.get_str(self.row_index)?;
+        Ok(str.unwrap())
+    }
+
+    #[inline]
+    pub fn into_opt_str(self) -> Result<Option<&'a str>> {
+        let str = self.marker.get_opt_str(self.row_index)?;
+        Ok(str.unwrap())
+    }
+
+    #[inline]
+    pub fn into_datetime<T: TimeZone>(self, tz: T) -> Result<chrono::DateTime<T>> {
+        let dt = self.marker.get_datetime(self.row_index, tz)?;
+        Ok(dt.unwrap())
+    }
+
+    #[inline]
+    pub fn into_uuid(self) -> Result<Uuid> {
+        let uuid = self.marker.get_uuid(self.row_index)?;
+        Ok(uuid.unwrap())
+    }
+
+    #[inline]
+    pub fn into_ipv4(self) -> Result<Ipv4Addr> {
+        let ipv4 = self.marker.get_ipv4(self.row_index)?;
+        Ok(ipv4.unwrap())
+    }
+
+    #[inline]
+    pub fn into_ipv6(self) -> Result<Ipv6Addr> {
+        let ipv6 = self.marker.get_ipv6(self.row_index)?;
+        Ok(ipv6.unwrap())
+    }
+
+    #[inline]
+    pub fn into_opt_ipv6(self) -> Result<Option<Ipv6Addr>> {
+        let ipv6 = self.marker.get_opt_ipv6(self.row_index)?;
+        Ok(ipv6.unwrap())
+    }
+
+    #[inline]
+    pub fn into_bool(self) -> Result<bool> {
+        let value = self.marker.get_bool(self.row_index)?;
+        Ok(value.unwrap())
+    }
+
+    #[inline]
+    pub fn into_f64(self) -> Result<f64> {
+        let value = self.marker.get_f64(self.row_index)?;
+        Ok(value.unwrap())
+    }
+
+    #[inline]
+    pub fn into_array_lc_strs(self) -> Result<impl Iterator<Item = &'a str>> {
+        let it = self.marker.get_array_lc_strs(self.row_index)?.unwrap();
+        Ok(it.into_iter())
     }
 }
 
 impl<'a> Iterator for BlockRow<'a> {
     type Item = (&'a str, ColumnAccessor<'a>);
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let col_name = self.col_names.get(self.col_index)?;
         let marker = self.cols.get(self.col_index)?;
@@ -220,15 +282,15 @@ impl From<TinyRange> for Range<usize> {
 }
 
 impl TryFrom<Range<usize>> for TinyRange {
-    type Error = error::Error;
+    type Error = Error;
 
     #[inline(always)]
     fn try_from(value: Range<usize>) -> std::result::Result<Self, Self::Error> {
         let start = u32::try_from(value.start)
-            .map_err(|_| error::Error::ValueOutOfRange("usize", "u32", value.start.to_string()))?;
+            .map_err(|_| Error::ValueOutOfRange("usize", "u32", value.start.to_string()))?;
 
         let length = u32::try_from(value.end - value.start).map_err(|_| {
-            error::Error::ValueOutOfRange("usize", "u32", (value.end - value.start).to_string())
+            Error::ValueOutOfRange("usize", "u32", (value.end - value.start).to_string())
         })?;
 
         Ok(TinyRange { start, length })

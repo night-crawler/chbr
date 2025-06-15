@@ -1,7 +1,8 @@
 use crate::ByteSliceExt as _;
-use crate::mark::Mark;
+use crate::mark::{Mark, MarkNullable};
 use crate::types::OffsetIndexPair as _;
 use crate::value::Value;
+use chrono::{DateTime, TimeZone};
 use std::ops::Range;
 
 impl<'a> Mark<'a> {
@@ -161,10 +162,7 @@ impl<'a> Mark<'a> {
                 Some(a.values.slice(start..end))
             }
 
-            Mark::Tuple(inner) => Some(Value::Tuple {
-                mark: inner,
-                index,
-            }),
+            Mark::Tuple(inner) => Some(Value::Tuple { mark: inner, index }),
             Mark::Nullable(n) => {
                 if n.mask.get(index) == Some(&1) {
                     return Some(Value::Empty);
@@ -317,32 +315,220 @@ impl<'a> Mark<'a> {
                 // fast path for LowCardinality with String keys
                 match (lc.indices.as_ref(), keys.as_ref()) {
                     (Mark::UInt8(indices), Mark::String(keys)) => {
-                        let value_index = indices.get(index).copied().unwrap() as usize;
-                        let value = keys.get(value_index).copied().unwrap();
-                        Ok(Some(value))
+                        let value = indices
+                            .get(index)
+                            .copied()
+                            .and_then(|value_index| keys.get(usize::from(value_index)).copied());
+                        Ok(value)
                     }
                     (Mark::UInt16(indices), Mark::String(keys)) => {
-                        let value_index = indices.get(index).unwrap().get() as usize;
-                        let value = keys.get(value_index).copied().unwrap();
-                        Ok(Some(value))
+                        let value = indices.get(index).and_then(|value_index| {
+                            let value_index = usize::from(value_index.get());
+                            keys.get(value_index).copied()
+                        });
+                        Ok(value)
                     }
                     (Mark::UInt32(indices), Mark::String(keys)) => {
-                        let value_index = indices.get(index).unwrap().get() as usize;
-                        let value = keys.get(value_index).copied().unwrap();
-                        Ok(Some(value))
+                        let value = indices.get(index).and_then(|value_index| {
+                            let value_index = value_index.get() as usize;
+                            keys.get(value_index).copied()
+                        });
+                        Ok(value)
                     }
                     (Mark::UInt64(indices), Mark::String(keys)) => {
-                        let value_index =
-                            usize::try_from(indices.get(index).unwrap().get()).unwrap();
-                        let value = keys.get(value_index).copied().unwrap();
-                        Ok(Some(value))
+                        let value = indices
+                            .get(index)
+                            .map(|value_index| usize::try_from(value_index.get()))
+                            .transpose()?
+                            .and_then(|value_index| keys.get(value_index).copied());
+                        Ok(value)
                     }
 
-                    _ => Err(crate::error::Error::MismatchedType("a", "a")),
+                    (_, mark) => Err(crate::error::Error::MismatchedType(mark.as_str(), "&str")),
                 }
             }
-            mark => Err(crate::error::Error::MismatchedType("a", "a")),
+            mark => Err(crate::error::Error::MismatchedType(mark.as_str(), "&str")),
         }
+    }
+
+    #[inline]
+    pub fn get_opt_str(&'a self, index: usize) -> crate::Result<Option<Option<&'a str>>> {
+        let Mark::Nullable(MarkNullable { mask, data }) = self else {
+            // convenience wrapper
+            let value = self.get_str(index)?;
+            return Ok(Some(value));
+        };
+
+        if mask.get(index) == Some(&1) {
+            return Ok(Some(None));
+        }
+
+        Ok(Some(data.get_str(index)?))
+    }
+
+    #[inline]
+    pub fn get_datetime<T: TimeZone>(
+        &'a self,
+        index: usize,
+        tz: T,
+    ) -> crate::Result<Option<DateTime<T>>> {
+        match self {
+            Mark::DateTime(d) => {
+                let value = d
+                    .data
+                    .get(index)
+                    .map(|dt| dt.with_tz(d.tz))
+                    .map(|dt| dt.with_timezone(&tz));
+                Ok(value)
+            }
+            Mark::DateTime64(d) => {
+                let value = d
+                    .data
+                    .get(index)
+                    .map(|dt| {
+                        dt.with_tz_and_precision(d.tz, d.precision).ok_or_else(|| {
+                            crate::Error::Overflow("DateTime64 value out of range".to_owned())
+                        })
+                    })
+                    .transpose()?
+                    .map(|dt| dt.with_timezone(&tz));
+
+                Ok(value)
+            }
+            _ => Err(crate::error::Error::MismatchedType(
+                self.as_str(),
+                "DateTime",
+            )),
+        }
+    }
+
+    #[inline]
+    pub fn get_uuid(&'a self, index: usize) -> crate::Result<Option<uuid::Uuid>> {
+        match self {
+            Mark::Uuid(bv) => {
+                let value = bv.get(index).map(|data| uuid::Uuid::from(*data));
+                Ok(value)
+            }
+            _ => Err(crate::error::Error::MismatchedType(self.as_str(), "Uuid")),
+        }
+    }
+
+    #[inline]
+    pub fn get_ipv6(&'a self, index: usize) -> crate::Result<Option<std::net::Ipv6Addr>> {
+        match self {
+            Mark::Ipv6(bv) => {
+                let value = bv.get(index).copied().map(Into::into);
+                Ok(value)
+            }
+            _ => Err(crate::error::Error::MismatchedType(self.as_str(), "Ipv6")),
+        }
+    }
+
+    #[inline]
+    pub fn get_opt_ipv6(
+        &'a self,
+        index: usize,
+    ) -> crate::Result<Option<Option<std::net::Ipv6Addr>>> {
+        let Mark::Nullable(MarkNullable { mask, data }) = self else {
+            let value = self.get_ipv6(index)?;
+            return Ok(Some(value));
+        };
+
+        if mask.get(index) == Some(&1) {
+            return Ok(Some(None));
+        }
+
+        let value = data.get_ipv6(index)?;
+        Ok(Some(value))
+    }
+
+    #[inline]
+    pub fn get_ipv4(&'a self, index: usize) -> crate::Result<Option<std::net::Ipv4Addr>> {
+        match self {
+            Mark::Ipv4(bv) => {
+                let value = bv.get(index).copied().map(Into::into);
+                Ok(value)
+            }
+            _ => Err(crate::error::Error::MismatchedType(self.as_str(), "Ipv4")),
+        }
+    }
+
+    #[inline]
+    pub fn get_bool(&'a self, index: usize) -> crate::Result<Option<bool>> {
+        match self {
+            Mark::Bool(bv) => {
+                let value = bv.get(index).copied().map(|v| v != 0);
+                Ok(value)
+            }
+            _ => Err(crate::error::Error::MismatchedType(self.as_str(), "bool")),
+        }
+    }
+
+    #[inline]
+    pub fn get_f64(&'a self, index: usize) -> crate::Result<Option<f64>> {
+        match self {
+            Mark::Float64(bv) => {
+                let value = bv.get(index).map(|v| v.get());
+                Ok(value)
+            }
+            _ => Err(crate::error::Error::MismatchedType(self.as_str(), "f64")),
+        }
+    }
+
+    #[inline]
+    pub fn get_lc_strs(
+        &'a self,
+        idx: Range<usize>,
+    ) -> crate::Result<impl Iterator<Item = &'a str>> {
+        let Mark::LowCardinality(lc) = self else {
+            return Err(crate::error::Error::MismatchedType(
+                self.as_str(),
+                "LowCardinality",
+            ));
+        };
+
+        let Some(keys) = &lc.additional_keys else {
+            return Err(crate::error::Error::CorruptedData(
+                "LowCardinality marker without additional keys".to_owned(),
+            ));
+        };
+
+        let Mark::String(keys) = keys.as_ref() else {
+            return Err(crate::error::Error::MismatchedType(keys.as_str(), "String"));
+        };
+
+        // if idx.end > keys.len() {
+        //     return Err(crate::error::Error::IndexOutOfBounds(
+        //         idx.end,
+        //         "LowCardinality keys",
+        //     ));
+        // }
+
+        let index_it: Box<dyn Iterator<Item = usize> + '_> = match lc.indices.as_ref() {
+            Mark::UInt8(bv) => Box::new(bv[idx].iter().copied().map(usize::from)),
+            Mark::UInt16(bv) => Box::new(bv[idx].iter().map(|v| usize::from(v.get()))),
+            Mark::UInt32(bv) => Box::new(bv[idx].iter().map(|v| v.get() as usize)),
+            Mark::UInt64(bv) => Box::new(bv[idx].iter().map(|v| usize::try_from(v.get()).unwrap())),
+            _ => unreachable!("must never have any other type"),
+        };
+
+        Ok(index_it.map(move |idx| keys.get(idx).copied().unwrap()))
+    }
+
+    #[inline]
+    pub fn get_array_lc_strs(
+        &'a self,
+        index: usize,
+    ) -> crate::Result<Option<impl Iterator<Item = &'a str>>> {
+        let Mark::Array(a) = self else {
+            return Err(crate::error::Error::MismatchedType(self.as_str(), "Array"));
+        };
+
+        let Some((start, end)) = a.offsets.offset_indices(index)? else {
+            return Ok(None);
+        };
+        let it = a.values.get_lc_strs(start..end)?;
+        Ok(Some(it))
     }
 }
 
@@ -544,6 +730,15 @@ mod tests {
                 actual.push(value);
             }
             assert_eq!(actual, *expected, "Mismatch at index {i}");
+
+            let actual = strings_marker
+                .get_array_lc_strs(i)?
+                .unwrap()
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual, *expected,
+                "Mismatch at index {i} (get_array_lc_strs)"
+            );
         }
 
         Ok(())
@@ -612,6 +807,9 @@ mod tests {
         for (i, expected) in expected_col.iter().enumerate() {
             let value: Option<&str> = strings_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Mismatch at index {i}");
+
+            let value = strings_marker.get_opt_str(i)?.unwrap();
+            assert_eq!(value, *expected, "Mismatch at index {i} (get_opt_str)");
         }
 
         Ok(())
@@ -918,6 +1116,9 @@ mod tests {
             let value: chrono::DateTime<chrono_tz::Tz> =
                 datetime_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Mismatch at index {i}");
+
+            let value = datetime_marker.get_datetime(i, chrono_tz::UTC)?.unwrap();
+            assert_eq!(value, *expected, "Mismatch at index {i} (get_datetime)");
         }
 
         let datetime64_marker = &block.cols[4];
