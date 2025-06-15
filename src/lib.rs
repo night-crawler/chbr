@@ -1,12 +1,12 @@
 use crate::conv::{date16, date32, datetime32, datetime32_tz, datetime64_tz};
 use crate::mark::Mark;
+use crate::value::Value;
 use chrono::NaiveDate;
 use chrono_tz::Tz;
 use std::iter::Peekable;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use uuid::Uuid;
 use zerocopy::little_endian::{I32, I64, I128, U16, U32, U64};
-use crate::value::Value;
 
 pub mod conv;
 pub mod error;
@@ -83,7 +83,6 @@ impl_from!(DateTime32Data => chrono::DateTime<chrono::Utc>, |d| datetime32(d.0.g
 
 impl DateTime64Data {
     #[inline(always)]
-
     pub fn with_tz_and_precision(&self, tz: Tz, precision: u8) -> Option<chrono::DateTime<Tz>> {
         datetime64_tz(self.0.get(), precision, tz)
     }
@@ -162,10 +161,9 @@ impl<'a> ColumnAccessor<'a> {
     pub fn get(self) -> Value<'a> {
         self.marker.get(self.row_index).unwrap()
     }
-    
-    pub fn get_str(self) -> Option<&'a str >{
-        let q = self.marker.get_str(self.row_index).unwrap();
-        q
+
+    pub fn get_str(self) -> Option<&'a str> {
+        self.marker.get_str(self.row_index).unwrap()
     }
 }
 
@@ -178,11 +176,14 @@ impl<'a> Iterator for BlockRow<'a> {
 
         self.col_index += 1;
 
-        Some((col_name, ColumnAccessor {
+        Some((
             col_name,
-            marker,
-            row_index: self.row_index,
-        }))
+            ColumnAccessor {
+                col_name,
+                marker,
+                row_index: self.row_index,
+            },
+        ))
     }
 }
 

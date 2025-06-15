@@ -25,16 +25,17 @@ impl<'a, T: Unaligned + FromBytes + Copy> TryFrom<&'a [u8]> for ByteView<'a, T> 
 }
 
 impl<'a, T: Unaligned + FromBytes + Copy> ByteView<'a, T> {
+    #[inline]
     pub fn len(&self) -> usize {
         self.bytes.len() / size_of::<T>()
     }
 
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     #[inline(always)]
-
     pub fn get(&self, index: usize) -> Option<&T> {
         if self.is_empty() || index >= self.len() {
             return None;
@@ -51,7 +52,6 @@ impl<'a, T: Unaligned + FromBytes + Copy> ByteView<'a, T> {
     }
 
     #[inline(always)]
-
     pub fn as_bytes(&self) -> &'a [u8] {
         self.bytes
     }

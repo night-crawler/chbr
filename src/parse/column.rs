@@ -1,5 +1,7 @@
 use crate::error::Error;
-use crate::mark::Mark;
+use crate::mark::{
+    Mark, MarkArray, MarkDynamic, MarkJson, MarkLowCardinality, MarkMap, MarkNested, MarkVariant,
+};
 use crate::parse::block::ParseContext;
 use crate::parse::consts::{
     HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION, NEED_GLOBAL_DICTIONARY_BIT,
@@ -140,10 +142,10 @@ fn json(ctx: ParseContext) -> IResult<&[u8], Mark> {
         final_headers.push(header);
     }
 
-    let marker = Mark::Json {
+    let marker = Mark::Json(MarkJson {
         columns: Box::new(subcols),
         headers: final_headers,
-    };
+    });
 
     let todo_wtf_is_it = ctx.num_rows * 8;
     let _wtf;
@@ -180,14 +182,17 @@ fn dynamic(ctx: ParseContext) -> IResult<&[u8], Mark> {
         counters[discriminator - 1] += 1;
     }
 
-    let mut markers = Vec::with_capacity(num_types);
+    let mut columns = Vec::with_capacity(num_types);
     for (index, typ) in types.into_iter().enumerate() {
         let marker;
         (input, marker) = typ.decode(ctx.fork(input).with_num_rows(counters[index]))?;
-        markers.push(marker);
+        columns.push(marker);
     }
 
-    let marker = Mark::Dynamic(discriminators, markers);
+    let marker = Mark::Dynamic(MarkDynamic {
+        discriminators,
+        columns,
+    });
     Ok((input, marker))
 }
 
@@ -201,11 +206,11 @@ fn lc<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>>
     if ctx.num_rows == 0 {
         return Ok((
             ctx.input,
-            Mark::LowCardinality {
+            Mark::LowCardinality(MarkLowCardinality {
                 indices: Box::new(Mark::Empty),
                 global_dictionary: None,
                 additional_keys: Some(Box::new(Mark::Empty)),
-            },
+            }),
         ));
     }
 
@@ -269,11 +274,11 @@ fn lc<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>>
     }
 
     let (input, indices_marker) = index_type.decode(ctx.fork(input))?;
-    let marker = Mark::LowCardinality {
+    let marker = Mark::LowCardinality(MarkLowCardinality {
         indices: Box::new(indices_marker),
         global_dictionary,
         additional_keys,
-    };
+    });
 
     Ok((input, marker))
 }
@@ -307,11 +312,11 @@ fn variant<'a>(inner: Vec<Type<'a>>, ctx: ParseContext<'a>) -> IResult<&'a [u8],
         markers.push(marker);
     }
 
-    let marker = Mark::Variant {
+    let marker = Mark::Variant(MarkVariant {
         offsets,
         discriminators,
         types: markers,
-    };
+    });
 
     Ok((input, marker))
 }
@@ -325,11 +330,11 @@ fn map<'a>(key: Type<'a>, value: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a
     let (input, keys) = key.decode(ctx.fork(input).with_num_rows(n))?;
     let (input, values) = value.decode(ctx.fork(input).with_num_rows(n))?;
 
-    let marker = Mark::Map {
+    let marker = Mark::Map(MarkMap {
         offsets,
         keys: keys.into(),
         values: values.into(),
-    };
+    });
 
     Ok((input, marker))
 }
@@ -352,11 +357,23 @@ fn array<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'
     debug!("offsets: {:?}", offsets);
 
     if num_rows == 0 {
-        return Ok((input, Mark::Array(offsets, Box::new(Mark::Empty))));
+        return Ok((
+            input,
+            Mark::Array(MarkArray {
+                offsets,
+                values: Box::new(Mark::Empty),
+            }),
+        ));
     }
 
     let (input, inner_block) = inner.decode(ctx.fork(input).with_num_rows(num_rows))?;
-    Ok((input, Mark::Array(offsets, Box::new(inner_block))))
+    Ok((
+        input,
+        Mark::Array(MarkArray {
+            offsets,
+            values: Box::new(inner_block),
+        }),
+    ))
 }
 
 fn string(ctx: ParseContext) -> IResult<&[u8], Mark> {
@@ -406,10 +423,10 @@ fn nested<'a>(fields: Vec<Field<'a>>, ctx: ParseContext<'a>) -> IResult<&'a [u8]
 
     let (input, inner_mark) = array_of_tuples.decode(ctx)?;
 
-    let mark = Mark::Nested {
+    let mark = Mark::Nested(MarkNested {
         col_names,
         array_of_tuples: Box::new(inner_mark),
-    };
+    });
 
     Ok((input, mark))
 }

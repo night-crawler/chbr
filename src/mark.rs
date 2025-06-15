@@ -10,6 +10,106 @@ use std::fmt::Debug;
 use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
 use zerocopy::{FromBytes, Unaligned};
 
+#[derive(Debug)]
+pub struct MarkMap<'a> {
+    pub offsets: Offsets<'a>,
+    pub keys: Box<Mark<'a>>,
+    pub values: Box<Mark<'a>>,
+}
+
+#[derive(Debug)]
+pub struct MarkVariant<'a> {
+    pub offsets: Vec<usize>,
+    pub discriminators: &'a [u8],
+    pub types: Vec<Mark<'a>>,
+}
+
+#[derive(Debug)]
+pub struct MarkLowCardinality<'a> {
+    pub indices: Box<Mark<'a>>,
+    pub global_dictionary: Option<Box<Mark<'a>>>,
+    pub additional_keys: Option<Box<Mark<'a>>>,
+}
+
+#[derive(Debug)]
+pub struct MarkNested<'a> {
+    pub col_names: Vec<&'a str>,
+    pub array_of_tuples: Box<Mark<'a>>,
+}
+
+#[derive(Debug)]
+pub struct MarkJson<'a> {
+    pub columns: Box<Mark<'a>>,
+    pub headers: Vec<JsonColumnHeader<'a>>,
+}
+
+#[derive(Debug)]
+pub struct MarkArray<'a> {
+    pub offsets: Offsets<'a>,
+    pub values: Box<Mark<'a>>,
+}
+
+#[derive(Debug)]
+pub struct MarkDecimal32<'a> {
+    pub precision: u8,
+    pub data: ByteView<'a, Decimal32Data>,
+}
+
+#[derive(Debug)]
+pub struct MarkDecimal64<'a> {
+    pub precision: u8,
+    pub data: ByteView<'a, Decimal64Data>,
+}
+
+#[derive(Debug)]
+pub struct MarkDecimal128<'a> {
+    pub precision: u8,
+    pub data: ByteView<'a, Decimal128Data>,
+}
+
+#[derive(Debug)]
+pub struct MarkDecimal256<'a> {
+    pub precision: u8,
+    pub data: ByteView<'a, Decimal256Data>,
+}
+
+#[derive(Debug)]
+pub struct MarkFixedString<'a> {
+    pub size: usize,
+    pub data: &'a [u8],
+}
+
+#[derive(Debug)]
+pub struct MarkDateTime<'a> {
+    pub tz: Tz,
+    pub data: ByteView<'a, DateTime32Data>,
+}
+
+#[derive(Debug)]
+pub struct MarkDateTime64<'a> {
+    pub precision: u8,
+    pub tz: Tz,
+    pub data: ByteView<'a, DateTime64Data>,
+}
+
+#[derive(Debug)]
+pub struct MarkEnum8<'a> {
+    pub variants: Vec<(&'a str, i8)>,
+    pub data: ByteView<'a, i8>,
+}
+
+#[derive(Debug)]
+pub struct MarkEnum16<'a> {
+    pub variants: Vec<(&'a str, i16)>,
+    pub data: ByteView<'a, I16>,
+}
+
+#[derive(Debug)]
+pub struct MarkDynamic<'a> {
+    pub discriminators: Vec<usize>,
+    pub columns: Vec<Mark<'a>>,
+}
+
 pub enum Mark<'a> {
     Empty,
     Bool(&'a [u8]),
@@ -28,24 +128,17 @@ pub enum Mark<'a> {
     Float32(ByteView<'a, F32>),
     Float64(ByteView<'a, F64>),
     BFloat16(ByteView<'a, Bf16Data>),
-    Decimal32(u8, ByteView<'a, Decimal32Data>),
-    Decimal64(u8, ByteView<'a, Decimal64Data>),
-    Decimal128(u8, ByteView<'a, Decimal128Data>),
-    Decimal256(u8, ByteView<'a, Decimal256Data>),
+    Decimal32(MarkDecimal32<'a>),
+    Decimal64(MarkDecimal64<'a>),
+    Decimal128(MarkDecimal128<'a>),
+    Decimal256(MarkDecimal256<'a>),
     String(Vec<&'a str>),
-    FixedString(usize, &'a [u8]),
+    FixedString(MarkFixedString<'a>),
     Uuid(ByteView<'a, UuidData>),
     Date(ByteView<'a, Date16Data>),
     Date32(ByteView<'a, Date32Data>),
-    DateTime {
-        tz: Tz,
-        data: ByteView<'a, DateTime32Data>,
-    },
-    DateTime64 {
-        precision: u8,
-        tz: Tz,
-        data: ByteView<'a, DateTime64Data>,
-    },
+    DateTime(MarkDateTime<'a>),
+    DateTime64(MarkDateTime64<'a>),
     Ipv4(ByteView<'a, Ipv4Data>),
     Ipv6(ByteView<'a, Ipv6Data>),
     Point(&'a [u8]),
@@ -55,41 +148,23 @@ pub enum Mark<'a> {
     LineString(Box<Mark<'a>>),
     MultiLineString(Box<Mark<'a>>),
 
-    Enum8(Vec<(&'a str, i8)>, ByteView<'a, i8>),
-    Enum16(Vec<(&'a str, i16)>, ByteView<'a, I16>),
+    Enum8(MarkEnum8<'a>),
+    Enum16(MarkEnum16<'a>),
 
-    LowCardinality {
-        indices: Box<Mark<'a>>,
-        global_dictionary: Option<Box<Mark<'a>>>,
-        additional_keys: Option<Box<Mark<'a>>>,
-    },
-    Array(Offsets<'a>, Box<Mark<'a>>),
+    LowCardinality(MarkLowCardinality<'a>),
+    Array(MarkArray<'a>),
     Tuple(Vec<Mark<'a>>),
     Nullable(&'a [u8], Box<Mark<'a>>),
-    Map {
-        offsets: Offsets<'a>,
-        keys: Box<Mark<'a>>,
-        values: Box<Mark<'a>>,
-    },
-    Variant {
-        offsets: Vec<usize>,
-        discriminators: &'a [u8],
-        types: Vec<Mark<'a>>,
-    },
-    Nested {
-        col_names: Vec<&'a str>,
-        array_of_tuples: Box<Mark<'a>>,
-    },
-    Dynamic(Vec<usize>, Vec<Mark<'a>>),
+    Map(MarkMap<'a>),
+    Variant(MarkVariant<'a>),
+    Nested(MarkNested<'a>),
+    Dynamic(MarkDynamic<'a>),
 
-    Json {
-        columns: Box<Mark<'a>>,
-        headers: Vec<JsonColumnHeader<'a>>,
-    },
+    Json(MarkJson<'a>),
 }
 
 impl Mark<'_> {
-    pub fn size(&self) -> Option<usize> {
+    pub const fn size(&self) -> Option<usize> {
         #[allow(clippy::match_same_arms)]
         match self {
             Self::Bool(_) => Some(1),
@@ -112,12 +187,12 @@ impl Mark<'_> {
 
             Self::Uuid(_) => Some(16),
 
-            Self::Decimal32(_, _) => Some(4),
-            Self::Decimal64(_, _) => Some(8),
-            Self::Decimal128(_, _) => Some(16),
-            Self::Decimal256(_, _) => Some(32),
+            Self::Decimal32(_) => Some(4),
+            Self::Decimal64(_) => Some(8),
+            Self::Decimal128(_) => Some(16),
+            Self::Decimal256(_) => Some(32),
 
-            Self::FixedString(size, _) => Some(*size),
+            Self::FixedString(f) => Some(f.size),
 
             Self::Ipv4(_) => Some(4),
             Self::Ipv6(_) => Some(16),
@@ -126,8 +201,8 @@ impl Mark<'_> {
             Self::Date32(_) => Some(4),
             Self::DateTime { .. } => Some(4),
             Self::DateTime64 { .. } => Some(8),
-            Self::Enum8(_, _) => Some(1),
-            Self::Enum16(_, _) => Some(2),
+            Self::Enum8(_) => Some(1),
+            Self::Enum16(_) => Some(2),
 
             // Point is represented by its X and Y coordinates, stored as a Tuple(Float64, Float64).
             Self::Point(_) => Some(16),
@@ -140,12 +215,12 @@ impl Mark<'_> {
             Self::MultiLineString(_) => None,
             Self::Map { .. } => None,
 
-            Self::Array(_, _) => None,
+            Self::Array(_) => None,
 
             Self::Tuple(_) => None,
 
             Self::Variant { .. } => None,
-            Self::Dynamic(_, _) => None,
+            Self::Dynamic(_) => None,
             Self::Json { .. } => None,
 
             Self::Nullable(_, _) => None,
@@ -215,61 +290,51 @@ impl Debug for Mark<'_> {
             Float64(v) => dbg_bv(f, "Float64", v),
             BFloat16(v) => dbg_bv(f, "BFloat16", v),
 
-            Decimal32(scale, b) => f
+            Decimal32(d) => f
                 .debug_struct("Decimal32")
-                .field("scale", scale)
-                .field("data", &b.as_slice())
+                .field("scale", &d.precision)
+                .field("data", &d.data.as_slice())
                 .finish(),
-            Decimal64(scale, b) => f
+            Decimal64(d) => f
                 .debug_struct("Decimal64")
-                .field("scale", scale)
-                .field("data", &b.as_slice())
+                .field("scale", &d.precision)
+                .field("data", &d.data.as_slice())
                 .finish(),
-            Decimal128(scale, b) => f
+            Decimal128(d) => f
                 .debug_struct("Decimal128")
-                .field("scale", scale)
-                .field("data", &b.as_slice())
+                .field("scale", &d.precision)
+                .field("data", &d.data.as_slice())
                 .finish(),
-            Decimal256(scale, b) => f
+            Decimal256(d) => f
                 .debug_struct("Decimal256")
-                .field("scale", scale)
-                .field("data", &b.as_slice())
+                .field("scale", &d.precision)
+                .field("data", &d.data.as_slice())
                 .finish(),
 
             String(data) => f.debug_struct("String").field("data", data).finish(),
-            FixedString(n, data) => f
+            FixedString(ff) => f
                 .debug_struct("FixedString")
-                .field("fixed_len", n)
-                .field("len_bytes", &data.len())
-                .field("ptr", &data.as_ptr())
+                .field("fixed_len", &ff.size)
+                .field("data", &ff.data)
                 .finish(),
 
-            DateTime { tz, data } => f
+            DateTime(d) => f
                 .debug_struct("DateTime")
-                .field("tz", tz)
-                .field("data", &data.as_slice())
+                .field("tz", &d.tz)
+                .field("data", &d.data.as_slice())
                 .finish(),
-            DateTime64 {
-                precision,
-                tz,
-                data,
-            } => f
+            DateTime64(d) => f
                 .debug_struct("DateTime64")
-                .field("tz", tz)
-                .field("precision", &precision)
-                .field("data", &data.as_slice())
+                .field("tz", &d.tz)
+                .field("precision", &d.precision)
+                .field("data", &d.data.as_slice())
                 .finish(),
 
-            Enum8(map, data) => f
+            Enum8(e) => f
                 .debug_struct("Enum8")
-                .field("map", &map.len())
-                .field("data", &data.as_slice())
+                .field("data", &e.data.as_slice())
                 .finish(),
-            Enum16(map, data) => f
-                .debug_struct("Enum16")
-                .field("map", &map)
-                .field("data", &data)
-                .finish(),
+            Enum16(e) => f.debug_struct("Enum16").field("map", &e).finish(),
 
             Ring(inner) => f.debug_tuple("Ring").field(inner).finish(),
             Polygon(inner) => f.debug_tuple("Polygon").field(inner).finish(),
@@ -277,21 +342,17 @@ impl Debug for Mark<'_> {
             LineString(inner) => f.debug_tuple("LineString").field(inner).finish(),
             MultiLineString(inner) => f.debug_tuple("MultiLineString").field(inner).finish(),
 
-            LowCardinality {
-                indices,
-                global_dictionary,
-                additional_keys,
-            } => f
+            LowCardinality(lc) => f
                 .debug_struct("LowCardinality")
-                .field("indices", indices)
-                .field("global_dictionary", global_dictionary)
-                .field("additional_keys", additional_keys)
+                .field("indices", &lc.indices)
+                .field("global_dictionary", &lc.global_dictionary)
+                .field("additional_keys", &lc.additional_keys)
                 .finish(),
 
-            Array(off, inner) => f
+            Array(a) => f
                 .debug_struct("Array")
-                .field("offsets_len", &off.len())
-                .field("values", inner)
+                .field("offsets_len", &a.offsets.len())
+                .field("values", &a.values)
                 .finish(),
 
             Tuple(items) => f.debug_tuple("Tuple").field(items).finish(),
@@ -303,48 +364,33 @@ impl Debug for Mark<'_> {
                 .field("column", col)
                 .finish(),
 
-            Map {
-                offsets,
-                keys,
-                values,
-            } => f
+            Map(m) => f
                 .debug_struct("Map")
-                .field("offsets_len", &offsets.len())
-                .field("keys", keys)
-                .field("values", values)
+                .field("offsets_len", &m.offsets.len())
+                .field("keys", &m.keys)
+                .field("values", &m.values)
                 .finish(),
 
-            Variant {
-                offsets,
-                discriminators,
-                types,
-            } => f
+            Variant(v) => f
                 .debug_struct("Variant")
-                .field("disc_bytes", &discriminators.len())
-                .field("disc_ptr", &discriminators.as_ptr())
-                .field("types", types)
-                .field("offsets", offsets)
+                .field("disc_bytes", &v.discriminators.len())
+                .field("disc_ptr", &v.discriminators.as_ptr())
+                .field("types", &v.types)
+                .field("offsets", &v.offsets)
                 .finish(),
 
-            Nested {
-                col_names,
-                array_of_tuples,
-            } => f
+            Nested(n) => f
                 .debug_struct("Nested")
-                .field("col_names", col_names)
-                .field("array_of_tuples", &array_of_tuples)
+                .field("col_names", &n.col_names)
+                .field("array_of_tuples", &n.array_of_tuples)
                 .finish(),
 
-            Dynamic(layout, cols) => f
-                .debug_struct("Dynamic")
-                .field("layout", layout)
-                .field("columns", cols)
-                .finish(),
+            Dynamic(d) => f.debug_struct("Dynamic").field("d", d).finish(),
 
-            Json { columns, headers } => f
+            Json(j) => f
                 .debug_struct("Json")
-                .field("columns", columns)
-                .field("headers", headers)
+                .field("columns", &j.columns)
+                .field("headers", &j.headers)
                 .finish(),
         }
     }
