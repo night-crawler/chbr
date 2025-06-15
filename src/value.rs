@@ -1,13 +1,10 @@
 use crate::error::Error;
-use crate::mark::{
-    Mark, MarkArray, MarkDecimal32, MarkDecimal64, MarkDecimal128, MarkDecimal256, MarkFixedString,
-    MarkLowCardinality, MarkMap, MarkNested,
-};
+use crate::mark::{Mark, MarkArray, MarkDateTime, MarkDateTime64, MarkDecimal32, MarkDecimal64, MarkDecimal128, MarkDecimal256, MarkEnum8, MarkEnum16, MarkFixedString, MarkLowCardinality, MarkMap, MarkNested, MarkNullable, MarkTuple};
 use crate::types::{OffsetIndexPair as _, Offsets};
 use crate::{
     Bf16Data, ByteSliceExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data,
-    Decimal32Data, Decimal64Data, Decimal128Data, Decimal256Data, Ipv4Data, Ipv6Data, UuidData,
-    i256, u256,
+    Decimal32Data, Decimal64Data, Decimal128Data, Decimal256Data, Ipv4Data, Ipv6Data, TinyRange,
+    UuidData, i256, u256,
 };
 use chrono_tz::Tz;
 use core::convert::TryFrom;
@@ -47,8 +44,8 @@ pub enum Value<'a> {
     Uuid(&'a UuidData),
     Date(chrono::NaiveDate),
     Date32(chrono::NaiveDate),
-    DateTime(chrono::DateTime<Tz>),
-    DateTime64(chrono::DateTime<Tz>),
+    DateTime(usize, &'a MarkDateTime<'a>),
+    DateTime64(usize, &'a MarkDateTime64<'a>),
     Ipv4(Ipv4Addr),
     Ipv6(&'a Ipv6Data),
     Point((f64, f64)),
@@ -105,16 +102,19 @@ pub enum Value<'a> {
     Ipv6Slice(&'a [Ipv6Data]),
 
     LowCardinalitySlice {
-        idx: Range<usize>,
+        idx: TinyRange,
         mark_lc: &'a MarkLowCardinality<'a>,
     },
 
     ArraySlice {
         mark_array: &'a MarkArray<'a>,
-        slice_indices: Range<usize>,
+        slice_indices: TinyRange,
     },
 
-    Tuple(usize, &'a [Mark<'a>]),
+    Tuple {
+        index: usize, 
+        mark: &'a MarkTuple<'a>
+    },
     Map {
         mark_map: &'a MarkMap<'a>,
         index: usize,
@@ -122,18 +122,17 @@ pub enum Value<'a> {
 
     MapSlice {
         mark_map: &'a MarkMap<'a>,
-        slice_indices: Range<usize>,
+        slice_indices: TinyRange,
     },
 
     TupleSlice {
-        inner: &'a [Mark<'a>],
-        slice_indices: Range<usize>,
+        mark: &'a MarkTuple<'a>,
+        slice_indices: TinyRange,
     },
 
     NullableSlice {
-        is_null: &'a [u8],
-        slice_indices: Range<usize>,
-        inner: &'a Mark<'a>,
+        mark_nullable: &'a MarkNullable<'a>,
+        slice_indices: TinyRange,
     },
 
     Nested {
@@ -143,22 +142,22 @@ pub enum Value<'a> {
 
     NestedSlice {
         mark_nested: &'a MarkNested<'a>,
-        slice_indices: Range<usize>,
+        slice_indices: TinyRange,
     },
 
     FixedStringSlice {
         mark_fs: &'a MarkFixedString<'a>,
-        indices: Range<usize>,
+        indices: TinyRange,
     },
 
     Enum8Slice {
-        variants: &'a [(&'a str, i8)],
-        data: &'a [i8],
+        mark: &'a MarkEnum8<'a>,
+        slice_indices: TinyRange,
     },
 
     Enum16Slice {
-        variants: &'a [(&'a str, i16)],
-        data: &'a [I16],
+        mark: &'a MarkEnum16<'a>,
+        slice_indices: TinyRange,
     },
 }
 
@@ -189,7 +188,8 @@ impl Value<'_> {
             Value::String(_) => "String",
             Value::Uuid(_) => "Uuid",
             Value::Date(_) | Value::Date32(_) => "Date",
-            Value::DateTime(_) | Value::DateTime64(_) => "DateTime",
+            Value::DateTime(_, _) => "DateTime",
+            Value::DateTime64(_, _) => "DateTime64",
             Value::Ipv4(_) => "Ipv4",
             Value::Ipv6(_) => "Ipv6",
             Value::Point(_) => "Point",
@@ -210,7 +210,7 @@ impl Value<'_> {
             Value::Float64Slice(_) => "Float64Slice",
             Value::LowCardinalitySlice { .. } => "LowCardinalitySlice",
             Value::ArraySlice { .. } => "ArraySlice",
-            Value::Tuple(_, _) => "Tuple",
+            Value::Tuple{..} => "Tuple",
             Value::Map { .. } => "Map",
             Value::MapSlice { .. } => "MapSlice",
             Value::TupleSlice { .. } => "TupleSlice",
@@ -320,7 +320,23 @@ impl TryFrom<Value<'_>> for chrono::DateTime<Tz> {
     #[inline(always)]
     fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
         match value {
-            Value::DateTime64(dt) | Value::DateTime(dt) => Ok(dt),
+            Value::DateTime(index, d) => {
+                // we checked the boundary before creating the Value
+                let value = d.data.get(index).unwrap().with_tz(d.tz);
+                Ok(value)
+            }
+            Value::DateTime64(index, d) => {
+                let value = d
+                    .data
+                    .get(index)
+                    .unwrap()
+                    .with_tz_and_precision(d.tz, d.precision);
+                let Some(value) = value else {
+                    return Err(Error::Overflow("DateTime64 value out of range".to_owned()));
+                };
+
+                Ok(value)
+            }
             other => Err(Error::MismatchedType(other.as_str(), "DateTime")),
         }
     }
@@ -484,7 +500,7 @@ impl<'a> TryFrom<Value<'a>> for LowCardinalitySliceIterator<'a> {
                     ));
                 };
 
-                let sliced = lc.indices.slice(idx);
+                let sliced = lc.indices.slice(idx.into());
 
                 Ok(Self {
                     indices: SliceUsizeIterator::try_from(sliced)?,
@@ -525,7 +541,7 @@ impl<'a> TryFrom<Value<'a>> for ArraySliceIterator<'a> {
                 slice_indices,
             } => Ok(Self {
                 mark_array,
-                slice_indices,
+                slice_indices: slice_indices.into(),
             }),
             other => Err(Error::MismatchedType(other.as_str(), "ArraySliceIterator")),
         }
@@ -570,7 +586,8 @@ macro_rules! impl_try_from_tuple {
             #[inline(always)]
             fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
                 match value {
-                    Value::Tuple(row, values) => {
+                    Value::Tuple { index, mark } => {
+                        let values = &mark.values;
                         if values.len() != $len {
                             return Err(Error::MismatchedType(
                                 concat!("Tuple with ", stringify!($len), " elements"),
@@ -582,9 +599,9 @@ macro_rules! impl_try_from_tuple {
                             $(
                                 {
                                     let field_val = values[$idx]
-                                        .get(row)
+                                        .get(index)
                                         .ok_or(Error::IndexOutOfBounds(
-                                            row,
+                                            index,
                                             concat!("Tuple", stringify!($len)),
                                         ))?;
                                     <$T>::try_from(field_val)?
@@ -703,7 +720,7 @@ where
                 offsets: &mark_map.offsets,
                 keys: &mark_map.keys,
                 values: &mark_map.values,
-                slice_indices,
+                slice_indices: slice_indices.into(),
                 _marker: PhantomData,
             }),
             other => Err(Error::MismatchedType(other.as_str(), "MapSliceIterator")),
@@ -733,7 +750,7 @@ where
 }
 
 pub struct TupleSliceIterator<'a> {
-    inner: &'a [Mark<'a>],
+    mark: &'a MarkTuple<'a>,
     slice_indices: Range<usize>,
 }
 
@@ -744,11 +761,11 @@ impl<'a> TryFrom<Value<'a>> for TupleSliceIterator<'a> {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::TupleSlice {
-                inner,
+                mark,
                 slice_indices,
             } => Ok(Self {
-                inner,
-                slice_indices,
+                mark,
+                slice_indices: slice_indices.into(),
             }),
             other => Err(Error::MismatchedType(other.as_str(), "TupleSliceIterator")),
         }
@@ -761,7 +778,10 @@ impl<'a> Iterator for TupleSliceIterator<'a> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let row_idx = self.slice_indices.next()?;
-        Some(Value::Tuple(row_idx, self.inner))
+        Some(Value::Tuple{
+            index: row_idx,
+            mark: self.mark
+        })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -901,9 +921,8 @@ impl Iterator for DateTime64SliceIterator<'_> {
 }
 
 pub struct NullableSliceIterator<'a> {
-    is_null: &'a [u8],
+    mark_nullable: &'a MarkNullable<'a>,
     slice_indices: Range<usize>,
-    inner: &'a Mark<'a>,
 }
 
 impl<'a> TryFrom<Value<'a>> for NullableSliceIterator<'a> {
@@ -913,13 +932,11 @@ impl<'a> TryFrom<Value<'a>> for NullableSliceIterator<'a> {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::NullableSlice {
-                is_null,
+                mark_nullable,
                 slice_indices,
-                inner,
             } => Ok(Self {
-                is_null,
-                slice_indices,
-                inner,
+                mark_nullable,
+                slice_indices: slice_indices.into(),
             }),
             other => Err(Error::MismatchedType(
                 other.as_str(),
@@ -935,10 +952,10 @@ impl<'a> Iterator for NullableSliceIterator<'a> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.slice_indices.next()?;
-        if self.is_null.get(index).copied()? == 1 {
+        if self.mark_nullable.mask.get(index).copied()? == 1 {
             return Some(Value::Empty);
         }
-        self.inner.get(index)
+        self.mark_nullable.data.get(index)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -1073,10 +1090,10 @@ impl<'a> TryFrom<Value<'a>> for NestedIterator<'a> {
                     .array_of_tuples
                     .get(index)
                     .ok_or(Error::IndexOutOfBounds(index, "Nested"))?;
-                let value: TupleSliceIterator = value.try_into()?;
+                let tuple_slice: TupleSliceIterator = value.try_into()?;
                 Ok(Self {
                     col_names: &mark_nested.col_names,
-                    tuple_slice: value,
+                    tuple_slice,
                 })
             }
             other => Err(Error::MismatchedType(other.as_str(), "NestedIterator")),
@@ -1090,13 +1107,13 @@ impl<'a> Iterator for NestedIterator<'a> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let value = self.tuple_slice.next()?;
-        let Value::Tuple(row, slice) = value else {
+        let Value::Tuple {index: row, mark} = value else {
             return None;
         };
 
-        let q = slice.iter().zip(self.col_names);
+        let mark_iter = mark.values.iter().zip(self.col_names);
 
-        Some(NestedItemsIterator { mark_ter: q, row })
+        Some(NestedItemsIterator { mark_ter: mark_iter, row })
     }
 }
 
@@ -1134,7 +1151,7 @@ impl<'a> TryFrom<Value<'a>> for NestedSliceIterator<'a> {
             } => Ok(Self {
                 col_names: &mark_nested.col_names,
                 array_of_tuples: &mark_nested.array_of_tuples,
-                slice_indices,
+                slice_indices: slice_indices.into(),
             }),
             other => Err(Error::MismatchedType(other.as_str(), "NestedSliceIterator")),
         }
@@ -1182,7 +1199,7 @@ impl<'a> TryFrom<Value<'a>> for FixedStringSliceIterator<'a> {
         match value {
             Value::FixedStringSlice { mark_fs, indices } => Ok(Self {
                 mark_fs,
-                slice_indices: indices,
+                slice_indices: indices.into(),
             }),
             other => Err(Error::MismatchedType(
                 other.as_str(),
@@ -1225,10 +1242,17 @@ impl<'a> TryFrom<Value<'a>> for Enum8SliceIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::Enum8Slice { variants, data } => Ok(Self {
-                variants,
-                data: data.iter(),
-            }),
+            Value::Enum8Slice {
+                mark,
+                slice_indices,
+            } => {
+                let slice_indices: Range<usize> = slice_indices.into();
+                let data = &mark.data[slice_indices];
+                Ok(Self {
+                    variants: &mark.variants,
+                    data: data.iter(),
+                })
+            }
             other => Err(Error::MismatchedType(other.as_str(), "Enum8Iterator")),
         }
     }
@@ -1262,10 +1286,17 @@ impl<'a> TryFrom<Value<'a>> for Enum16SliceIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::Enum16Slice { variants, data } => Ok(Self {
-                variants,
-                data: data.iter(),
-            }),
+            Value::Enum16Slice {
+                mark,
+                slice_indices,
+            } => {
+                let slice_indices: Range<usize> = slice_indices.into();
+                let data = &mark.data[slice_indices];
+                Ok(Self {
+                    variants: &mark.variants,
+                    data: data.iter(),
+                })
+            }
             other => Err(Error::MismatchedType(other.as_str(), "Enum16Iterator")),
         }
     }

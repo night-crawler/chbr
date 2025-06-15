@@ -1,7 +1,5 @@
 use crate::error::Error;
-use crate::mark::{
-    Mark, MarkArray, MarkDynamic, MarkJson, MarkLowCardinality, MarkMap, MarkNested, MarkVariant,
-};
+use crate::mark::{Mark, MarkArray, MarkDynamic, MarkJson, MarkLowCardinality, MarkMap, MarkNested, MarkNullable, MarkTuple, MarkVariant};
 use crate::parse::block::ParseContext;
 use crate::parse::consts::{
     HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION, NEED_GLOBAL_DICTIONARY_BIT,
@@ -199,7 +197,11 @@ fn dynamic(ctx: ParseContext) -> IResult<&[u8], Mark> {
 fn nullable<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
     let (mask, input) = ctx.input.split_at(ctx.num_rows);
     let (input, marker) = inner.decode(ctx.fork(input))?;
-    Ok((input, Mark::Nullable(mask, Box::new(marker))))
+    let mark_nullable = MarkNullable {
+        mask: mask,
+        data: Box::new(marker),
+    };
+    Ok((input, Mark::Nullable(mark_nullable)))
 }
 
 fn lc<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
@@ -347,7 +349,11 @@ fn tuple<'a>(inner: Vec<Type<'a>>, ctx: ParseContext<'a>) -> IResult<&'a [u8], M
         (input, marker) = typ.decode(ctx.fork(input))?;
         markers.push(marker);
     }
-    Ok((input, Mark::Tuple(markers)))
+    
+    let marker = MarkTuple {
+        values: markers,
+    };
+    Ok((input, Mark::Tuple(marker)))
 }
 
 fn array<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {

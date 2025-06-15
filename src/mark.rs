@@ -110,6 +110,17 @@ pub struct MarkDynamic<'a> {
     pub columns: Vec<Mark<'a>>,
 }
 
+#[derive(Debug)]
+pub struct MarkNullable<'a> {
+    pub mask: &'a [u8],
+    pub data: Box<Mark<'a>>,
+}
+
+#[derive(Debug)]
+pub struct MarkTuple<'a> {
+    pub values: Vec<Mark<'a>>,
+}
+
 pub enum Mark<'a> {
     Empty,
     Bool(&'a [u8]),
@@ -153,8 +164,8 @@ pub enum Mark<'a> {
 
     LowCardinality(MarkLowCardinality<'a>),
     Array(MarkArray<'a>),
-    Tuple(Vec<Mark<'a>>),
-    Nullable(&'a [u8], Box<Mark<'a>>),
+    Tuple(MarkTuple<'a>),
+    Nullable(MarkNullable<'a>),
     Map(MarkMap<'a>),
     Variant(MarkVariant<'a>),
     Nested(MarkNested<'a>),
@@ -223,7 +234,7 @@ impl Mark<'_> {
             Self::Dynamic(_) => None,
             Self::Json { .. } => None,
 
-            Self::Nullable(_, _) => None,
+            Self::Nullable(_) => None,
             Self::LowCardinality { .. } => None,
             Self::String(_) => None,
             Self::Nested { .. } => None,
@@ -357,12 +368,7 @@ impl Debug for Mark<'_> {
 
             Tuple(items) => f.debug_tuple("Tuple").field(items).finish(),
 
-            Nullable(nulls, col) => f
-                .debug_struct("Nullable")
-                .field("nulls_bytes", &nulls.len())
-                .field("nulls_ptr", &nulls.as_ptr())
-                .field("column", col)
-                .finish(),
+            Nullable(n) => f.debug_struct("Nullable").field("data", n).finish(),
 
             Map(m) => f
                 .debug_struct("Map")
