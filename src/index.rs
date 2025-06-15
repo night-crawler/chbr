@@ -1,7 +1,8 @@
 use crate::ByteSliceExt as _;
-use crate::mark::Mark;
+use crate::mark::{Mark, MarkNullable};
 use crate::types::OffsetIndexPair as _;
 use crate::value::Value;
+use chrono::{DateTime, TimeZone};
 use std::ops::Range;
 
 impl<'a> Mark<'a> {
@@ -13,37 +14,48 @@ impl<'a> Mark<'a> {
             Mark::Int16(bv) => bv.get(index).map(|v| v.get()).map(Value::Int16),
             Mark::Int32(bv) => bv.get(index).map(|v| v.get()).map(Value::Int32),
             Mark::Int64(bv) => bv.get(index).map(|v| v.get()).map(Value::Int64),
-            Mark::Int128(bv) => bv.get(index).map(|v| v.get()).map(Value::Int128),
-            Mark::Int256(bv) => bv.get(index).copied().map(Value::Int256),
+            Mark::Int128(bv) => bv.get(index).map(Value::Int128),
+            Mark::Int256(bv) => bv.get(index).map(Value::Int256),
             Mark::UInt8(bv) => bv.get(index).copied().map(Value::UInt8),
             Mark::UInt16(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt16),
             Mark::UInt32(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt32),
             Mark::UInt64(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt64),
-            Mark::UInt128(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt128),
-            Mark::UInt256(bv) => bv.get(index).copied().map(Value::UInt256),
+            Mark::UInt128(bv) => bv.get(index).map(Value::UInt128),
+            Mark::UInt256(bv) => bv.get(index).map(Value::UInt256),
             Mark::Float32(bv) => bv.get(index).map(|v| v.get()).map(Value::Float32),
             Mark::Float64(bv) => bv.get(index).map(|v| v.get()).map(Value::Float64),
             Mark::BFloat16(bv) => {
                 let value = *bv.get(index)?;
                 Some(Value::BFloat16(value.into()))
             }
-            Mark::Decimal32(precision, data) => {
-                let value = data.get(index)?.with_precision(*precision);
-                Some(Value::Decimal32(value))
+            Mark::Decimal32(d) => {
+                if d.data.len() < index {
+                    return None;
+                }
+                Some(Value::Decimal32(index, d))
             }
-            Mark::Decimal64(precision, data) => {
-                let value = data.get(index)?.with_precision(*precision);
-                Some(Value::Decimal64(value))
+            Mark::Decimal64(d) => {
+                if d.data.len() < index {
+                    return None;
+                }
+                Some(Value::Decimal64(index, d))
             }
-            Mark::Decimal128(precision, data) => {
-                let value = data.get(index)?.with_precision(*precision).unwrap();
-                Some(Value::Decimal128(value))
+            Mark::Decimal128(d) => {
+                if d.data.len() < index {
+                    return None;
+                }
+                Some(Value::Decimal128(index, d))
             }
-            Mark::Decimal256(_, _) => unimplemented!("Decimal256 is not yet supported"),
+            Mark::Decimal256(d) => {
+                if d.data.len() < index {
+                    return None;
+                }
+                Some(Value::Decimal256(index, d))
+            }
             Mark::String(strings) => Some(Value::String(strings.get(index)?)),
-            Mark::FixedString(size, data) => {
-                let offset = size * index;
-                let slice = data[offset..offset + size].rtrim_zeros();
+            Mark::FixedString(f) => {
+                let offset = f.size * index;
+                let slice = f.data[offset..offset + f.size].rtrim_zeros();
 
                 Some(Value::String(unsafe {
                     std::str::from_utf8_unchecked(slice)
@@ -51,7 +63,7 @@ impl<'a> Mark<'a> {
             }
             Mark::Uuid(bv) => {
                 let value = bv.get(index)?;
-                Some(Value::Uuid(uuid::Uuid::from(*value)))
+                Some(Value::Uuid(value))
             }
             Mark::Date(bv) => {
                 let value = *bv.get(index)?;
@@ -61,25 +73,26 @@ impl<'a> Mark<'a> {
                 let value = *bv.get(index)?;
                 Some(Value::Date32(value.into()))
             }
-            Mark::DateTime { tz, data } => {
-                let value = data.get(index)?.with_tz(*tz);
-                Some(Value::DateTime(value))
+            Mark::DateTime(d) => {
+                if d.data.len() < index {
+                    return None;
+                }
+                Some(Value::DateTime(index, d))
             }
-            Mark::DateTime64 {
-                precision,
-                tz,
-                data,
-            } => {
-                let value = data.get(index)?.with_tz_and_precision(*tz, *precision)?;
-                Some(Value::DateTime64(value))
+            Mark::DateTime64(d) => {
+                if d.data.len() < index {
+                    return None;
+                }
+
+                Some(Value::DateTime64(index, d))
             }
             Mark::Ipv4(data) => {
                 let value = *data.get(index)?;
                 Some(Value::Ipv4(value.into()))
             }
             Mark::Ipv6(data) => {
-                let value = *data.get(index)?;
-                Some(Value::Ipv6(value.into()))
+                let value = data.get(index)?;
+                Some(Value::Ipv6(value))
             }
             Mark::Point(_) => unreachable!("Point should be covered by Tuple(f64, f64)"),
             Mark::Ring(_)
@@ -89,36 +102,33 @@ impl<'a> Mark<'a> {
             | Mark::MultiLineString(_) => {
                 unreachable!("Geometric types should be covered by arrays)")
             }
-            Mark::Enum8(variants, data) => {
+            Mark::Enum8(v) => {
                 // is there any more efficient way to map into the enum name?
                 // we could allocate vec![<name>; 255] to store names, but it will not
                 // work for enum 16
-                let variant = *data.get(index)?;
-                if let Ok(index) = variants.binary_search_by_key(&variant, |(_, id)| *id) {
-                    return Some(Value::String(variants[index].0));
+                let variant = *v.data.get(index)?;
+                if let Ok(index) = v.variants.binary_search_by_key(&variant, |(_, id)| *id) {
+                    return Some(Value::String(v.variants[index].0));
                 }
                 // actually at this point it's broken, but we trust clickhouse!
                 None
             }
-            Mark::Enum16(variants, data) => {
-                let variant = data.get(index)?.get();
-                if let Ok(index) = variants.binary_search_by_key(&variant, |(_, id)| *id) {
-                    return Some(Value::String(variants[index].0));
+            Mark::Enum16(v) => {
+                let variant = v.data.get(index)?.get();
+                if let Ok(index) = v.variants.binary_search_by_key(&variant, |(_, id)| *id) {
+                    return Some(Value::String(v.variants[index].0));
                 }
                 None
             }
-            Mark::LowCardinality {
-                indices,
+            Mark::LowCardinality(lc) => {
                 // https://github.com/ClickHouse/clickhouse-go/blob/main/lib/column/lowcardinality.go#L191
-                global_dictionary: _unused,
-                additional_keys,
-            } => {
-                let Some(keys) = additional_keys else {
+
+                let Some(keys) = &lc.additional_keys else {
                     return None;
                 };
 
                 // fast path for LowCardinality with String keys
-                match (indices.as_ref(), keys.as_ref()) {
+                match (lc.indices.as_ref(), keys.as_ref()) {
                     (Mark::UInt8(indices), Mark::String(keys)) => {
                         let value_index = indices.get(index).copied()? as usize;
                         let value = keys.get(value_index).copied()?;
@@ -135,7 +145,7 @@ impl<'a> Mark<'a> {
                         return Some(Value::String(value));
                     }
                     (Mark::UInt64(indices), Mark::String(keys)) => {
-                        let value_index = indices.get(index)?.get() as usize;
+                        let value_index = usize::try_from(indices.get(index)?.get()).unwrap();
                         let value = keys.get(value_index).copied()?;
                         return Some(Value::String(value));
                     }
@@ -143,55 +153,38 @@ impl<'a> Mark<'a> {
                     _ => {}
                 }
 
-                let value_index: usize = indices.get(index)?.try_into().unwrap();
+                let value_index: usize = lc.indices.get(index)?.try_into().unwrap();
 
                 Some(keys.get(value_index)?)
             }
-            Mark::Array(offsets, marker) => {
-                let (start, end) = offsets.offset_indices(index).unwrap()?;
-                Some(marker.slice(start..end))
+            Mark::Array(a) => {
+                let (start, end) = a.offsets.offset_indices(index).unwrap()?;
+                Some(a.values.slice(start..end))
             }
 
-            Mark::Tuple(inner) => Some(Value::Tuple(index, inner)),
-            Mark::Nullable(is_null, data) => {
-                if is_null.get(index) == Some(&1) {
+            Mark::Tuple(inner) => Some(Value::Tuple { mark: inner, index }),
+            Mark::Nullable(n) => {
+                if n.mask.get(index) == Some(&1) {
                     return Some(Value::Empty);
                 }
 
-                data.get(index)
+                n.data.get(index)
             }
-            Mark::Map {
-                offsets,
-                keys,
-                values,
-            } => Some(Value::Map {
-                offsets,
-                keys,
-                values,
-                index,
-            }),
-            Mark::Variant {
-                offsets,
-                discriminators,
-                types,
-            } => {
-                let discriminator = (*discriminators.get(index)?) as usize;
-                let in_type_index = *offsets.get(index)?;
-                types[discriminator].get(in_type_index)
+            Mark::Map(mark_map) => Some(Value::Map { mark_map, index }),
+            Mark::Variant(v) => {
+                let discriminator = (*v.discriminators.get(index)?) as usize;
+                let in_type_index = *v.offsets.get(index)?;
+                v.types[discriminator].get(in_type_index)
             }
-            Mark::Nested {
-                col_names,
-                array_of_tuples,
-            } => {
+            Mark::Nested(n) => {
                 // verify the index is present
-                let _ = array_of_tuples.get(index)?;
+                let _ = n.array_of_tuples.get(index)?;
                 Some(Value::Nested {
-                    col_names,
-                    array_of_tuples,
+                    mark_nested: n,
                     index,
                 })
             }
-            Mark::Dynamic(_, _) => todo!(),
+            Mark::Dynamic(_) => todo!(),
             Mark::Json { .. } => todo!(),
         }
     }
@@ -220,43 +213,38 @@ impl<'a> Mark<'a> {
             Mark::Float32(bv) => Value::Float32Slice(&bv[idx]),
             Mark::Float64(bv) => Value::Float64Slice(&bv[idx]),
             Mark::BFloat16(bv) => Value::BFloat16Slice(&bv[idx]),
-            Mark::Decimal32(precision, bv) => Value::Decimal32Slice {
-                precision: *precision,
-                slice: &bv[idx],
+            Mark::Decimal32(d) => Value::Decimal32Slice {
+                precision: d.precision,
+                slice: &d.data[idx],
             },
-            Mark::Decimal64(precision, bv) => Value::Decimal64Slice {
-                precision: *precision,
-                slice: &bv[idx],
+            Mark::Decimal64(d) => Value::Decimal64Slice {
+                precision: d.precision,
+                slice: &d.data[idx],
             },
-            Mark::Decimal128(precision, bv) => Value::Decimal128Slice {
-                precision: *precision,
-                slice: &bv[idx],
+            Mark::Decimal128(d) => Value::Decimal128Slice {
+                precision: d.precision,
+                slice: &d.data[idx],
             },
-            Mark::Decimal256(prevision, bv) => Value::Decimal256Slice {
-                precision: *prevision,
-                slice: &bv[idx],
+            Mark::Decimal256(d) => Value::Decimal256Slice {
+                precision: d.precision,
+                slice: &d.data[idx],
             },
             Mark::String(data) => Value::StringSlice(&data[idx]),
-            Mark::FixedString(size, data) => Value::FixedStringSlice {
-                size: *size,
-                data,
-                indices: idx,
+            Mark::FixedString(f) => Value::FixedStringSlice {
+                mark_fs: f,
+                indices: idx.try_into().unwrap(),
             },
             Mark::Uuid(bv) => Value::UuidSlice(&bv[idx]),
             Mark::Date(bv) => Value::Date16Slice(&bv[idx]),
             Mark::Date32(bv) => Value::Date32Slice(&bv[idx]),
-            Mark::DateTime { tz, data } => Value::DateTime32Slice {
-                tz: *tz,
-                slice: &data[idx],
+            Mark::DateTime(d) => Value::DateTime32Slice {
+                tz: d.tz,
+                slice: &d.data[idx],
             },
-            Mark::DateTime64 {
-                precision,
-                tz,
-                data,
-            } => Value::DateTime64Slice {
-                precision: *precision,
-                tz: *tz,
-                slice: &data[idx],
+            Mark::DateTime64(d) => Value::DateTime64Slice {
+                precision: d.precision,
+                tz: d.tz,
+                slice: &d.data[idx],
             },
             Mark::Ipv4(bv) => Value::Ipv4Slice(&bv[idx]),
             Mark::Ipv6(bv) => Value::Ipv6Slice(&bv[idx]),
@@ -266,64 +254,281 @@ impl<'a> Mark<'a> {
             | Mark::MultiPolygon(_)
             | Mark::LineString(_)
             | Mark::MultiLineString(_) => unreachable!("must be covered by array marker already"),
-            Mark::Enum8(variants, data) => Value::Enum8Slice {
-                variants,
-                data: &data[idx],
+            Mark::Enum8(e) => Value::Enum8Slice {
+                mark: e,
+                slice_indices: idx.try_into().unwrap(),
+                // variants: &e.variants,
+                // data: &e.data[idx],
             },
-            Mark::Enum16(variants, data) => Value::Enum16Slice {
-                variants,
-                data: &data[idx],
+            Mark::Enum16(e) => Value::Enum16Slice {
+                // variants: &e.variants,
+                // data: &e.data[idx],
+                mark: e,
+                slice_indices: idx.try_into().unwrap(),
             },
-            Mark::LowCardinality {
-                indices,
-                global_dictionary: _unused,
-                additional_keys,
-            } => {
-                let Some(additional_keys) = additional_keys else {
-                    panic!("LowCardinality marker without additional keys");
-                };
-                let sliced = indices.slice(idx);
-                Value::LowCardinalitySlice {
-                    indices: sliced.into(),
-                    additional_keys,
-                }
-            }
-            Mark::Array(offsets, data) => Value::ArraySlice {
-                offsets,
-                data,
-                slice_indices: idx,
+            Mark::LowCardinality(lc) => Value::LowCardinalitySlice {
+                idx: idx.try_into().unwrap(),
+                mark_lc: lc,
+            },
+            Mark::Array(a) => Value::ArraySlice {
+                mark_array: a,
+                slice_indices: idx.try_into().unwrap(),
             },
             Mark::Tuple(inner) => Value::TupleSlice {
-                inner,
-                slice_indices: idx,
+                mark: inner,
+                slice_indices: idx.try_into().unwrap(),
             },
-            Mark::Nullable(is_null, data) => Value::NullableSlice {
-                is_null,
-                inner: data,
-                slice_indices: idx,
+            Mark::Nullable(n) => Value::NullableSlice {
+                mark_nullable: n,
+                slice_indices: idx.try_into().unwrap(),
             },
-            Mark::Map {
-                offsets,
-                keys,
-                values,
-            } => Value::MapSlice {
-                offsets,
-                keys,
-                values,
-                slice_indices: idx,
+            Mark::Map(m) => Value::MapSlice {
+                mark_map: m,
+                slice_indices: idx.try_into().unwrap(),
             },
-            Mark::Nested {
-                col_names,
-                array_of_tuples,
-            } => Value::NestedSlice {
-                col_names,
-                array_of_tuples,
-                slice_indices: idx,
+            Mark::Nested(n) => Value::NestedSlice {
+                mark_nested: n,
+                slice_indices: idx.try_into().unwrap(),
             },
             Mark::Variant { .. } => todo!(),
-            Mark::Dynamic(_, _) => todo!(),
+            Mark::Dynamic(_) => todo!(),
             Mark::Json { .. } => todo!(),
         }
+    }
+
+    #[inline]
+    pub fn get_str(&'a self, index: usize) -> crate::Result<Option<&'a str>> {
+        match self {
+            Mark::String(strings) => Ok(strings.get(index).copied()),
+            Mark::FixedString(fs) => {
+                let offset = fs.size * index;
+                let slice = fs.data[offset..offset + fs.size].rtrim_zeros();
+                let slice = unsafe { std::str::from_utf8_unchecked(slice) };
+                Ok(Some(slice))
+            }
+            Mark::LowCardinality(lc) => {
+                let Some(keys) = &lc.additional_keys else {
+                    return Err(crate::error::Error::CorruptedData(
+                        "LowCardinality marker without additional keys".to_owned(),
+                    ));
+                };
+                // fast path for LowCardinality with String keys
+                match (lc.indices.as_ref(), keys.as_ref()) {
+                    (Mark::UInt8(indices), Mark::String(keys)) => {
+                        let value = indices
+                            .get(index)
+                            .copied()
+                            .and_then(|value_index| keys.get(usize::from(value_index)).copied());
+                        Ok(value)
+                    }
+                    (Mark::UInt16(indices), Mark::String(keys)) => {
+                        let value = indices.get(index).and_then(|value_index| {
+                            let value_index = usize::from(value_index.get());
+                            keys.get(value_index).copied()
+                        });
+                        Ok(value)
+                    }
+                    (Mark::UInt32(indices), Mark::String(keys)) => {
+                        let value = indices.get(index).and_then(|value_index| {
+                            let value_index = value_index.get() as usize;
+                            keys.get(value_index).copied()
+                        });
+                        Ok(value)
+                    }
+                    (Mark::UInt64(indices), Mark::String(keys)) => {
+                        let value = indices
+                            .get(index)
+                            .map(|value_index| usize::try_from(value_index.get()))
+                            .transpose()?
+                            .and_then(|value_index| keys.get(value_index).copied());
+                        Ok(value)
+                    }
+
+                    (_, mark) => Err(crate::error::Error::MismatchedType(mark.as_str(), "&str")),
+                }
+            }
+            mark => Err(crate::error::Error::MismatchedType(mark.as_str(), "&str")),
+        }
+    }
+
+    #[inline]
+    pub fn get_opt_str(&'a self, index: usize) -> crate::Result<Option<Option<&'a str>>> {
+        let Mark::Nullable(MarkNullable { mask, data }) = self else {
+            // convenience wrapper
+            let value = self.get_str(index)?;
+            return Ok(Some(value));
+        };
+
+        if mask.get(index) == Some(&1) {
+            return Ok(Some(None));
+        }
+
+        Ok(Some(data.get_str(index)?))
+    }
+
+    #[inline]
+    pub fn get_datetime<T: TimeZone>(
+        &'a self,
+        index: usize,
+        tz: T,
+    ) -> crate::Result<Option<DateTime<T>>> {
+        match self {
+            Mark::DateTime(d) => {
+                let value = d
+                    .data
+                    .get(index)
+                    .map(|dt| dt.with_tz(d.tz))
+                    .map(|dt| dt.with_timezone(&tz));
+                Ok(value)
+            }
+            Mark::DateTime64(d) => {
+                let value = d
+                    .data
+                    .get(index)
+                    .map(|dt| {
+                        dt.with_tz_and_precision(d.tz, d.precision).ok_or_else(|| {
+                            crate::Error::Overflow("DateTime64 value out of range".to_owned())
+                        })
+                    })
+                    .transpose()?
+                    .map(|dt| dt.with_timezone(&tz));
+
+                Ok(value)
+            }
+            _ => Err(crate::error::Error::MismatchedType(
+                self.as_str(),
+                "DateTime",
+            )),
+        }
+    }
+
+    #[inline]
+    pub fn get_uuid(&'a self, index: usize) -> crate::Result<Option<uuid::Uuid>> {
+        match self {
+            Mark::Uuid(bv) => {
+                let value = bv.get(index).map(|data| uuid::Uuid::from(*data));
+                Ok(value)
+            }
+            _ => Err(crate::error::Error::MismatchedType(self.as_str(), "Uuid")),
+        }
+    }
+
+    #[inline]
+    pub fn get_ipv6(&'a self, index: usize) -> crate::Result<Option<std::net::Ipv6Addr>> {
+        match self {
+            Mark::Ipv6(bv) => {
+                let value = bv.get(index).copied().map(Into::into);
+                Ok(value)
+            }
+            _ => Err(crate::error::Error::MismatchedType(self.as_str(), "Ipv6")),
+        }
+    }
+
+    #[inline]
+    pub fn get_opt_ipv6(
+        &'a self,
+        index: usize,
+    ) -> crate::Result<Option<Option<std::net::Ipv6Addr>>> {
+        let Mark::Nullable(MarkNullable { mask, data }) = self else {
+            let value = self.get_ipv6(index)?;
+            return Ok(Some(value));
+        };
+
+        if mask.get(index) == Some(&1) {
+            return Ok(Some(None));
+        }
+
+        let value = data.get_ipv6(index)?;
+        Ok(Some(value))
+    }
+
+    #[inline]
+    pub fn get_ipv4(&'a self, index: usize) -> crate::Result<Option<std::net::Ipv4Addr>> {
+        match self {
+            Mark::Ipv4(bv) => {
+                let value = bv.get(index).copied().map(Into::into);
+                Ok(value)
+            }
+            _ => Err(crate::error::Error::MismatchedType(self.as_str(), "Ipv4")),
+        }
+    }
+
+    #[inline]
+    pub fn get_bool(&'a self, index: usize) -> crate::Result<Option<bool>> {
+        match self {
+            Mark::Bool(bv) => {
+                let value = bv.get(index).copied().map(|v| v != 0);
+                Ok(value)
+            }
+            _ => Err(crate::error::Error::MismatchedType(self.as_str(), "bool")),
+        }
+    }
+
+    #[inline]
+    pub fn get_f64(&'a self, index: usize) -> crate::Result<Option<f64>> {
+        match self {
+            Mark::Float64(bv) => {
+                let value = bv.get(index).map(|v| v.get());
+                Ok(value)
+            }
+            _ => Err(crate::error::Error::MismatchedType(self.as_str(), "f64")),
+        }
+    }
+
+    #[inline]
+    pub fn get_lc_strs(
+        &'a self,
+        idx: Range<usize>,
+    ) -> crate::Result<impl Iterator<Item = &'a str>> {
+        let Mark::LowCardinality(lc) = self else {
+            return Err(crate::error::Error::MismatchedType(
+                self.as_str(),
+                "LowCardinality",
+            ));
+        };
+
+        let Some(keys) = &lc.additional_keys else {
+            return Err(crate::error::Error::CorruptedData(
+                "LowCardinality marker without additional keys".to_owned(),
+            ));
+        };
+
+        let Mark::String(keys) = keys.as_ref() else {
+            return Err(crate::error::Error::MismatchedType(keys.as_str(), "String"));
+        };
+
+        // if idx.end > keys.len() {
+        //     return Err(crate::error::Error::IndexOutOfBounds(
+        //         idx.end,
+        //         "LowCardinality keys",
+        //     ));
+        // }
+
+        let index_it: Box<dyn Iterator<Item = usize> + '_> = match lc.indices.as_ref() {
+            Mark::UInt8(bv) => Box::new(bv[idx].iter().copied().map(usize::from)),
+            Mark::UInt16(bv) => Box::new(bv[idx].iter().map(|v| usize::from(v.get()))),
+            Mark::UInt32(bv) => Box::new(bv[idx].iter().map(|v| v.get() as usize)),
+            Mark::UInt64(bv) => Box::new(bv[idx].iter().map(|v| usize::try_from(v.get()).unwrap())),
+            _ => unreachable!("must never have any other type"),
+        };
+
+        Ok(index_it.map(move |idx| keys.get(idx).copied().unwrap()))
+    }
+
+    #[inline]
+    pub fn get_array_lc_strs(
+        &'a self,
+        index: usize,
+    ) -> crate::Result<Option<impl Iterator<Item = &'a str>>> {
+        let Mark::Array(a) = self else {
+            return Err(crate::error::Error::MismatchedType(self.as_str(), "Array"));
+        };
+
+        let Some((start, end)) = a.offsets.offset_indices(index)? else {
+            return Ok(None);
+        };
+        let it = a.values.get_lc_strs(start..end)?;
+        Ok(Some(it))
     }
 }
 
@@ -525,6 +730,15 @@ mod tests {
                 actual.push(value);
             }
             assert_eq!(actual, *expected, "Mismatch at index {i}");
+
+            let actual = strings_marker
+                .get_array_lc_strs(i)?
+                .unwrap()
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual, *expected,
+                "Mismatch at index {i} (get_array_lc_strs)"
+            );
         }
 
         Ok(())
@@ -593,6 +807,9 @@ mod tests {
         for (i, expected) in expected_col.iter().enumerate() {
             let value: Option<&str> = strings_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Mismatch at index {i}");
+
+            let value = strings_marker.get_opt_str(i)?.unwrap();
+            assert_eq!(value, *expected, "Mismatch at index {i} (get_opt_str)");
         }
 
         Ok(())
@@ -899,6 +1116,9 @@ mod tests {
             let value: chrono::DateTime<chrono_tz::Tz> =
                 datetime_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Mismatch at index {i}");
+
+            let value = datetime_marker.get_datetime(i, chrono_tz::UTC)?.unwrap();
+            assert_eq!(value, *expected, "Mismatch at index {i} (get_datetime)");
         }
 
         let datetime64_marker = &block.cols[4];

@@ -35,7 +35,7 @@ fn get_unsigned_leb128(input: &[u8]) -> Result<(u64, &[u8]), Error> {
                 return Err(Error::Length($idx));
             }
             let byte = input[$idx];
-            $acc |= ((byte & DATA) as u64) << $shift;
+            $acc |= (u64::from(byte & DATA)) << $shift;
             if byte & CONT == 0 {
                 return Ok(($acc, &input[$idx + 1..]));
             }
@@ -68,7 +68,7 @@ fn get_unsigned_leb128(input: &[u8]) -> Result<(u64, &[u8]), Error> {
         return Err(Error::Overflow("varuint too large for u64".into()));
     }
 
-    acc |= (b9 as u64) << 63;
+    acc |= u64::from(b9) << 63;
     Ok((acc, &input[10..]))
 }
 

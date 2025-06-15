@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 
-use crate::mark::Mark;
+use crate::mark::{
+    Mark, MarkDateTime, MarkDateTime64, MarkDecimal32, MarkDecimal64, MarkDecimal128,
+    MarkDecimal256, MarkEnum8, MarkEnum16, MarkFixedString,
+};
 use crate::parse::typ::parse_type;
 use crate::slice::ByteView;
 pub use chrono_tz::Tz;
@@ -266,28 +269,46 @@ impl<'a> Type<'a> {
             Type::Float32 => Mark::Float32(ByteView::try_from(data)?),
             Type::Float64 => Mark::Float64(ByteView::try_from(data)?),
             Type::BFloat16 => Mark::BFloat16(ByteView::try_from(data)?),
-            Type::Decimal32(scale) => Mark::Decimal32(scale, ByteView::try_from(data)?),
-            Type::Decimal64(scale) => Mark::Decimal64(scale, ByteView::try_from(data)?),
-            Type::Decimal128(scale) => Mark::Decimal128(scale, ByteView::try_from(data)?),
-            Type::Decimal256(scale) => Mark::Decimal256(scale, ByteView::try_from(data)?),
-            Type::FixedString(size) => Mark::FixedString(size, data),
+            Type::Decimal32(precision) => Mark::Decimal32(MarkDecimal32 {
+                precision,
+                data: ByteView::try_from(data)?,
+            }),
+            Type::Decimal64(precision) => Mark::Decimal64(MarkDecimal64 {
+                precision,
+                data: ByteView::try_from(data)?,
+            }),
+            Type::Decimal128(precision) => Mark::Decimal128(MarkDecimal128 {
+                precision,
+                data: ByteView::try_from(data)?,
+            }),
+            Type::Decimal256(precision) => Mark::Decimal256(MarkDecimal256 {
+                precision,
+                data: ByteView::try_from(data)?,
+            }),
+            Type::FixedString(size) => Mark::FixedString(MarkFixedString { size, data }),
             Type::Uuid => Mark::Uuid(ByteView::try_from(data)?),
             Type::Date => Mark::Date(ByteView::try_from(data)?),
             Type::Date32 => Mark::Date32(ByteView::try_from(data)?),
-            Type::DateTime(tz) => Mark::DateTime {
+            Type::DateTime(tz) => Mark::DateTime(MarkDateTime {
                 tz,
                 data: ByteView::try_from(data)?,
-            },
-            Type::DateTime64(precision, tz) => Mark::DateTime64 {
+            }),
+            Type::DateTime64(precision, tz) => Mark::DateTime64(MarkDateTime64 {
                 precision,
                 tz,
                 data: ByteView::try_from(data)?,
-            },
+            }),
             Type::Ipv4 => Mark::Ipv4(ByteView::try_from(data)?),
             Type::Ipv6 => Mark::Ipv6(ByteView::try_from(data)?),
 
-            Type::Enum8(values) => Mark::Enum8(values, ByteView::try_from(data)?),
-            Type::Enum16(values) => Mark::Enum16(values, ByteView::try_from(data)?),
+            Type::Enum8(variants) => Mark::Enum8(MarkEnum8 {
+                variants,
+                data: ByteView::try_from(data)?,
+            }),
+            Type::Enum16(variants) => Mark::Enum16(MarkEnum16 {
+                variants,
+                data: ByteView::try_from(data)?,
+            }),
 
             _ => unimplemented!("Const size is not implemented for type: {:?}", self),
         };
