@@ -272,14 +272,12 @@ impl Debug for Mark<'_> {
         match self {
             Empty => f.write_str("Empty"),
 
-            // simple &[u8] cases
             Bool(b) | Point(b) => dbg_slice(
                 f,
                 core::any::type_name::<Self>().rsplit("::").next().unwrap(),
                 b,
             ),
 
-            // ByteView-backed numeric columns
             Ipv4(v) => dbg_bv(f, "Ipv4", v),
             Ipv6(v) => dbg_bv(f, "Ipv6", v),
             Date32(v) => dbg_bv(f, "Date32", v),
@@ -380,7 +378,6 @@ impl Debug for Mark<'_> {
             Variant(v) => f
                 .debug_struct("Variant")
                 .field("disc_bytes", &v.discriminators.len())
-                .field("disc_ptr", &v.discriminators.as_ptr())
                 .field("types", &v.types)
                 .field("offsets", &v.offsets)
                 .finish(),
@@ -391,13 +388,71 @@ impl Debug for Mark<'_> {
                 .field("array_of_tuples", &n.array_of_tuples)
                 .finish(),
 
-            Dynamic(d) => f.debug_struct("Dynamic").field("d", d).finish(),
+            Dynamic(d) => f
+                .debug_struct("Dynamic")
+                .field("discriminators", &d.discriminators)
+                .field("columns", &d.columns)
+                .finish(),
 
             Json(j) => f
                 .debug_struct("Json")
                 .field("columns", &j.columns)
                 .field("headers", &j.headers)
                 .finish(),
+        }
+    }
+}
+
+impl Mark<'_> {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Mark::Empty => "Empty",
+            Mark::Bool(_) => "Bool",
+            Mark::Int8(_) => "Int8",
+            Mark::Int16(_) => "Int16",
+            Mark::Int32(_) => "Int32",
+            Mark::Int64(_) => "Int64",
+            Mark::Int128(_) => "Int128",
+            Mark::Int256(_) => "Int256",
+            Mark::UInt8(_) => "UInt8",
+            Mark::UInt16(_) => "UInt16",
+            Mark::UInt32(_) => "UInt32",
+            Mark::UInt64(_) => "UInt64",
+            Mark::UInt128(_) => "UInt128",
+            Mark::UInt256(_) => "UInt256",
+            Mark::Float32(_) => "Float32",
+            Mark::Float64(_) => "Float64",
+            Mark::BFloat16(_) => "BFloat16",
+            Mark::Decimal32(_) => "Decimal32",
+            Mark::Decimal64(_) => "Decimal64",
+            Mark::Decimal128(_) => "Decimal128",
+            Mark::Decimal256(_) => "Decimal256",
+            Mark::String(_) => "String",
+            Mark::FixedString(_) => "FixedString",
+            Mark::Uuid(_) => "Uuid",
+            Mark::Date(_) => "Date",
+            Mark::Date32(_) => "Date32",
+            Mark::DateTime(_) => "DateTime",
+            Mark::DateTime64(_) => "DateTime64",
+            Mark::Ipv4(_) => "Ipv4",
+            Mark::Ipv6(_) => "Ipv6",
+            Mark::Point(_) => "Point",
+            Mark::Ring(_) => "Ring",
+            Mark::Polygon(_) => "Polygon",
+            Mark::MultiPolygon(_) => "MultiPolygon",
+            Mark::LineString(_) => "LineString",
+            Mark::MultiLineString(_) => "MultiLineString",
+            Mark::Enum8(_) => "Enum8",
+            Mark::Enum16(_) => "Enum16",
+            Mark::LowCardinality(_) => "LowCardinality",
+            Mark::Array(_) => "Array",
+            Mark::Tuple(_) => "Tuple",
+            Mark::Nullable(_) => "Nullable",
+            Mark::Map(_) => "Map",
+            Mark::Variant(_) => "Variant",
+            Mark::Nested(_) => "Nested",
+            Mark::Dynamic(_) => "Dynamic",
+            Mark::Json(_) => "Json",
         }
     }
 }

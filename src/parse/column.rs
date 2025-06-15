@@ -1,5 +1,8 @@
 use crate::error::Error;
-use crate::mark::{Mark, MarkArray, MarkDynamic, MarkJson, MarkLowCardinality, MarkMap, MarkNested, MarkNullable, MarkTuple, MarkVariant};
+use crate::mark::{
+    Mark, MarkArray, MarkDynamic, MarkJson, MarkLowCardinality, MarkMap, MarkNested, MarkNullable,
+    MarkTuple, MarkVariant,
+};
 use crate::parse::block::ParseContext;
 use crate::parse::consts::{
     HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION, NEED_GLOBAL_DICTIONARY_BIT,
@@ -349,10 +352,8 @@ fn tuple<'a>(inner: Vec<Type<'a>>, ctx: ParseContext<'a>) -> IResult<&'a [u8], M
         (input, marker) = typ.decode(ctx.fork(input))?;
         markers.push(marker);
     }
-    
-    let marker = MarkTuple {
-        values: markers,
-    };
+
+    let marker = MarkTuple { values: markers };
     Ok((input, Mark::Tuple(marker)))
 }
 

@@ -1,5 +1,9 @@
 use crate::error::Error;
-use crate::mark::{Mark, MarkArray, MarkDateTime, MarkDateTime64, MarkDecimal32, MarkDecimal64, MarkDecimal128, MarkDecimal256, MarkEnum8, MarkEnum16, MarkFixedString, MarkLowCardinality, MarkMap, MarkNested, MarkNullable, MarkTuple};
+use crate::mark::{
+    Mark, MarkArray, MarkDateTime, MarkDateTime64, MarkDecimal32, MarkDecimal64, MarkDecimal128,
+    MarkDecimal256, MarkEnum8, MarkEnum16, MarkFixedString, MarkLowCardinality, MarkMap,
+    MarkNested, MarkNullable, MarkTuple,
+};
 use crate::types::{OffsetIndexPair as _, Offsets};
 use crate::{
     Bf16Data, ByteSliceExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data,
@@ -48,7 +52,6 @@ pub enum Value<'a> {
     DateTime64(usize, &'a MarkDateTime64<'a>),
     Ipv4(Ipv4Addr),
     Ipv6(&'a Ipv6Data),
-    Point((f64, f64)),
 
     StringSlice(&'a [&'a str]),
     BoolSlice(&'a [u8]),
@@ -112,8 +115,8 @@ pub enum Value<'a> {
     },
 
     Tuple {
-        index: usize, 
-        mark: &'a MarkTuple<'a>
+        index: usize,
+        mark: &'a MarkTuple<'a>,
     },
     Map {
         mark_map: &'a MarkMap<'a>,
@@ -192,7 +195,6 @@ impl Value<'_> {
             Value::DateTime64(_, _) => "DateTime64",
             Value::Ipv4(_) => "Ipv4",
             Value::Ipv6(_) => "Ipv6",
-            Value::Point(_) => "Point",
             Value::StringSlice(_) => "StringSlice",
             Value::Int8Slice(_) => "Int8Slice",
             Value::Int16Slice(_) => "Int16Slice",
@@ -210,7 +212,7 @@ impl Value<'_> {
             Value::Float64Slice(_) => "Float64Slice",
             Value::LowCardinalitySlice { .. } => "LowCardinalitySlice",
             Value::ArraySlice { .. } => "ArraySlice",
-            Value::Tuple{..} => "Tuple",
+            Value::Tuple { .. } => "Tuple",
             Value::Map { .. } => "Map",
             Value::MapSlice { .. } => "MapSlice",
             Value::TupleSlice { .. } => "TupleSlice",
@@ -311,8 +313,6 @@ impl<'a> TryFrom<Value<'a>> for Uuid {
         }
     }
 }
-
-// impl_try_from_value!(Point, (f64, f64));
 
 impl TryFrom<Value<'_>> for chrono::DateTime<Tz> {
     type Error = Error;
@@ -778,9 +778,9 @@ impl<'a> Iterator for TupleSliceIterator<'a> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let row_idx = self.slice_indices.next()?;
-        Some(Value::Tuple{
+        Some(Value::Tuple {
             index: row_idx,
-            mark: self.mark
+            mark: self.mark,
         })
     }
 
@@ -1107,13 +1107,16 @@ impl<'a> Iterator for NestedIterator<'a> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let value = self.tuple_slice.next()?;
-        let Value::Tuple {index: row, mark} = value else {
+        let Value::Tuple { index: row, mark } = value else {
             return None;
         };
 
         let mark_iter = mark.values.iter().zip(self.col_names);
 
-        Some(NestedItemsIterator { mark_ter: mark_iter, row })
+        Some(NestedItemsIterator {
+            mark_ter: mark_iter,
+            row,
+        })
     }
 }
 
