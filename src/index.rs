@@ -73,15 +73,17 @@ impl<'a> Mark<'a> {
                 Some(Value::Date32(value.into()))
             }
             Mark::DateTime(d) => {
-                let value = d.data.get(index)?.with_tz(d.tz);
-                Some(Value::DateTime(value))
+                if d.data.len() < index {
+                    return None;
+                }
+                Some(Value::DateTime(index, d))
             }
             Mark::DateTime64(d) => {
-                let value = d
-                    .data
-                    .get(index)?
-                    .with_tz_and_precision(d.tz, d.precision)?;
-                Some(Value::DateTime64(value))
+                if d.data.len() < index {
+                    return None;
+                }
+
+                Some(Value::DateTime64(index, d))
             }
             Mark::Ipv4(data) => {
                 let value = *data.get(index)?;
@@ -159,13 +161,16 @@ impl<'a> Mark<'a> {
                 Some(a.values.slice(start..end))
             }
 
-            Mark::Tuple(inner) => Some(Value::Tuple(index, inner)),
-            Mark::Nullable(is_null, data) => {
-                if is_null.get(index) == Some(&1) {
+            Mark::Tuple(inner) => Some(Value::Tuple {
+                mark: inner,
+                index,
+            }),
+            Mark::Nullable(n) => {
+                if n.mask.get(index) == Some(&1) {
                     return Some(Value::Empty);
                 }
 
-                data.get(index)
+                n.data.get(index)
             }
             Mark::Map(mark_map) => Some(Value::Map { mark_map, index }),
             Mark::Variant(v) => {
@@ -229,7 +234,7 @@ impl<'a> Mark<'a> {
             Mark::String(data) => Value::StringSlice(&data[idx]),
             Mark::FixedString(f) => Value::FixedStringSlice {
                 mark_fs: f,
-                indices: idx,
+                indices: idx.try_into().unwrap(),
             },
             Mark::Uuid(bv) => Value::UuidSlice(&bv[idx]),
             Mark::Date(bv) => Value::Date16Slice(&bv[idx]),
@@ -252,34 +257,40 @@ impl<'a> Mark<'a> {
             | Mark::LineString(_)
             | Mark::MultiLineString(_) => unreachable!("must be covered by array marker already"),
             Mark::Enum8(e) => Value::Enum8Slice {
-                variants: &e.variants,
-                data: &e.data[idx],
+                mark: e,
+                slice_indices: idx.try_into().unwrap(),
+                // variants: &e.variants,
+                // data: &e.data[idx],
             },
             Mark::Enum16(e) => Value::Enum16Slice {
-                variants: &e.variants,
-                data: &e.data[idx],
+                // variants: &e.variants,
+                // data: &e.data[idx],
+                mark: e,
+                slice_indices: idx.try_into().unwrap(),
             },
-            Mark::LowCardinality(lc) => Value::LowCardinalitySlice { idx, mark_lc: lc },
+            Mark::LowCardinality(lc) => Value::LowCardinalitySlice {
+                idx: idx.try_into().unwrap(),
+                mark_lc: lc,
+            },
             Mark::Array(a) => Value::ArraySlice {
                 mark_array: a,
-                slice_indices: idx,
+                slice_indices: idx.try_into().unwrap(),
             },
             Mark::Tuple(inner) => Value::TupleSlice {
-                inner,
-                slice_indices: idx,
+                mark: inner,
+                slice_indices: idx.try_into().unwrap(),
             },
-            Mark::Nullable(is_null, data) => Value::NullableSlice {
-                is_null,
-                inner: data,
-                slice_indices: idx,
+            Mark::Nullable(n) => Value::NullableSlice {
+                mark_nullable: n,
+                slice_indices: idx.try_into().unwrap(),
             },
             Mark::Map(m) => Value::MapSlice {
                 mark_map: m,
-                slice_indices: idx,
+                slice_indices: idx.try_into().unwrap(),
             },
             Mark::Nested(n) => Value::NestedSlice {
                 mark_nested: n,
-                slice_indices: idx,
+                slice_indices: idx.try_into().unwrap(),
             },
             Mark::Variant { .. } => todo!(),
             Mark::Dynamic(_) => todo!(),

@@ -5,6 +5,7 @@ use chrono::NaiveDate;
 use chrono_tz::Tz;
 use std::iter::Peekable;
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::ops::Range;
 use uuid::Uuid;
 use zerocopy::little_endian::{I32, I64, I128, U16, U32, U64};
 
@@ -199,6 +200,38 @@ impl<'a> BlockIterator<'a> {
             blocks: blocks.iter().peekable(),
             block_row: 0,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TinyRange {
+    pub start: u32,
+    pub length: u32,
+}
+
+impl From<TinyRange> for Range<usize> {
+    #[inline(always)]
+    fn from(value: TinyRange) -> Self {
+        Range {
+            start: value.start as usize,
+            end: (value.start + value.length) as usize,
+        }
+    }
+}
+
+impl TryFrom<Range<usize>> for TinyRange {
+    type Error = error::Error;
+
+    #[inline(always)]
+    fn try_from(value: Range<usize>) -> std::result::Result<Self, Self::Error> {
+        let start = u32::try_from(value.start)
+            .map_err(|_| error::Error::ValueOutOfRange("usize", "u32", value.start.to_string()))?;
+
+        let length = u32::try_from(value.end - value.start).map_err(|_| {
+            error::Error::ValueOutOfRange("usize", "u32", (value.end - value.start).to_string())
+        })?;
+
+        Ok(TinyRange { start, length })
     }
 }
 
