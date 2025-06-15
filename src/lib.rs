@@ -1,12 +1,12 @@
 use crate::conv::{date16, date32, datetime32, datetime32_tz, datetime64_tz};
 use crate::mark::Mark;
-use crate::value::Value;
 use chrono::NaiveDate;
 use chrono_tz::Tz;
 use std::iter::Peekable;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use uuid::Uuid;
 use zerocopy::little_endian::{I32, I64, I128, U16, U32, U64};
+use crate::value::Value;
 
 pub mod conv;
 pub mod error;
@@ -152,17 +152,37 @@ pub struct BlockRow<'a> {
     row_index: usize,
 }
 
+pub struct ColumnAccessor<'a> {
+    pub col_name: &'a str,
+    pub marker: &'a Mark<'a>,
+    row_index: usize,
+}
+
+impl<'a> ColumnAccessor<'a> {
+    pub fn get(self) -> Value<'a> {
+        self.marker.get(self.row_index).unwrap()
+    }
+    
+    pub fn get_str(self) -> Option<&'a str >{
+        let q = self.marker.get_str(self.row_index).unwrap();
+        q
+    }
+}
+
 impl<'a> Iterator for BlockRow<'a> {
-    type Item = (&'a str, Value<'a>);
+    type Item = (&'a str, ColumnAccessor<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
         let col_name = self.col_names.get(self.col_index)?;
         let marker = self.cols.get(self.col_index)?;
 
-        let value = marker.get(self.row_index)?;
         self.col_index += 1;
 
-        Some((col_name, value))
+        Some((col_name, ColumnAccessor {
+            col_name,
+            marker,
+            row_index: self.row_index,
+        }))
     }
 }
 

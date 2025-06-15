@@ -34,6 +34,9 @@ pub enum Error {
 
     #[error("Index {0} out of bounds for {1}")]
     IndexOutOfBounds(usize, &'static str),
+    
+    #[error("Corrupted data: {0}")]
+    CorruptedData(String),
 }
 
 impl<T> From<nom::Err<T>> for Error
