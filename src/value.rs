@@ -26,13 +26,13 @@ pub enum Value<'a> {
     Int32(i32),
     Int64(i64),
     Int128(i128),
-    Int256(i256),
+    Int256(Box<i256>),
     UInt8(u8),
     UInt16(u16),
     UInt32(u32),
     UInt64(u64),
     UInt128(u128),
-    UInt256(u256),
+    UInt256(Box<u256>),
     Float32(f32),
     Float64(f64),
     BFloat16(bf16),
@@ -280,9 +280,9 @@ impl_try_from_value!(Ipv4Slice, &'a [Ipv4Data]);
 impl_try_from_value!(Ipv6Slice, &'a [Ipv6Data]);
 
 impl_try_from_value!(Bool, bool);
-impl_try_from_value!(Int256, i256);
+impl_try_from_value!(Int256, Box<i256>);
 
-impl_try_from_value!(UInt256, u256);
+impl_try_from_value!(UInt256, Box<u256>);
 
 impl_try_from_value!(Float64, f64);
 impl_try_from_value!(Float32, f32);

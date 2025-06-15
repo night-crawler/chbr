@@ -52,7 +52,7 @@ pub struct BenchmarkSample<'a> {
 impl<'a> TryFrom<BlockRow<'a>> for BenchmarkSample<'a> {
     type Error = chbr::error::Error;
 
-    fn try_from(mut row: BlockRow<'a>) -> Result<Self, Self::Error> {
+    fn try_from(row: BlockRow<'a>) -> Result<Self, Self::Error> {
         let mut id: Option<uuid::Uuid> = None;
         let mut lc_string_cd10: Option<&'a str> = None;
         let mut timestamp: Option<chrono::DateTime<chrono::Utc>> = None;
@@ -76,32 +76,32 @@ impl<'a> TryFrom<BlockRow<'a>> for BenchmarkSample<'a> {
         let mut nested_some_id = Vec::<u128>::new();
         let mut nested_some_other_id = Vec::<u64>::new();
 
-        for (name, value) in &mut row {
+        for (name, accessor) in row {
             match name {
-                "id" => id = Some(value.try_into()?),
-                "lc_string_cd10" => lc_string_cd10 = Some(value.try_into()?),
+                "id" => id = Some(accessor.get().try_into()?),
+                "lc_string_cd10" => lc_string_cd10 = accessor.get_str(),
                 "timestamp" => {
-                    let ts: chrono::DateTime<chrono_tz::Tz> = value.try_into()?;
+                    let ts: chrono::DateTime<chrono_tz::Tz> = accessor.get().try_into()?;
                     let ts = ts.with_timezone(&chrono::Utc);
                     timestamp = Some(ts)
                 }
-                "count" => count = Some(value.try_into()?),
-                "some_number" => some_number = Some(value.try_into()?),
+                "count" => count = Some(accessor.get().try_into()?),
+                "some_number" => some_number = Some(accessor.get().try_into()?),
 
-                "lc_nullable_string_cd1000" => lc_nullable_string_cd1000 = value.try_into()?,
-                "lc_nullable_string_cd5000" => lc_nullable_string_cd5000 = value.try_into()?,
-                "lc_nullable_string_cd3000" => lc_nullable_string_cd3000 = value.try_into()?,
-                "lc_nullable_string_cd4000" => lc_nullable_string_cd4000 = value.try_into()?,
-                "lc_nullable_string_cd50000" => lc_nullable_string_cd50000 = value.try_into()?,
-                "lc_nullable_string_cd100" => lc_nullable_string_cd100 = value.try_into()?,
-                "lc_nullable_string_cd500" => lc_nullable_string_cd500 = value.try_into()?,
-                "lc_nullable_string8" => lc_nullable_string8 = value.try_into()?,
-                "lc_nullable_string_cd_00000" => lc_nullable_string_cd_00000 = value.try_into()?,
+                "lc_nullable_string_cd1000" => lc_nullable_string_cd1000 = accessor.get_str(),
+                "lc_nullable_string_cd5000" => lc_nullable_string_cd5000 = accessor.get_str(),
+                "lc_nullable_string_cd3000" => lc_nullable_string_cd3000 = accessor.get_str(),
+                "lc_nullable_string_cd4000" => lc_nullable_string_cd4000 = accessor.get_str(),
+                "lc_nullable_string_cd50000" => lc_nullable_string_cd50000 = accessor.get_str(),
+                "lc_nullable_string_cd100" => lc_nullable_string_cd100 = accessor.get_str(),
+                "lc_nullable_string_cd500" => lc_nullable_string_cd500 = accessor.get_str(),
+                "lc_nullable_string8" => lc_nullable_string8 = accessor.get_str(),
+                "lc_nullable_string_cd_00000" => lc_nullable_string_cd_00000 = accessor.get_str(),
 
-                "some_ip_address" => some_ip_address = value.try_into()?,
+                "some_ip_address" => some_ip_address = accessor.get().try_into()?,
 
                 "lc_tags" => {
-                    let it: LowCardinalitySliceIterator = value.try_into()?;
+                    let it: LowCardinalitySliceIterator = accessor.get().try_into()?;
                     for value in it {
                         let value: &str = value.try_into()?;
                         lc_tags.push(value);
@@ -109,22 +109,22 @@ impl<'a> TryFrom<BlockRow<'a>> for BenchmarkSample<'a> {
                 }
 
                 "nested_field.lc_string_cd10" => {
-                    let it: LowCardinalitySliceIterator = value.try_into()?;
+                    let it: LowCardinalitySliceIterator = accessor.get().try_into()?;
                     for value in it {
                         let value: &str = value.try_into()?;
                         nested_lc_string_cd10.push(value);
                     }
                 }
                 "nested_field.flag" => {
-                    let it: BoolSliceIterator = value.try_into()?;
+                    let it: BoolSliceIterator = accessor.get().try_into()?;
                     nested_flag.extend(it);
                 }
                 "nested_field.some_id" => {
-                    let slice: &[U128] = value.try_into()?;
+                    let slice: &[U128] = accessor.get().try_into()?;
                     nested_some_id.extend(slice.iter().map(|v| v.get()));
                 }
                 "nested_field.some_other_id" => {
-                    let slice: &[U64] = value.try_into()?;
+                    let slice: &[U64] = accessor.get().try_into()?;
                     nested_some_other_id.extend(slice.iter().map(|v| v.get()));
                 }
 

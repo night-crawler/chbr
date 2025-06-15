@@ -14,13 +14,13 @@ impl<'a> Mark<'a> {
             Mark::Int32(bv) => bv.get(index).map(|v| v.get()).map(Value::Int32),
             Mark::Int64(bv) => bv.get(index).map(|v| v.get()).map(Value::Int64),
             Mark::Int128(bv) => bv.get(index).map(|v| v.get()).map(Value::Int128),
-            Mark::Int256(bv) => bv.get(index).copied().map(Value::Int256),
+            Mark::Int256(bv) => bv.get(index).copied().map(|v| Value::Int256(Box::new(v))),
             Mark::UInt8(bv) => bv.get(index).copied().map(Value::UInt8),
             Mark::UInt16(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt16),
             Mark::UInt32(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt32),
             Mark::UInt64(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt64),
             Mark::UInt128(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt128),
-            Mark::UInt256(bv) => bv.get(index).copied().map(Value::UInt256),
+            Mark::UInt256(bv) => bv.get(index).copied().map(|v| Value::UInt256(Box::new(v))),
             Mark::Float32(bv) => bv.get(index).map(|v| v.get()).map(Value::Float32),
             Mark::Float64(bv) => bv.get(index).map(|v| v.get()).map(Value::Float64),
             Mark::BFloat16(bv) => {
@@ -323,6 +323,53 @@ impl<'a> Mark<'a> {
             Mark::Variant { .. } => todo!(),
             Mark::Dynamic(_, _) => todo!(),
             Mark::Json { .. } => todo!(),
+        }
+    }
+    
+    #[inline]
+    pub fn get_str(&'a self, index: usize) -> crate::Result<Option<&'a str>> {
+        match self {
+            Mark::String(strings) => Ok(strings.get(index).copied()),
+            Mark::FixedString(size, data) => {
+                let offset = size * index;
+                let slice = data[offset..offset + size].rtrim_zeros();
+                let slice = unsafe { std::str::from_utf8_unchecked(slice) };
+                Ok(Some(slice))
+            }
+            Mark::LowCardinality {
+                indices, global_dictionary: _, additional_keys
+            } => {
+                let Some(keys) = additional_keys else {
+                    return Err(crate::error::Error::CorruptedData("LowCardinality marker without additional keys".to_owned()));
+                };
+                // fast path for LowCardinality with String keys
+                match (indices.as_ref(), keys.as_ref()) {
+                    (Mark::UInt8(indices), Mark::String(keys)) => {
+                        let value_index = indices.get(index).copied().unwrap() as usize;
+                        let value = keys.get(value_index).copied().unwrap();
+                        Ok(Some(value))
+                    }
+                    (Mark::UInt16(indices), Mark::String(keys)) => {
+                        let value_index = indices.get(index).unwrap().get() as usize;
+                        let value = keys.get(value_index).copied().unwrap();
+                        Ok(Some(value))
+                    }
+                    (Mark::UInt32(indices), Mark::String(keys)) => {
+                        let value_index = indices.get(index).unwrap().get() as usize;
+                        let value = keys.get(value_index).copied().unwrap();
+                        Ok(Some(value))
+                    }
+                    (Mark::UInt64(indices), Mark::String(keys)) => {
+                        let value_index = indices.get(index).unwrap().get() as usize;
+                        let value = keys.get(value_index).copied().unwrap();
+                        Ok(Some(value))
+                    }
+
+                    _ => Err(crate::error::Error::MismatchedType("a", "a")),
+                }
+
+            }
+            mark => Err(crate::error::Error::MismatchedType("a", "a")),
         }
     }
 }
