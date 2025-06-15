@@ -1,5 +1,8 @@
 use crate::error::Error;
-use crate::mark::Mark;
+use crate::mark::{
+    Mark, MarkArray, MarkDecimal32, MarkDecimal64, MarkDecimal128, MarkDecimal256, MarkFixedString,
+    MarkLowCardinality, MarkMap, MarkNested,
+};
 use crate::types::{OffsetIndexPair as _, Offsets};
 use crate::{
     Bf16Data, ByteSliceExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data,
@@ -25,29 +28,29 @@ pub enum Value<'a> {
     Int16(i16),
     Int32(i32),
     Int64(i64),
-    Int128(i128),
-    Int256(Box<i256>),
+    Int128(&'a I128),
+    Int256(&'a i256),
     UInt8(u8),
     UInt16(u16),
     UInt32(u32),
     UInt64(u64),
-    UInt128(u128),
-    UInt256(Box<u256>),
+    UInt128(&'a U128),
+    UInt256(&'a u256),
     Float32(f32),
     Float64(f64),
     BFloat16(bf16),
-    Decimal32(Decimal),
-    Decimal64(Decimal),
-    Decimal128(Decimal),
-    Decimal256(Decimal),
+    Decimal32(usize, &'a MarkDecimal32<'a>),
+    Decimal64(usize, &'a MarkDecimal64<'a>),
+    Decimal128(usize, &'a MarkDecimal128<'a>),
+    Decimal256(usize, &'a MarkDecimal256<'a>),
     String(&'a str),
-    Uuid(Uuid),
+    Uuid(&'a UuidData),
     Date(chrono::NaiveDate),
     Date32(chrono::NaiveDate),
     DateTime(chrono::DateTime<Tz>),
     DateTime64(chrono::DateTime<Tz>),
     Ipv4(Ipv4Addr),
-    Ipv6(Ipv6Addr),
+    Ipv6(&'a Ipv6Data),
     Point((f64, f64)),
 
     StringSlice(&'a [&'a str]),
@@ -102,28 +105,23 @@ pub enum Value<'a> {
     Ipv6Slice(&'a [Ipv6Data]),
 
     LowCardinalitySlice {
-        indices: Box<Value<'a>>,
-        additional_keys: &'a Mark<'a>,
+        idx: Range<usize>,
+        mark_lc: &'a MarkLowCardinality<'a>,
     },
 
     ArraySlice {
-        offsets: &'a Offsets<'a>,
-        data: &'a Mark<'a>,
+        mark_array: &'a MarkArray<'a>,
         slice_indices: Range<usize>,
     },
 
     Tuple(usize, &'a [Mark<'a>]),
     Map {
-        offsets: &'a Offsets<'a>,
-        keys: &'a Mark<'a>,
-        values: &'a Mark<'a>,
+        mark_map: &'a MarkMap<'a>,
         index: usize,
     },
 
     MapSlice {
-        offsets: &'a Offsets<'a>,
-        keys: &'a Mark<'a>,
-        values: &'a Mark<'a>,
+        mark_map: &'a MarkMap<'a>,
         slice_indices: Range<usize>,
     },
 
@@ -139,20 +137,17 @@ pub enum Value<'a> {
     },
 
     Nested {
-        col_names: &'a [&'a str],
-        array_of_tuples: &'a Mark<'a>,
+        mark_nested: &'a MarkNested<'a>,
         index: usize,
     },
 
     NestedSlice {
-        col_names: &'a [&'a str],
-        array_of_tuples: &'a Mark<'a>,
+        mark_nested: &'a MarkNested<'a>,
         slice_indices: Range<usize>,
     },
 
     FixedStringSlice {
-        size: usize,
-        data: &'a [u8],
+        mark_fs: &'a MarkFixedString<'a>,
         indices: Range<usize>,
     },
 
@@ -187,10 +182,10 @@ impl Value<'_> {
             Value::Float32(_) => "Float32",
             Value::Float64(_) => "Float64",
             Value::BFloat16(_) => "BFloat16",
-            Value::Decimal32(_) => "Decimal32",
-            Value::Decimal64(_) => "Decimal64",
-            Value::Decimal128(_) => "Decimal128",
-            Value::Decimal256(_) => "Decimal256",
+            Value::Decimal32(_, _) => "Decimal32",
+            Value::Decimal64(_, _) => "Decimal64",
+            Value::Decimal128(_, _) => "Decimal128",
+            Value::Decimal256(_, _) => "Decimal256",
             Value::String(_) => "String",
             Value::Uuid(_) => "Uuid",
             Value::Date(_) | Value::Date32(_) => "Date",
@@ -280,9 +275,9 @@ impl_try_from_value!(Ipv4Slice, &'a [Ipv4Data]);
 impl_try_from_value!(Ipv6Slice, &'a [Ipv6Data]);
 
 impl_try_from_value!(Bool, bool);
-impl_try_from_value!(Int256, Box<i256>);
+impl_try_from_value!(Int256, &'a i256);
 
-impl_try_from_value!(UInt256, Box<u256>);
+impl_try_from_value!(UInt256, &'a u256);
 
 impl_try_from_value!(Float64, f64);
 impl_try_from_value!(Float32, f32);
@@ -290,9 +285,32 @@ impl_try_from_value!(BFloat16, bf16);
 impl_try_from_value!(BFloat16Slice, &'a [Bf16Data]);
 
 impl_try_from_value!(Ipv4, Ipv4Addr);
-impl_try_from_value!(Ipv6, Ipv6Addr);
 
-impl_try_from_value!(Uuid, Uuid);
+impl<'a> TryFrom<Value<'a>> for Ipv6Addr {
+    type Error = Error;
+
+    #[inline(always)]
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Ipv6(v) => Ok(Ipv6Addr::from(*v)),
+            other => Err(Error::MismatchedType(other.as_str(), "&\'aIpv6Data")),
+        }
+    }
+}
+
+impl<'a> TryFrom<Value<'a>> for Uuid {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Uuid(uuid_data) => {
+                let [hi, lo] = uuid_data.0;
+                Ok(Uuid::from_u64_pair(hi.get(), lo.get()))
+            }
+            other => Err(Error::MismatchedType(other.as_str(), "DateTime")),
+        }
+    }
+}
 
 // impl_try_from_value!(Point, (f64, f64));
 
@@ -342,7 +360,7 @@ macro_rules! impl_try_from_integer_value {
                         Value::Int64(v) => <$target>::try_from(v).map_err(|_| {
                             Error::ValueOutOfRange("i64", stringify!($target), v.to_string())
                         }),
-                        Value::Int128(v) => <$target>::try_from(v).map_err(|_| {
+                        Value::Int128(v) => <$target>::try_from(v.get()).map_err(|_| {
                             Error::ValueOutOfRange("i128", stringify!($target), v.to_string())
                         }),
 
@@ -358,7 +376,7 @@ macro_rules! impl_try_from_integer_value {
                         Value::UInt64(v) => <$target>::try_from(v).map_err(|_| {
                             Error::ValueOutOfRange("u64", stringify!($target), v.to_string())
                         }),
-                        Value::UInt128(v) => <$target>::try_from(v).map_err(|_| {
+                        Value::UInt128(v) => <$target>::try_from(v.get()).map_err(|_| {
                             Error::ValueOutOfRange("u128", stringify!($target), v.to_string())
                         }),
 
@@ -371,7 +389,7 @@ macro_rules! impl_try_from_integer_value {
 }
 
 impl_try_from_integer_value!(
-    u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize,
+    u8, u16, u32, u64, usize, i8, i16, i32, i64, isize, i128, u128
 );
 
 // TODO: also isize iterator?
@@ -458,13 +476,21 @@ impl<'a> TryFrom<Value<'a>> for LowCardinalitySliceIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::LowCardinalitySlice {
-                indices,
-                additional_keys,
-            } => Ok(Self {
-                indices: SliceUsizeIterator::try_from(*indices)?,
-                additional_keys,
-            }),
+            Value::LowCardinalitySlice { idx, mark_lc: lc } => {
+                let Some(additional_keys) = lc.additional_keys.as_ref() else {
+                    return Err(Error::MismatchedType(
+                        "LowCardinalitySliceIterator",
+                        "LowCardinalitySlice with no additional keys",
+                    ));
+                };
+
+                let sliced = lc.indices.slice(idx);
+
+                Ok(Self {
+                    indices: SliceUsizeIterator::try_from(sliced)?,
+                    additional_keys,
+                })
+            }
             other => Err(Error::MismatchedType(
                 other.as_str(),
                 "LowCardinalitySliceIterator",
@@ -484,8 +510,7 @@ impl<'a> Iterator for LowCardinalitySliceIterator<'a> {
 }
 
 pub struct ArraySliceIterator<'a> {
-    offsets: &'a Offsets<'a>,
-    data: &'a Mark<'a>,
+    mark_array: &'a MarkArray<'a>,
     slice_indices: Range<usize>,
 }
 
@@ -496,12 +521,10 @@ impl<'a> TryFrom<Value<'a>> for ArraySliceIterator<'a> {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::ArraySlice {
-                offsets,
-                data,
+                mark_array,
                 slice_indices,
             } => Ok(Self {
-                offsets,
-                data,
+                mark_array,
                 slice_indices,
             }),
             other => Err(Error::MismatchedType(other.as_str(), "ArraySliceIterator")),
@@ -516,8 +539,8 @@ impl<'a> Iterator for ArraySliceIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let slice_idx = self.slice_indices.next()?;
 
-        let (start, end) = self.offsets.offset_indices(slice_idx).unwrap()?;
-        Some(self.data.slice(start..end))
+        let (start, end) = self.mark_array.offsets.offset_indices(slice_idx).unwrap()?;
+        Some(self.mark_array.values.slice(start..end))
     }
 }
 
@@ -607,20 +630,16 @@ where
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::Map {
-                offsets,
-                keys,
-                values,
-                index,
-            } => {
+            Value::Map { mark_map, index } => {
                 // Resolve (start, end) for the requested row in the Map column
-                let (start, end) = offsets
+                let (start, end) = mark_map
+                    .offsets
                     .offset_indices(index)?
                     .ok_or(Error::IndexOutOfBounds(index, "Map"))?;
 
                 Ok(Self {
-                    keys,
-                    values,
+                    keys: &mark_map.keys,
+                    values: &mark_map.values,
                     range: start..end,
                     _marker: PhantomData,
                 })
@@ -678,14 +697,12 @@ where
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::MapSlice {
-                offsets,
-                keys,
-                values,
+                mark_map,
                 slice_indices,
             } => Ok(Self {
-                offsets,
-                keys,
-                values,
+                offsets: &mark_map.offsets,
+                keys: &mark_map.keys,
+                values: &mark_map.values,
                 slice_indices,
                 _marker: PhantomData,
             }),
@@ -761,10 +778,12 @@ impl<'a> TryFrom<Value<'a>> for Decimal {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::Decimal32(v)
-            | Value::Decimal64(v)
-            | Value::Decimal128(v)
-            | Value::Decimal256(v) => Ok(v),
+            Value::Decimal32(index, mark) => Ok(mark.data[index].with_precision(mark.precision)),
+            Value::Decimal64(index, mark) => Ok(mark.data[index].with_precision(mark.precision)),
+            Value::Decimal128(index, mark) => mark.data[index].with_precision(mark.precision),
+            Value::Decimal256(_, _) => Err(Error::NotImplemented(
+                "Decimal256 is not yet supported".to_owned(),
+            )),
             other => Err(Error::MismatchedType(other.as_str(), "Decimal")),
         }
     }
@@ -1049,17 +1068,14 @@ impl<'a> TryFrom<Value<'a>> for NestedIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::Nested {
-                col_names,
-                array_of_tuples,
-                index,
-            } => {
-                let value = array_of_tuples
+            Value::Nested { mark_nested, index } => {
+                let value = mark_nested
+                    .array_of_tuples
                     .get(index)
                     .ok_or(Error::IndexOutOfBounds(index, "Nested"))?;
                 let value: TupleSliceIterator = value.try_into()?;
                 Ok(Self {
-                    col_names,
+                    col_names: &mark_nested.col_names,
                     tuple_slice: value,
                 })
             }
@@ -1113,12 +1129,11 @@ impl<'a> TryFrom<Value<'a>> for NestedSliceIterator<'a> {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::NestedSlice {
-                col_names,
-                array_of_tuples,
+                mark_nested,
                 slice_indices,
             } => Ok(Self {
-                col_names,
-                array_of_tuples,
+                col_names: &mark_nested.col_names,
+                array_of_tuples: &mark_nested.array_of_tuples,
                 slice_indices,
             }),
             other => Err(Error::MismatchedType(other.as_str(), "NestedSliceIterator")),
@@ -1155,8 +1170,7 @@ impl<'a> Iterator for NestedSliceIterator<'a> {
 impl ExactSizeIterator for NestedSliceIterator<'_> {}
 
 pub struct FixedStringSliceIterator<'a> {
-    data: &'a [u8],
-    size: usize,
+    mark_fs: &'a MarkFixedString<'a>,
     slice_indices: Range<usize>,
 }
 
@@ -1166,13 +1180,8 @@ impl<'a> TryFrom<Value<'a>> for FixedStringSliceIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::FixedStringSlice {
-                size,
-                data,
-                indices,
-            } => Ok(Self {
-                data,
-                size,
+            Value::FixedStringSlice { mark_fs, indices } => Ok(Self {
+                mark_fs,
                 slice_indices: indices,
             }),
             other => Err(Error::MismatchedType(
@@ -1188,14 +1197,14 @@ impl<'a> Iterator for FixedStringSliceIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let slice_idx = self.slice_indices.next()?;
-        let start = slice_idx * self.size;
-        let end = start + self.size;
+        let start = slice_idx * self.mark_fs.size;
+        let end = start + self.mark_fs.size;
 
-        if end > self.data.len() {
+        if end > self.mark_fs.data.len() {
             return None;
         }
 
-        let slice = &self.data[start..end].rtrim_zeros();
+        let slice = &self.mark_fs.data[start..end].rtrim_zeros();
         Some(unsafe { std::str::from_utf8_unchecked(slice) })
     }
 

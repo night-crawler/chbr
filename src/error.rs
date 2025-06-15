@@ -23,6 +23,9 @@ pub enum Error {
     #[error("Mismatched type: Internal type is {0}, but asked to get {1}")]
     MismatchedType(&'static str, &'static str),
 
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
+
     #[error("Utf8 decode error: {0}; bytes: {1:0x?}")]
     Utf8Decode(std::str::Utf8Error, Vec<u8>),
 
@@ -34,7 +37,7 @@ pub enum Error {
 
     #[error("Index {0} out of bounds for {1}")]
     IndexOutOfBounds(usize, &'static str),
-    
+
     #[error("Corrupted data: {0}")]
     CorruptedData(String),
 }
