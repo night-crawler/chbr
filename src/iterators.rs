@@ -7,7 +7,6 @@ pub struct ColBool<'a>(&'a Mark<'a>);
 pub struct ColStr<'a>(&'a Mark<'a>);
 pub struct ColUsize<'a>(&'a Mark<'a>);
 
-
 pub trait Read<'a> {
     type Item;
     fn read(&'a self, idx: usize) -> Self::Item;
@@ -54,7 +53,6 @@ impl<'a, Inner: Read<'a>> Iterator for ArrayIter<'a, Inner> {
         Some(self.inner.read(i))
     }
 }
-
 
 impl<'a> Read<'a> for ColBool<'a> {
     type Item = bool;
@@ -195,7 +193,7 @@ mod tests {
         ];
 
         for row in 0..block.num_rows {
-            let outer = reader.read(row); 
+            let outer = reader.read(row);
             let mut actual_row = Vec::new();
 
             for mp in outer {

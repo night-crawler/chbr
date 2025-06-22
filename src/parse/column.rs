@@ -8,8 +8,9 @@ use crate::parse::consts::{
     HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION, NEED_GLOBAL_DICTIONARY_BIT,
     NEED_UPDATE_DICTIONARY_BIT, TUINT8, TUINT16, TUINT32, TUINT64,
 };
+use crate::parse::typ::parse_type;
 use crate::parse::{IResult, parse_var_str_bytes};
-use crate::parse::{parse_offsets, parse_u64, parse_var_str_type, parse_varuint};
+use crate::parse::{parse_offsets, parse_u64, parse_var_str, parse_var_str_type, parse_varuint};
 use crate::types::{Field, JsonColumnHeader, OffsetIndexPair as _, Type};
 use crate::{bt, t};
 use log::debug;
@@ -156,41 +157,64 @@ fn json(ctx: ParseContext) -> IResult<&[u8], Mark> {
 }
 
 fn dynamic(ctx: ParseContext) -> IResult<&[u8], Mark> {
-    let (mut input, num_types) = parse_varuint(ctx.input)?;
-    debug!("num_types: {num_types}");
+    let (mut input, num_types) = parse_varuint::<usize>(ctx.input)?;
 
-    let mut types = Vec::with_capacity(num_types);
+    let mut type_names = Vec::with_capacity(num_types + 1);
     for _ in 0..num_types {
+        let t;
+        (input, t) = parse_var_str(input)?;
+        type_names.push(t);
+    }
+    type_names.push("SharedVariant");
+    // https://github.com/ClickHouse/clickhouse-go/blob/a27396fbf07ca38de1d452c5b366b3a37ce45f56/lib/column/dynamic.go#L366
+    type_names.sort_unstable();
+
+    debug!("Dynamic type names (sorted): {type_names:?}");
+
+    let mut types = Vec::with_capacity(num_types + 1);
+    for name in type_names {
         let typ;
-        (input, typ) = parse_var_str_type(input)?;
+        (_, typ) = parse_type(name.as_bytes())?;
         types.push(typ);
     }
 
-    debug!("{:?}", types);
+    debug!("Dynamic types: {types:?}");
 
-    // skip stats I guess?
     input = &input[8..];
 
     let mut discriminators = Vec::with_capacity(ctx.num_rows);
-    let mut counters = vec![0usize; num_types];
-    for _ in 0..ctx.num_rows {
-        let discriminator;
-        (input, discriminator) = parse_varuint(input)?;
-        discriminators.push(discriminator);
-        if discriminator == 0 {
-            continue;
-        }
-        counters[discriminator - 1] += 1;
+    let mut offsets = vec![0usize; ctx.num_rows];
+    let mut row_counts = vec![0usize; types.len()];
+
+    for offset in &mut offsets {
+        let disc;
+        (input, disc) = parse_varuint(input)?;
+
+        *offset = row_counts[disc];
+        row_counts[disc] += 1;
+
+        discriminators.push(disc);
     }
 
-    let mut columns = Vec::with_capacity(num_types);
-    for (index, typ) in types.into_iter().enumerate() {
+    let mut columns = Vec::with_capacity(types.len());
+    for (i, typ) in types.into_iter().enumerate() {
+        if matches!(typ, Type::SharedVariant) {
+            columns.push(Mark::Empty);
+            continue;
+        }
+
+        let read_rows = row_counts[i];
+        debug!(
+            "Decoding dynamic column {i}: {typ:?}; remainder: {}; read rows: {read_rows}",
+            input.len()
+        );
         let marker;
-        (input, marker) = typ.decode(ctx.fork(input).with_num_rows(counters[index]))?;
+        (input, marker) = typ.decode(ctx.fork(input).with_num_rows(read_rows))?;
         columns.push(marker);
     }
 
     let marker = Mark::Dynamic(MarkDynamic {
+        offsets,
         discriminators,
         columns,
     });

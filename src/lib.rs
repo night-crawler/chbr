@@ -12,12 +12,12 @@ use zerocopy::little_endian::{I32, I64, I128, U16, U32, U64};
 pub mod conv;
 pub mod error;
 pub mod index;
+mod iterators;
 pub mod mark;
 pub mod parse;
 pub mod slice;
 pub mod types;
 pub mod value;
-mod iterators;
 
 pub use error::Error;
 
@@ -339,8 +339,7 @@ pub(crate) mod common {
                 .format(|buf, record| {
                     writeln!(
                         buf,
-                        "{} [{:<5}] {}:{} {}",
-                        buf.timestamp_millis(),
+                        "[{:<5}] {}:{} {}",
                         record.level(),
                         record.file().unwrap_or("<unknown>"),
                         record.line().unwrap_or(0),

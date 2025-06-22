@@ -183,6 +183,7 @@ fn parse_other_primitives(input: &[u8]) -> IResult<&[u8], Type> {
     alt((
         map(tag("Dynamic"), |_| Type::Dynamic),
         map(tag("JSON"), |_| Type::Json),
+        map(tag("SharedVariant"), |_| Type::SharedVariant),
     ))
     .parse(input)
 }

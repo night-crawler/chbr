@@ -104,8 +104,8 @@ pub struct MarkEnum16<'a> {
     pub data: ByteView<'a, I16>,
 }
 
-#[derive(Debug)]
 pub struct MarkDynamic<'a> {
+    pub offsets: Vec<usize>,
     pub discriminators: Vec<usize>,
     pub columns: Vec<Mark<'a>>,
 }

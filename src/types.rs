@@ -139,6 +139,8 @@ pub enum Type<'a> {
 
     Dynamic,
     Json,
+
+    SharedVariant,
 }
 
 impl<'a> Type<'a> {
@@ -236,6 +238,7 @@ impl<'a> Type<'a> {
             Self::LowCardinality(_) => None,
             Self::String => None,
             Self::Nested(_) => None,
+            Type::SharedVariant => None,
         }
     }
 
