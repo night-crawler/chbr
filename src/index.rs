@@ -261,12 +261,8 @@ impl<'a> Mark<'a> {
             Mark::Enum8(e) => Value::Enum8Slice {
                 mark: e,
                 slice_indices: idx.try_into().unwrap(),
-                // variants: &e.variants,
-                // data: &e.data[idx],
             },
             Mark::Enum16(e) => Value::Enum16Slice {
-                // variants: &e.variants,
-                // data: &e.data[idx],
                 mark: e,
                 slice_indices: idx.try_into().unwrap(),
             },
@@ -500,14 +496,7 @@ impl<'a> Mark<'a> {
         let Mark::String(keys) = keys.as_ref() else {
             return Err(crate::error::Error::MismatchedType(keys.as_str(), "String"));
         };
-
-        // if idx.end > keys.len() {
-        //     return Err(crate::error::Error::IndexOutOfBounds(
-        //         idx.end,
-        //         "LowCardinality keys",
-        //     ));
-        // }
-
+        
         let index_it: Box<dyn Iterator<Item = usize> + '_> = match lc.indices.as_ref() {
             Mark::UInt8(bv) => Box::new(bv[idx].iter().copied().map(usize::from)),
             Mark::UInt16(bv) => Box::new(bv[idx].iter().map(|v| usize::from(v.get()))),
