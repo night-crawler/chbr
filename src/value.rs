@@ -167,6 +167,11 @@ pub enum Value<'a> {
         mark: &'a MarkJson<'a>,
         index: usize,
     },
+
+    JsonSlice {
+        mark: &'a MarkJson<'a>,
+        slice_indices: TinyRange,
+    },
 }
 
 impl Value<'_> {
@@ -241,6 +246,7 @@ impl Value<'_> {
             Value::Enum16Slice { .. } => "Enum16SliceIterator",
             Value::BFloat16Slice(_) => "BFloat16Slice",
             Value::Json { .. } => "Json",
+            Value::JsonSlice { .. } => "JsonSlice"
         }
     }
 }

@@ -4,6 +4,7 @@ use crate::types::OffsetIndexPair as _;
 use crate::value::Value;
 use chrono::{DateTime, TimeZone};
 use std::ops::Range;
+use crate::value::Value::JsonSlice;
 
 impl<'a> Mark<'a> {
     pub fn get(&'a self, index: usize) -> Option<Value<'a>> {
@@ -292,7 +293,10 @@ impl<'a> Mark<'a> {
             },
             Mark::Variant { .. } => todo!(),
             Mark::Dynamic(_) => todo!(),
-            Mark::Json { .. } => todo!(),
+            Mark::Json(mark) => JsonSlice {
+                mark,
+                slice_indices: idx.try_into().unwrap(),
+            }
         }
     }
 
@@ -1953,4 +1957,12 @@ mod tests {
 
         Ok(())
     }
+
+    // #[test]
+    // fn json_arr() -> TestResult {
+    //     let data = load("./test_data/json_arr.native")?;
+    //     let (_, block) = parse_block(&data)?;
+    //     
+    //     Ok(())
+    // }
 }
