@@ -163,6 +163,8 @@ pub struct JsonColumnHeader<'a> {
     pub typ: Box<Type<'a>>,
     pub variant_version: u64,
     pub mark: Mark<'a>,
+    pub discriminators: &'a [u8],
+    pub offsets: Vec<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

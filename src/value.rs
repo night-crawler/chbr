@@ -1,7 +1,7 @@
 use crate::error::Error;
 use crate::mark::{
     Mark, MarkArray, MarkDateTime, MarkDateTime64, MarkDecimal32, MarkDecimal64, MarkDecimal128,
-    MarkDecimal256, MarkEnum8, MarkEnum16, MarkFixedString, MarkLowCardinality, MarkMap,
+    MarkDecimal256, MarkEnum8, MarkEnum16, MarkFixedString, MarkJson, MarkLowCardinality, MarkMap,
     MarkNested, MarkNullable, MarkTuple,
 };
 use crate::types::{OffsetIndexPair as _, Offsets};
@@ -162,6 +162,11 @@ pub enum Value<'a> {
         mark: &'a MarkEnum16<'a>,
         slice_indices: TinyRange,
     },
+
+    Json {
+        mark: &'a MarkJson<'a>,
+        index: usize,
+    },
 }
 
 impl Value<'_> {
@@ -235,6 +240,7 @@ impl Value<'_> {
             Value::Enum8Slice { .. } => "Enum8SliceIterator",
             Value::Enum16Slice { .. } => "Enum16SliceIterator",
             Value::BFloat16Slice(_) => "BFloat16Slice",
+            Value::Json { .. } => "Json",
         }
     }
 }
@@ -1319,5 +1325,51 @@ impl<'a> Iterator for Enum16SliceIterator<'a> {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.data.size_hint()
+    }
+}
+
+pub struct JsonIterator<'a> {
+    mark: &'a MarkJson<'a>,
+    index: usize,
+    path_index: usize,
+}
+
+impl<'a> TryFrom<Value<'a>> for JsonIterator<'a> {
+    type Error = Error;
+
+    #[inline(always)]
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Json { mark, index } => Ok(Self {
+                mark,
+                index,
+                path_index: 0,
+            }),
+            other => Err(Error::MismatchedType(other.as_str(), "JsonIterator")),
+        }
+    }
+}
+
+impl<'a> Iterator for JsonIterator<'a> {
+    type Item = (&'a str, Value<'a>);
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let header = self.mark.headers.get(self.path_index)?;
+
+            if header.discriminators.get(self.index)? == &255 {
+                self.path_index += 1;
+                continue;
+            }
+
+            let path = self.mark.paths.get(self.path_index).copied()?;
+
+            let index = header.offsets.get(self.index).copied()?;
+            let value = header.mark.get(index)?;
+            self.path_index += 1;
+
+            break Some((path, value));
+        }
     }
 }

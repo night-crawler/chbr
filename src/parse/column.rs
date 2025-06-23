@@ -14,6 +14,7 @@ use crate::parse::{parse_offsets, parse_u64, parse_var_str, parse_var_str_type, 
 use crate::types::{Field, JsonColumnHeader, OffsetIndexPair as _, Type};
 use crate::{bt, t};
 use log::debug;
+use std::hint::unreachable_unchecked;
 
 impl<'a> Type<'a> {
     pub(crate) fn decode_prefix(&self, mut ctx: ParseContext<'a>) -> IResult<&'a [u8], ()> {
@@ -119,34 +120,45 @@ fn json(ctx: ParseContext) -> IResult<&[u8], Mark> {
     debug!("num_paths_old: {num_paths_old}");
 
     let (input, num_paths) = parse_varuint(input)?;
-    let (mut input, subcols) = Type::String.decode(ctx.fork(input).with_num_rows(num_paths))?;
+    let (mut input, columns) = Type::String.decode(ctx.fork(input).with_num_rows(num_paths))?;
+    let Mark::String(columns) = columns else {
+        unsafe { unreachable_unchecked() };
+    };
 
-    let mut col_headers = Vec::with_capacity(num_paths);
+    let mut headers = Vec::with_capacity(num_paths);
 
     for _ in 0..num_paths {
         let header;
         (input, header) = json_column_header(ctx.fork(input))?;
-        col_headers.push(header);
+        headers.push(header);
     }
 
-    let mut final_headers = Vec::with_capacity(num_paths);
-    for mut header in col_headers {
+    for header in &mut headers {
         let discriminators;
         (discriminators, input) = input.split_at(ctx.num_rows);
 
-        let local_rows = discriminators.iter().filter(|&&d| d != 255).count();
+        let offsets = &mut header.offsets;
+        let mut counter = 0usize;
+
+        for (discriminator, offset) in discriminators.iter().copied().zip(offsets.iter_mut()) {
+            *offset = counter;
+            if discriminator != 255 {
+                counter += 1;
+            }
+        }
+
         let marker;
         (input, marker) = header
             .typ
             .clone()
-            .decode(ctx.fork(input).with_num_rows(local_rows))?;
+            .decode(ctx.fork(input).with_num_rows(counter))?;
         header.mark = marker;
-        final_headers.push(header);
+        header.discriminators = discriminators;
     }
 
     let marker = Mark::Json(MarkJson {
-        columns: Box::new(subcols),
-        headers: final_headers,
+        paths: columns,
+        headers,
     });
 
     let todo_wtf_is_it = ctx.num_rows * 8;
@@ -225,7 +237,7 @@ fn nullable<'a>(inner: Type<'a>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mar
     let (mask, input) = ctx.input.split_at(ctx.num_rows);
     let (input, marker) = inner.decode(ctx.fork(input))?;
     let mark_nullable = MarkNullable {
-        mask: mask,
+        mask,
         data: Box::new(marker),
     };
     Ok((input, Mark::Nullable(mark_nullable)))
@@ -435,6 +447,8 @@ fn json_column_header(ctx: ParseContext<'_>) -> IResult<&[u8], JsonColumnHeader>
             typ: Box::new(typ),
             variant_version: variant,
             mark: Mark::Empty,
+            discriminators: &[],
+            offsets: vec![0; ctx.num_rows],
         },
     ))
 }

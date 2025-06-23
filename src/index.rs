@@ -189,7 +189,7 @@ impl<'a> Mark<'a> {
                 let in_type_index = d.offsets.get(index).copied()?;
                 d.columns[discriminator].get(in_type_index)
             }
-            Mark::Json { .. } => todo!(),
+            Mark::Json(j) => Some(Value::Json { mark: j, index }),
         }
     }
 
@@ -543,8 +543,9 @@ mod tests {
     use crate::parse::block::parse_block;
     use crate::value::{
         ArraySliceIterator, BoolSliceIterator, Enum8SliceIterator, Enum16SliceIterator,
-        FixedStringSliceIterator, LowCardinalitySliceIterator, MapIterator, MapSliceIterator,
-        NestedIterator, NestedSliceIterator, NullableSliceIterator, TupleSliceIterator, Value,
+        FixedStringSliceIterator, JsonIterator, LowCardinalitySliceIterator, MapIterator,
+        MapSliceIterator, NestedIterator, NestedSliceIterator, NullableSliceIterator,
+        TupleSliceIterator, Value,
     };
     use half::bf16;
     // use pretty_assertions::assert_eq;
@@ -1902,6 +1903,64 @@ mod tests {
             rust_decimal::Decimal::try_from(1.23f32)?,
             "Mismatch at index 9"
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn json() -> TestResult {
+        let data = load("./test_data/json.native")?;
+        let (_, block) = parse_block(&data)?;
+
+        //    ┌─id─┬─json──────────────────────────────────────────────────────────┐
+        //  1. │  0 │ {"key":"value"}                                               │
+        //  2. │  1 │ {"array":["1","2","3"]}                                       │
+        //  3. │  2 │ {"nested":{"a":"1","b":"2"}}                                  │
+        //  4. │  3 │ {"boolean":true}                                              │
+        //  5. │  4 │ {}                                                            │
+        //  6. │  5 │ {"date":"2023-01-01"}                                         │
+        //  7. │  6 │ {"datetime":"2023-01-01T12:00:00Z"}                           │
+        //  8. │  7 │ {"array":{"haha":true}}                                       │
+        //  9. │  8 │ {"complex":{"nested":{"array":["1","2","3"],"value":"test"}}} │
+        // 10. │  9 │ {}                                                            │
+        // 11. │ 10 │ {"empty_array":[]}                                            │
+        // 12. │ 11 │ {"mixed_types":["1","string","true",null]}                    │
+        // 13. │ 12 │ {"uuid":"bb679be2-e161-4e5e-b09b-d66f3ed12464"}               │
+        //     └────┴───────────────────────────────────────────────────────────────┘
+
+        let expected_paths = &[
+            ["key"].as_slice(),
+            ["array"].as_slice(),
+            ["nested.a", "nested.b"].as_slice(),
+            ["boolean"].as_slice(),
+            [].as_slice(),
+            ["date"].as_slice(),
+            ["datetime"].as_slice(),
+            ["array.haha"].as_slice(),
+            ["complex.nested.array", "complex.nested.value"].as_slice(),
+            [].as_slice(),
+            ["empty_array"].as_slice(),
+            ["mixed_types"].as_slice(),
+            ["uuid"].as_slice(),
+        ];
+
+        let json_marker = &block.cols[1];
+        for (i, expected_paths) in expected_paths.iter().copied().enumerate() {
+            let mut expected_paths = Vec::from(expected_paths);
+            expected_paths.sort_unstable();
+
+            let it: JsonIterator = json_marker.get(i).unwrap().try_into()?;
+            let mut actual_paths: Vec<&str> = Vec::new();
+            for (path, _value) in it {
+                actual_paths.push(path);
+            }
+            actual_paths.sort_unstable();
+            assert_eq!(
+                actual_paths, expected_paths,
+                "Mismatch at index {i}: expected {:?}, got {:?}",
+                expected_paths, actual_paths
+            );
+        }
 
         Ok(())
     }

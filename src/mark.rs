@@ -39,7 +39,7 @@ pub struct MarkNested<'a> {
 
 #[derive(Debug)]
 pub struct MarkJson<'a> {
-    pub columns: Box<Mark<'a>>,
+    pub paths: Vec<&'a str>,
     pub headers: Vec<JsonColumnHeader<'a>>,
 }
 
@@ -396,7 +396,7 @@ impl Debug for Mark<'_> {
 
             Json(j) => f
                 .debug_struct("Json")
-                .field("columns", &j.columns)
+                .field("columns", &j.paths)
                 .field("headers", &j.headers)
                 .finish(),
         }
