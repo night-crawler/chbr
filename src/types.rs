@@ -60,6 +60,32 @@ impl OffsetIndexPair for Offsets<'_> {
     }
 }
 
+#[derive(Debug)]
+pub enum TypeHeader<'a> {
+    Empty,
+    Tuple(Vec<TypeHeader<'a>>),
+    Json(Box<JsonColumnHeader<'a>>),
+    Map(Box<TypeHeader<'a>>, Box<TypeHeader<'a>>),
+    Variant(Vec<TypeHeader<'a>>),
+    Array(Box<TypeHeader<'a>>),
+}
+
+impl TypeHeader<'_> {
+    pub fn as_array(&self) -> &TypeHeader {
+        match self {
+            TypeHeader::Array(inner) => inner,
+            e => unreachable!("Wrong type header: {e:?}")
+        }
+    }
+
+    pub fn as_tuple(&self) -> &[TypeHeader] {
+        match self {
+            TypeHeader::Tuple(t) => t,
+            e => unreachable!("Wrong type header: {e:?}")
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type<'a> {
     Bool,

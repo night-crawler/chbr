@@ -102,10 +102,11 @@ pub fn parse_single(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
         debug!("column type parsed: {:?}", typ);
 
         let ctx = parse_context.fork(input);
-        (input, ()) = typ.decode_prefix(ctx.clone())?;
+        let header;
+        (input, header) = typ.decode_header(ctx.clone())?;
 
         let marker;
-        (input, marker) = typ.decode(ctx.fork(input))?;
+        (input, marker) = typ.decode(ctx.fork(input), header)?;
         debug!("Decoded, remaining bytes: {}", input.len());
 
         markers.push(marker);
@@ -149,7 +150,7 @@ mod tests {
                 #[test]
                 fn $name() -> TestResult {
                     let buf = load($file)?;
-                    parse_single(&buf)?;
+                    parse_many(&buf)?;
                     Ok(())
                 }
             )*
@@ -173,5 +174,13 @@ mod tests {
         plain_strings => "./testdata/plain_strings.native",
         metric_activity => "./testdata/metric_activity.native",
         array_of_nested => "./testdata/array_of_nested.native",
+        // json_arr => "./testdata/json_arr.native",
+    }
+
+    #[test]
+    fn json_arr() -> TestResult {
+        let buf = load("./testdata/json_arr.native")?;
+        parse_many(&buf)?;
+        Ok(())
     }
 }
