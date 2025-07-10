@@ -74,7 +74,7 @@ echo 'select * from benchmark_sample order by id limit 100000 FORMAT NATIVE' \
       -H 'X-ClickHouse-Key: test_user' \
       'http://100.64.0.2:8124/?database=default' \
       --data-binary @- \
-      --output test_data/benchmark_sample.native
+      --output testdata/benchmark_sample.native
       
       
 echo 'select * from benchmark_sample order by id limit 100000 FORMAT RowBinary' \
@@ -83,5 +83,5 @@ echo 'select * from benchmark_sample order by id limit 100000 FORMAT RowBinary' 
       -H 'X-ClickHouse-Key: test_user' \
       'http://100.64.0.2:8124/?database=default' \
       --data-binary @- \
-      --output test_data/benchmark_sample.rb
+      --output testdata/benchmark_sample.rb
 ```

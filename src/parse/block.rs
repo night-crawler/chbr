@@ -1,9 +1,11 @@
-use crate::ParsedBlock;
-use crate::parse::IResult;
-use crate::parse::typ::parse_type;
-use crate::parse::{parse_var_str, parse_varuint};
-use log::debug;
 use std::ops::Deref;
+
+use log::debug;
+
+use crate::{
+    ParsedBlock,
+    parse::{IResult, parse_var_str, parse_varuint, typ::parse_type},
+};
 
 #[derive(Debug, Clone)]
 pub struct ParseContext<'a> {
@@ -48,12 +50,12 @@ impl<'a> ParseContext<'a> {
     }
 }
 
-pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
+pub fn parse_single(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
     if input.is_empty() {
         return Ok((
             input,
             ParsedBlock {
-                cols: Vec::new(),
+                markers: Vec::new(),
                 col_names: Vec::new(),
                 num_rows: 0,
             },
@@ -77,7 +79,7 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
     parse_context.num_columns = num_columns;
     parse_context.num_rows = num_rows;
 
-    let mut columns = Vec::with_capacity(num_columns);
+    let mut markers = Vec::with_capacity(num_columns);
     let mut col_names = Vec::with_capacity(num_columns);
 
     for index in 0..num_columns {
@@ -92,7 +94,7 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
 
         let column_type;
         (input, column_type) = parse_var_str(input)?;
-        debug!("column type: {column_type}");
+        debug!("{column_name}: column type: {column_type}");
 
         // convert back to bytes, converting to string needed to ensure encoding
         // and fail earlier, can be removed later
@@ -106,24 +108,24 @@ pub fn parse_block(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
         (input, marker) = typ.decode(ctx.fork(input))?;
         debug!("Decoded, remaining bytes: {}", input.len());
 
-        columns.push(marker);
+        markers.push(marker);
     }
 
     Ok((
         input,
         ParsedBlock {
-            cols: columns,
+            markers,
             col_names,
             num_rows,
         },
     ))
 }
 
-pub fn parse_blocks(mut input: &[u8]) -> Result<Vec<ParsedBlock>, crate::parse::Error> {
+pub fn parse_many(mut input: &[u8]) -> Result<Vec<ParsedBlock>, crate::parse::Error> {
     let mut blocks = Vec::new();
     while !input.is_empty() {
         let block;
-        (input, block) = parse_block(input)?;
+        (input, block) = parse_single(input)?;
         blocks.push(block);
     }
 
@@ -132,119 +134,44 @@ pub fn parse_blocks(mut input: &[u8]) -> Result<Vec<ParsedBlock>, crate::parse::
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::common::load;
     use testresult::TestResult;
 
-    #[test]
-    fn a_lot_of_types() -> TestResult {
-        let buf = load("./test_data/sample.native")?;
-        parse_block(&buf)?;
-        Ok(())
+    use super::*;
+    use crate::common::load;
+
+    macro_rules! test_file {
+        (
+            $(
+                $name:ident => $file:expr
+            ),* $(,)?
+        ) => {
+            $(
+                #[test]
+                fn $name() -> TestResult {
+                    let buf = load($file)?;
+                    parse_single(&buf)?;
+                    Ok(())
+                }
+            )*
+        }
     }
 
-    #[test]
-    fn array_lc_string() -> TestResult {
-        let buf = load("./test_data/array_lc_string.native")?;
-        parse_block(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn array() -> TestResult {
-        let buf = load("./test_data/array.native")?;
-        parse_block(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn tuple() -> TestResult {
-        let buf = load("./test_data/tuple.native")?;
-        parse_block(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn variant() -> TestResult {
-        let buf = load("./test_data/variant.native")?;
-        parse_block(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn dynamic() -> TestResult {
-        let buf = load("./test_data/dynamic.native")?;
-        parse_block(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn nullable_string() -> TestResult {
-        let buf = load("./test_data/nullable_string.native")?;
-        parse_block(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn json() -> TestResult {
-        let buf = load("./test_data/json.native")?;
-        parse_block(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn array_nullable_int64() -> TestResult {
-        let buf = load("./test_data/array_nullable_int64.native")?;
-        parse_block(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn array_lc_nullable_string() -> TestResult {
-        let buf = load("./test_data/array_lc_nullable_string.native")?;
-        parse_block(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn array_string() -> TestResult {
-        let buf = load("./test_data/array_string.native")?;
-        parse_block(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn map_nullable_lc_string() -> TestResult {
-        let buf = load("./test_data/map_nullable_lc_string.native")?;
-        parse_block(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn events() -> TestResult {
-        let buf = load("./test_data/events.native")?;
-        parse_block(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn plain_strings() -> TestResult {
-        let buf = load("./test_data/plain_strings.native")?;
-        parse_block(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn metric_activity() -> TestResult {
-        let buf = load("./test_data/metric_activity.native")?;
-        parse_block(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn array_of_nested() -> TestResult {
-        let buf = load("./test_data/array_of_nested.native")?;
-        parse_block(&buf)?;
-        Ok(())
+    test_file! {
+        a_lot_of_types => "./testdata/sample.native",
+        array_lc_string => "./testdata/array_lc_string.native",
+        array => "./testdata/array.native",
+        tuple => "./testdata/tuple.native",
+        variant => "./testdata/variant.native",
+        dynamic => "./testdata/dynamic.native",
+        nullable_string => "./testdata/nullable_string.native",
+        json => "./testdata/json.native",
+        array_nullable_int64 => "./testdata/array_nullable_int64.native",
+        array_lc_nullable_string => "./testdata/array_lc_nullable_string.native",
+        array_string => "./testdata/array_string.native",
+        map_nullable_lc_string => "./testdata/map_nullable_lc_string.native",
+        events => "./testdata/events.native",
+        plain_strings => "./testdata/plain_strings.native",
+        metric_activity => "./testdata/metric_activity.native",
+        array_of_nested => "./testdata/array_of_nested.native",
     }
 }

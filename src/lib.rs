@@ -1,17 +1,25 @@
-use crate::conv::{date16, date32, datetime32, datetime32_tz, datetime64_tz};
-use crate::mark::Mark;
-use crate::value::Value;
+use std::{
+    collections::{HashMap, HashSet},
+    iter::Peekable,
+    net::{Ipv4Addr, Ipv6Addr},
+    ops::Range,
+};
+
 use chrono::{NaiveDate, TimeZone};
 use chrono_tz::Tz;
-use std::iter::Peekable;
-use std::net::{Ipv4Addr, Ipv6Addr};
-use std::ops::Range;
 use uuid::Uuid;
 use zerocopy::little_endian::{I32, I64, I128, U16, U32, U64};
+
+use crate::{
+    conv::{date16, date32, datetime32, datetime32_tz, datetime64_tz},
+    mark::Mark,
+    value::Value,
+};
 
 pub mod conv;
 pub mod error;
 pub mod index;
+mod macros;
 pub mod mark;
 pub mod parse;
 pub mod slice;
@@ -20,11 +28,64 @@ pub mod value;
 
 pub use error::Error;
 
+pub type Result<T> = std::result::Result<T, Error>;
+
+pub(crate) trait ByteExt {
+    fn rtrim_zeros(&self) -> &[u8];
+}
+
+impl ByteExt for [u8] {
+    #[inline(always)]
+    fn rtrim_zeros(&self) -> &[u8] {
+        let mut end = self.len();
+        while end > 0 && self[end - 1] == 0 {
+            end -= 1;
+        }
+        &self[..end]
+    }
+}
+
+/// This range represents a starting offset and a length, as opposed to the
+/// Rust's range, which stores start and end positions.
+/// In particular, this range encodes row numbers/offsets within a ClickHouse block,
+/// so it should not be wildly huge. Nevertheless, if the end position exceeds `u32::MAX`,
+/// we still have a good chance of not failing to convert the Range<usize> to TinyRange.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TinyRange {
+    pub start: u32,
+    pub length: u32,
+}
+
+impl From<TinyRange> for Range<usize> {
+    #[inline(always)]
+    fn from(value: TinyRange) -> Self {
+        Range {
+            start: value.start as usize,
+            end: (value.start + value.length) as usize,
+        }
+    }
+}
+
+impl TryFrom<Range<usize>> for TinyRange {
+    type Error = Error;
+
+    #[inline(always)]
+    fn try_from(value: Range<usize>) -> std::result::Result<Self, Self::Error> {
+        let start = u32::try_from(value.start)
+            .map_err(|_| Error::ValueOutOfRange("usize", "u32", value.start.to_string()))?;
+
+        let length = u32::try_from(value.end - value.start).map_err(|_| {
+            Error::ValueOutOfRange("usize", "u32", (value.end - value.start).to_string())
+        })?;
+
+        Ok(TinyRange { start, length })
+    }
+}
+
 #[macro_export]
 macro_rules! transparent_newtype {
     ( $( $vis:vis $name:ident ( $inner:ty ) ; )+ ) => {
         $(
-            #[allow(non_camel_case_types)]
             #[repr(transparent)]
             #[derive(
                 Clone,
@@ -57,8 +118,8 @@ macro_rules! impl_from {
 }
 
 transparent_newtype! {
-    pub i256 ([u8; 32]);
-    pub u256 ([u8; 32]);
+    pub I256 ([u8; 32]);
+    pub U256 ([u8; 32]);
     pub UuidData([U64; 2]);
     pub Ipv4Data (U32);
     pub Ipv6Data ([u8; 16]);
@@ -69,7 +130,7 @@ transparent_newtype! {
     pub Decimal32Data (I32);
     pub Decimal64Data (I64);
     pub Decimal128Data (I128);
-    pub Decimal256Data (i256);
+    pub Decimal256Data (I256);
     pub Bf16Data ([u8; 2]);
 }
 
@@ -124,27 +185,84 @@ impl Decimal128Data {
     }
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
-
-pub(crate) trait ByteSliceExt {
-    fn rtrim_zeros(&self) -> &[u8];
+pub struct ParsedBlock<'a> {
+    pub markers: Vec<Mark<'a>>,
+    pub col_names: Vec<&'a str>,
+    pub num_rows: usize,
 }
 
-impl ByteSliceExt for [u8] {
-    #[inline(always)]
-    fn rtrim_zeros(&self) -> &[u8] {
-        let mut end = self.len();
-        while end > 0 && self[end - 1] == 0 {
-            end -= 1;
+impl ParsedBlock<'_> {
+    fn reorder(&mut self, order: &HashMap<&str, usize>) -> Result<()> {
+        let num_cols = self.col_names.len();
+        let col_names = std::mem::replace(&mut self.col_names, Vec::with_capacity(num_cols));
+        let markers = std::mem::replace(&mut self.markers, Vec::with_capacity(num_cols));
+
+        let mut triples = Vec::with_capacity(num_cols);
+        let mut num_used = 0;
+        for (index, (col_name, marker)) in col_names.into_iter().zip(markers).enumerate() {
+            let sort_key = if let Some(key) = order.get(col_name).copied() {
+                num_used += 1;
+                key
+            } else {
+                // if the column is not in the order, we put it at the end
+                num_cols + index
+            };
+            triples.push((col_name, marker, sort_key));
         }
-        &self[..end]
+
+        if num_used < order.len() {
+            let present_columns = triples
+                .iter()
+                .map(|(name, _, _)| *name)
+                .collect::<HashSet<_>>();
+            let mut missing = order.keys().copied().collect::<HashSet<_>>();
+            missing.retain(|name| !present_columns.contains(name));
+
+            return Err(Error::InvalidColumnOrder(format!(
+                "Got unexpected columns: {missing:?}"
+            )));
+        }
+
+        triples.sort_unstable_by_key(|(_, _, sort_key)| *sort_key);
+
+        for (col_name, marker, _) in triples {
+            self.col_names.push(col_name);
+            self.markers.push(marker);
+        }
+
+        Ok(())
     }
 }
 
-pub struct ParsedBlock<'a> {
-    pub cols: Vec<Mark<'a>>,
-    pub col_names: Vec<&'a str>,
-    pub num_rows: usize,
+pub struct BlocksIterator<'a> {
+    blocks: Peekable<std::slice::Iter<'a, ParsedBlock<'a>>>,
+    block_row: usize,
+}
+
+impl<'a> BlocksIterator<'a> {
+    #[inline]
+    pub fn new(blocks: &'a [ParsedBlock<'a>]) -> Self {
+        Self {
+            blocks: blocks.iter().peekable(),
+            block_row: 0,
+        }
+    }
+
+    pub fn new_ordered(blocks: &'a mut [ParsedBlock<'a>], order: &[&str]) -> Result<Self> {
+        let order_map = order
+            .iter()
+            .enumerate()
+            .map(|(index, name)| (*name, index))
+            .collect::<HashMap<_, _>>();
+        for block in blocks.iter_mut() {
+            block.reorder(&order_map)?;
+        }
+
+        Ok(Self {
+            blocks: blocks.iter().peekable(),
+            block_row: 0,
+        })
+    }
 }
 
 pub struct BlockRow<'a> {
@@ -154,12 +272,78 @@ pub struct BlockRow<'a> {
     row_index: usize,
 }
 
+impl<'a> BlockRow<'a> {
+    pub fn cols(&self) -> &'a [Mark<'a>] {
+        self.cols
+    }
+
+    pub fn col_names(&self) -> &'a [&'a str] {
+        self.col_names
+    }
+
+    pub fn row_index(&self) -> usize {
+        self.row_index
+    }
+
+    pub fn col_index(&self) -> usize {
+        self.col_index
+    }
+}
+
+impl<'a> Iterator for BlockRow<'a> {
+    type Item = (&'a str, ColumnAccessor<'a>);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let col_name = self.col_names.get(self.col_index)?;
+        let marker = self.cols.get(self.col_index)?;
+
+        self.col_index += 1;
+
+        Some((
+            col_name,
+            ColumnAccessor {
+                col_name,
+                marker,
+                row_index: self.row_index,
+            },
+        ))
+    }
+}
+
+impl<'a> Iterator for BlocksIterator<'a> {
+    type Item = BlockRow<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let block = self.blocks.peek()?;
+            if self.block_row >= block.num_rows {
+                self.blocks.next();
+                self.block_row = 0;
+                continue;
+            }
+
+            let block_row = BlockRow {
+                col_names: &block.col_names,
+                cols: &block.markers,
+                col_index: 0,
+                row_index: self.block_row,
+            };
+            self.block_row += 1;
+
+            break Some(block_row);
+        }
+    }
+}
+
 pub struct ColumnAccessor<'a> {
     pub col_name: &'a str,
     pub marker: &'a Mark<'a>,
     row_index: usize,
 }
 
+/// Provides access to the column value and allows to avoid constructing new
+/// Value instances. For small types it can have a large performance impact.
 impl<'a> ColumnAccessor<'a> {
     #[inline]
     pub fn get(self) -> Value<'a> {
@@ -229,110 +413,27 @@ impl<'a> ColumnAccessor<'a> {
     }
 }
 
-impl<'a> Iterator for BlockRow<'a> {
-    type Item = (&'a str, ColumnAccessor<'a>);
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        let col_name = self.col_names.get(self.col_index)?;
-        let marker = self.cols.get(self.col_index)?;
-
-        self.col_index += 1;
-
-        Some((
-            col_name,
-            ColumnAccessor {
-                col_name,
-                marker,
-                row_index: self.row_index,
-            },
-        ))
-    }
+pub fn iter_blocks<'a>(blocks: &'a [ParsedBlock]) -> BlocksIterator<'a> {
+    BlocksIterator::new(blocks)
 }
 
-pub struct BlockIterator<'a> {
-    blocks: Peekable<std::slice::Iter<'a, ParsedBlock<'a>>>,
-    block_row: usize,
-}
-
-impl<'a> BlockIterator<'a> {
-    #[inline(always)]
-    pub fn new(blocks: &'a [ParsedBlock<'a>]) -> Self {
-        Self {
-            blocks: blocks.iter().peekable(),
-            block_row: 0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TinyRange {
-    pub start: u32,
-    pub length: u32,
-}
-
-impl From<TinyRange> for Range<usize> {
-    #[inline(always)]
-    fn from(value: TinyRange) -> Self {
-        Range {
-            start: value.start as usize,
-            end: (value.start + value.length) as usize,
-        }
-    }
-}
-
-impl TryFrom<Range<usize>> for TinyRange {
-    type Error = Error;
-
-    #[inline(always)]
-    fn try_from(value: Range<usize>) -> std::result::Result<Self, Self::Error> {
-        let start = u32::try_from(value.start)
-            .map_err(|_| Error::ValueOutOfRange("usize", "u32", value.start.to_string()))?;
-
-        let length = u32::try_from(value.end - value.start).map_err(|_| {
-            Error::ValueOutOfRange("usize", "u32", (value.end - value.start).to_string())
-        })?;
-
-        Ok(TinyRange { start, length })
-    }
-}
-
-impl<'a> Iterator for BlockIterator<'a> {
-    type Item = BlockRow<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let block = self.blocks.peek()?;
-            if self.block_row >= block.num_rows {
-                self.blocks.next();
-                self.block_row = 0;
-                continue;
-            }
-
-            let block_row = BlockRow {
-                col_names: &block.col_names,
-                cols: &block.cols,
-                col_index: 0,
-                row_index: self.block_row,
-            };
-            self.block_row += 1;
-
-            break Some(block_row);
-        }
-    }
+pub fn iter_blocks_ordered<'a>(
+    blocks: &'a mut [ParsedBlock<'a>],
+    order: &[&str],
+) -> Result<BlocksIterator<'a>> {
+    BlocksIterator::new_ordered(blocks, order)
 }
 
 #[cfg(test)]
 pub(crate) mod common {
-    use log::LevelFilter;
-    use once_cell::sync::OnceCell;
-    use std::io::Read as _;
-    use std::path::Path;
+    use std::{io::Read as _, path::Path, sync::Once};
 
-    static INIT: OnceCell<()> = OnceCell::new();
+    use log::LevelFilter;
+
+    static INIT: Once = Once::new();
 
     pub fn init_logger() {
-        INIT.get_or_init(|| {
+        INIT.call_once(|| {
             use std::io::Write as _;
             env_logger::builder()
                 .format(|buf, record| {

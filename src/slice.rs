@@ -1,6 +1,10 @@
-use core::ops::{Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive};
-use core::{fmt, mem::size_of};
-use core::{marker::PhantomData, ops::Index};
+use core::{
+    fmt,
+    marker::PhantomData,
+    mem::size_of,
+    ops::{Index, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive},
+};
+
 use zerocopy::{FromBytes, Unaligned};
 
 #[repr(transparent)]
@@ -10,7 +14,7 @@ pub struct ByteView<'a, T: Unaligned + FromBytes + Copy> {
 }
 
 impl<'a, T: Unaligned + FromBytes + Copy> TryFrom<&'a [u8]> for ByteView<'a, T> {
-    type Error = crate::error::Error;
+    type Error = crate::Error;
 
     fn try_from(bytes: &'a [u8]) -> Result<Self, Self::Error> {
         if bytes.len() % size_of::<T>() == 0 {
@@ -115,10 +119,11 @@ impl_slice_index!(RangeFull);
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use pretty_assertions::{assert_eq, assert_ne};
     use testresult::TestResult;
     use zerocopy::byteorder::{LittleEndian, U64};
+
+    use super::*;
 
     fn to_le_bytes(nums: &[u64]) -> Vec<u8> {
         let mut v = Vec::with_capacity(nums.len() * 8);
@@ -167,7 +172,7 @@ mod tests {
             Ok(_) => {
                 panic!("Expected error, but got Ok");
             }
-            Err(crate::error::Error::Length(e)) => {
+            Err(crate::Error::Length(e)) => {
                 assert_eq!(e, 115);
             }
             _ => {

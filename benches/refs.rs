@@ -1,12 +1,9 @@
-use chbr::parse::block::parse_blocks;
-use chbr::value::{BoolSliceIterator, LowCardinalitySliceIterator};
-use chbr::{BlockIterator, BlockRow};
+use std::{fs, hint::black_box, net::Ipv6Addr};
+
+use chbr::{BlockRow, BlocksIterator, parse::block::parse_many};
 use chrono::Utc;
 use clickhouse::rowbinary::de::deserialize_from;
 use criterion::{Criterion, criterion_group, criterion_main};
-use std::fs;
-use std::hint::black_box;
-use std::net::Ipv6Addr;
 use testresult::TestResult;
 use zerocopy::little_endian::{U64, U128};
 
@@ -54,94 +51,14 @@ impl<'a> TryFrom<BlockRow<'a>> for BenchmarkSample<'a> {
     type Error = chbr::error::Error;
 
     fn try_from(row: BlockRow<'a>) -> Result<Self, Self::Error> {
-        let mut id: Option<uuid::Uuid> = None;
-        let mut lc_string_cd10: Option<&'a str> = None;
-        let mut timestamp: Option<chrono::DateTime<chrono::Utc>> = None;
-        let mut count: Option<f64> = None;
-        let mut some_number: Option<u32> = None;
+        let i = row.row_index();
 
-        let mut lc_nullable_string_cd1000: Option<&'a str> = None;
-        let mut lc_nullable_string_cd5000: Option<&'a str> = None;
-        let mut lc_nullable_string_cd3000: Option<&'a str> = None;
-        let mut lc_nullable_string_cd4000: Option<&'a str> = None;
-        let mut lc_nullable_string_cd50000: Option<&'a str> = None;
-        let mut lc_nullable_string_cd100: Option<&'a str> = None;
-        let mut lc_nullable_string_cd500: Option<&'a str> = None;
-        let mut lc_nullable_string8: Option<&'a str> = None;
-        let mut lc_nullable_string_cd_00000: Option<&'a str> = None;
-        let mut some_ip_address: Option<Ipv6Addr> = None;
-
-        let mut lc_tags = Vec::<&'a str>::new();
-        let mut nested_lc_string_cd10 = Vec::<&'a str>::new();
-        let mut nested_flag = Vec::<bool>::new();
-        let mut nested_some_id = Vec::<u128>::new();
-        let mut nested_some_other_id = Vec::<u64>::new();
-
-        for (name, acc) in row {
-            match name {
-                "id" => id = Some(acc.into_uuid()?),
-                "lc_string_cd10" => lc_string_cd10 = Some(acc.into_str()?),
-                "timestamp" => timestamp = Some(acc.into_datetime(Utc)?),
-                "count" => count = Some(acc.get().try_into()?),
-                "some_number" => some_number = Some(acc.get().try_into()?),
-
-                "lc_nullable_string_cd1000" => lc_nullable_string_cd1000 = acc.into_opt_str()?,
-                "lc_nullable_string_cd5000" => lc_nullable_string_cd5000 = acc.into_opt_str()?,
-                "lc_nullable_string_cd3000" => lc_nullable_string_cd3000 = acc.into_opt_str()?,
-                "lc_nullable_string_cd4000" => lc_nullable_string_cd4000 = acc.into_opt_str()?,
-                "lc_nullable_string_cd50000" => lc_nullable_string_cd50000 = acc.into_opt_str()?,
-                "lc_nullable_string_cd100" => lc_nullable_string_cd100 = acc.into_opt_str()?,
-                "lc_nullable_string_cd500" => lc_nullable_string_cd500 = acc.into_opt_str()?,
-                "lc_nullable_string8" => lc_nullable_string8 = acc.into_opt_str()?,
-                "lc_nullable_string_cd_00000" => {
-                    lc_nullable_string_cd_00000 = acc.into_opt_str()?
-                }
-
-                "some_ip_address" => some_ip_address = acc.into_opt_ipv6()?,
-
-                "lc_tags" => {
-                    let it: LowCardinalitySliceIterator = acc.get().try_into()?;
-                    for value in it {
-                        let value: &str = value.try_into()?;
-                        lc_tags.push(value);
-                    }
-                }
-
-                "nested_field.lc_string_cd10" => {
-                    // let it: LowCardinalitySliceIterator = acc.get().try_into()?;
-                    // for value in it {
-                    //     let value: &str = value.try_into()?;
-                    //     nested_lc_string_cd10.push(value);
-                    // }
-
-                    nested_lc_string_cd10.extend(acc.into_array_lc_strs()?)
-                }
-                "nested_field.flag" => {
-                    let it: BoolSliceIterator = acc.get().try_into()?;
-                    nested_flag.extend(it);
-                }
-                "nested_field.some_id" => {
-                    let slice: &[U128] = acc.get().try_into()?;
-                    nested_some_id.extend(slice.iter().map(|v| v.get()));
-                }
-                "nested_field.some_other_id" => {
-                    let slice: &[U64] = acc.get().try_into()?;
-                    nested_some_other_id.extend(slice.iter().map(|v| v.get()));
-                }
-
-                other => {
-                    return Err(chbr::error::Error::Parse(other.to_owned()));
-                }
-            }
-        }
-
-        Ok(BenchmarkSample {
-            id: id.expect("`id` column missing"),
-            lc_string_cd10: lc_string_cd10.expect("`lc_string_cd10` column missing"),
-            timestamp: timestamp.expect("`timestamp` column missing"),
-            count: count.expect("`count` column missing"),
-            some_number: some_number.expect("`some_number` column missing"),
-
+        let [
+            id,
+            lc_string_cd10,
+            timestamp,
+            count,
+            some_number,
             lc_nullable_string_cd1000,
             lc_nullable_string_cd5000,
             lc_nullable_string_cd3000,
@@ -149,29 +66,96 @@ impl<'a> TryFrom<BlockRow<'a>> for BenchmarkSample<'a> {
             lc_nullable_string_cd50000,
             lc_nullable_string_cd100,
             lc_nullable_string_cd500,
-            some_ip_address,
             lc_nullable_string8,
-            lc_tags,
             lc_nullable_string_cd_00000,
-            nested_lc_string_cd10,
-            nested_flag,
+            some_ip_address,
+            lc_tags,
+            nested_field_lc_string_cd10,
+            nested_field_flag,
+            nested_field_some_id,
+            nested_field_some_other_id,
+            ..,
+        ] = row.cols()
+        else {
+            unreachable!()
+        };
+
+        let tags = lc_tags.get_array_lc_strs(i)?.unwrap().collect::<Vec<_>>();
+        let nested_strs = nested_field_lc_string_cd10
+            .get_array_lc_strs(i)?
+            .unwrap()
+            .collect::<Vec<_>>();
+
+        let mut nested_some_id = Vec::with_capacity(nested_strs.len());
+        let slice: &[U128] = nested_field_some_id.get_arr_uint128_slice(i)?.unwrap();
+        nested_some_id.extend(slice.iter().map(|v| v.get()));
+
+        let mut nested_some_other_id = Vec::with_capacity(nested_strs.len());
+        let slice: &[U64] = nested_field_some_other_id.get_arr_uint64_slice(i)?.unwrap();
+        nested_some_other_id.extend(slice.iter().map(|v| v.get()));
+
+        let row = Self {
+            id: id.get_uuid(i)?.unwrap(),
+            lc_string_cd10: lc_string_cd10.get_str(i)?.unwrap(),
+            timestamp: timestamp.get_datetime(i, Utc)?.unwrap(),
+            count: count.get_f64(i)?.unwrap(),
+            some_number: some_number.get_u32(i)?.unwrap(),
+            lc_nullable_string_cd1000: lc_nullable_string_cd1000.get_opt_str(i)?.unwrap(),
+            lc_nullable_string_cd5000: lc_nullable_string_cd5000.get_opt_str(i)?.unwrap(),
+            lc_nullable_string_cd3000: lc_nullable_string_cd3000.get_opt_str(i)?.unwrap(),
+            lc_nullable_string_cd4000: lc_nullable_string_cd4000.get_opt_str(i)?.unwrap(),
+            lc_nullable_string_cd50000: lc_nullable_string_cd50000.get_opt_str(i)?.unwrap(),
+            lc_nullable_string_cd100: lc_nullable_string_cd100.get_opt_str(i)?.unwrap(),
+            lc_nullable_string_cd500: lc_nullable_string_cd500.get_opt_str(i)?.unwrap(),
+            some_ip_address: some_ip_address.get_opt_ipv6(i)?.unwrap(),
+            lc_nullable_string8: lc_nullable_string8.get_opt_str(i)?.unwrap(),
+            lc_tags: tags,
+            lc_nullable_string_cd_00000: lc_nullable_string_cd_00000.get_opt_str(i)?.unwrap(),
+            nested_lc_string_cd10: nested_strs,
+            nested_flag: nested_field_flag.get_arr_bool_iter(i)?.unwrap().collect(),
             nested_some_id,
             nested_some_other_id,
-        })
+        };
+
+        Ok(row)
     }
 }
 
-// fn ch_rs_read(mut input: &[u8]) -> TestResult {
-//     while !input.is_empty() {
-//         let value: BenchmarkSample = deserialize_from(&mut input)?;
-//         black_box(value);
-//     }
-//     Ok(())
-// }
+fn ch_rs_read(mut input: &[u8]) -> TestResult {
+    while !input.is_empty() {
+        let value: BenchmarkSample = deserialize_from(&mut input)?;
+        black_box(value);
+    }
+    Ok(())
+}
 
 fn native_read(input: &[u8]) -> TestResult<()> {
-    let blocks = parse_blocks(input)?;
-    let it = BlockIterator::new(&blocks);
+    let mut blocks = parse_many(input)?;
+    let it = BlocksIterator::new_ordered(
+        &mut blocks,
+        &[
+            "id",
+            "lc_string_cd10",
+            "timestamp",
+            "count",
+            "some_number",
+            "lc_nullable_string_cd1000",
+            "lc_nullable_string_cd5000",
+            "lc_nullable_string_cd3000",
+            "lc_nullable_string_cd4000",
+            "lc_nullable_string_cd50000",
+            "lc_nullable_string_cd100",
+            "lc_nullable_string_cd500",
+            "lc_nullable_string8",
+            "lc_nullable_string_cd_00000",
+            "some_ip_address",
+            "lc_tags",
+            "nested_field.lc_string_cd10",
+            "nested_field.flag",
+            "nested_field.some_id",
+            "nested_field.some_other_id",
+        ],
+    )?;
 
     for row in it {
         let row: BenchmarkSample = row.try_into()?;
@@ -183,13 +167,13 @@ fn native_read(input: &[u8]) -> TestResult<()> {
 
 fn bench_readers(c: &mut Criterion) {
     let rb_data =
-        fs::read("test_data/benchmark_sample.rb").expect("missing test_data/benchmark_sample.rb");
-    let native_data = fs::read("test_data/benchmark_sample.native")
-        .expect("missing test_data/benchmark_sample.native");
+        fs::read("testdata/benchmark_sample.rb").expect("missing testdata/benchmark_sample.rb");
+    let native_data = fs::read("testdata/benchmark_sample.native")
+        .expect("missing testdata/benchmark_sample.native");
 
-    // c.bench_function("serde", |b| {
-    //     b.iter(|| ch_rs_read(black_box(&rb_data)).unwrap())
-    // });
+    c.bench_function("serde", |b| {
+        b.iter(|| ch_rs_read(black_box(&rb_data)).unwrap())
+    });
 
     c.bench_function("chbr", |b| {
         b.iter(|| native_read(black_box(&native_data)).unwrap())

@@ -1,25 +1,27 @@
-use crate::error::Error;
-use crate::mark::{
-    Mark, MarkArray, MarkDateTime, MarkDateTime64, MarkDecimal32, MarkDecimal64, MarkDecimal128,
-    MarkDecimal256, MarkEnum8, MarkEnum16, MarkFixedString, MarkLowCardinality, MarkMap,
-    MarkNested, MarkNullable, MarkTuple,
+use core::{convert::TryFrom, marker::PhantomData};
+use std::{
+    hint::unreachable_unchecked,
+    net::{Ipv4Addr, Ipv6Addr},
+    ops::Range,
 };
-use crate::types::{OffsetIndexPair as _, Offsets};
-use crate::{
-    Bf16Data, ByteSliceExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data,
-    Decimal32Data, Decimal64Data, Decimal128Data, Decimal256Data, Ipv4Data, Ipv6Data, TinyRange,
-    UuidData, i256, u256,
-};
+
 use chrono_tz::Tz;
-use core::convert::TryFrom;
-use core::marker::PhantomData;
 use half::bf16;
 use rust_decimal::Decimal;
-use std::hint::unreachable_unchecked;
-use std::net::{Ipv4Addr, Ipv6Addr};
-use std::ops::Range;
 use uuid::Uuid;
 use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
+
+use crate::{
+    Bf16Data, ByteExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data,
+    Decimal64Data, Decimal128Data, Decimal256Data, I256, Ipv4Data, Ipv6Data, TinyRange, U256,
+    UuidData,
+    error::Error,
+    mark::{
+        Array, DateTime, DateTime64, Decimal32, Decimal64, Decimal128, Decimal256, Enum8, Enum16,
+        FixedString, Json, LowCardinality, Map, Mark, Nested, Nullable, Tuple,
+    },
+    types::{OffsetIndexPair as _, Offsets},
+};
 
 #[derive(Debug, Clone)]
 pub enum Value<'a> {
@@ -30,26 +32,26 @@ pub enum Value<'a> {
     Int32(i32),
     Int64(i64),
     Int128(&'a I128),
-    Int256(&'a i256),
+    Int256(&'a I256),
     UInt8(u8),
     UInt16(u16),
     UInt32(u32),
     UInt64(u64),
     UInt128(&'a U128),
-    UInt256(&'a u256),
+    UInt256(&'a U256),
     Float32(f32),
     Float64(f64),
     BFloat16(bf16),
-    Decimal32(usize, &'a MarkDecimal32<'a>),
-    Decimal64(usize, &'a MarkDecimal64<'a>),
-    Decimal128(usize, &'a MarkDecimal128<'a>),
-    Decimal256(usize, &'a MarkDecimal256<'a>),
+    Decimal32(usize, &'a Decimal32<'a>),
+    Decimal64(usize, &'a Decimal64<'a>),
+    Decimal128(usize, &'a Decimal128<'a>),
+    Decimal256(usize, &'a Decimal256<'a>),
     String(&'a str),
     Uuid(&'a UuidData),
     Date(chrono::NaiveDate),
     Date32(chrono::NaiveDate),
-    DateTime(usize, &'a MarkDateTime<'a>),
-    DateTime64(usize, &'a MarkDateTime64<'a>),
+    DateTime(usize, &'a DateTime<'a>),
+    DateTime64(usize, &'a DateTime64<'a>),
     Ipv4(Ipv4Addr),
     Ipv6(&'a Ipv6Data),
 
@@ -60,13 +62,13 @@ pub enum Value<'a> {
     Int32Slice(&'a [I32]),
     Int64Slice(&'a [I64]),
     Int128Slice(&'a [I128]),
-    Int256Slice(&'a [i256]),
+    Int256Slice(&'a [I256]),
     UInt8Slice(&'a [u8]),
     UInt16Slice(&'a [U16]),
     UInt32Slice(&'a [U32]),
     UInt64Slice(&'a [U64]),
     UInt128Slice(&'a [U128]),
-    UInt256Slice(&'a [u256]),
+    UInt256Slice(&'a [U256]),
     Float32Slice(&'a [F32]),
     Float64Slice(&'a [F64]),
     BFloat16Slice(&'a [Bf16Data]),
@@ -106,61 +108,66 @@ pub enum Value<'a> {
 
     LowCardinalitySlice {
         idx: TinyRange,
-        mark_lc: &'a MarkLowCardinality<'a>,
+        mark_lc: &'a LowCardinality<'a>,
     },
 
     ArraySlice {
-        mark_array: &'a MarkArray<'a>,
+        mark_array: &'a Array<'a>,
         slice_indices: TinyRange,
     },
 
     Tuple {
         index: usize,
-        mark: &'a MarkTuple<'a>,
+        mark: &'a Tuple<'a>,
     },
     Map {
-        mark_map: &'a MarkMap<'a>,
+        mark_map: &'a Map<'a>,
         index: usize,
     },
 
     MapSlice {
-        mark_map: &'a MarkMap<'a>,
+        mark_map: &'a Map<'a>,
         slice_indices: TinyRange,
     },
 
     TupleSlice {
-        mark: &'a MarkTuple<'a>,
+        mark: &'a Tuple<'a>,
         slice_indices: TinyRange,
     },
 
     NullableSlice {
-        mark_nullable: &'a MarkNullable<'a>,
+        mark_nullable: &'a Nullable<'a>,
         slice_indices: TinyRange,
     },
 
     Nested {
-        mark_nested: &'a MarkNested<'a>,
+        mark_nested: &'a Nested<'a>,
         index: usize,
     },
 
     NestedSlice {
-        mark_nested: &'a MarkNested<'a>,
+        mark_nested: &'a Nested<'a>,
         slice_indices: TinyRange,
     },
 
     FixedStringSlice {
-        mark_fs: &'a MarkFixedString<'a>,
+        mark_fs: &'a FixedString<'a>,
         indices: TinyRange,
     },
 
     Enum8Slice {
-        mark: &'a MarkEnum8<'a>,
+        mark: &'a Enum8<'a>,
         slice_indices: TinyRange,
     },
 
     Enum16Slice {
-        mark: &'a MarkEnum16<'a>,
+        mark: &'a Enum16<'a>,
         slice_indices: TinyRange,
+    },
+
+    Json {
+        mark: &'a Json<'a>,
+        index: usize,
     },
 }
 
@@ -235,6 +242,7 @@ impl Value<'_> {
             Value::Enum8Slice { .. } => "Enum8SliceIterator",
             Value::Enum16Slice { .. } => "Enum16SliceIterator",
             Value::BFloat16Slice(_) => "BFloat16Slice",
+            Value::Json { .. } => "Json",
         }
     }
 }
@@ -270,6 +278,9 @@ impl_try_from_value!(UInt32Slice, &'a [U32]);
 impl_try_from_value!(UInt64Slice, &'a [U64]);
 impl_try_from_value!(UInt128Slice, &'a [U128]);
 
+impl_try_from_value!(Float32Slice, &'a [F32]);
+impl_try_from_value!(Float64Slice, &'a [F64]);
+
 impl_try_from_value!(UuidSlice, &'a [UuidData]);
 impl_try_from_value!(Date16Slice, &'a [Date16Data]);
 impl_try_from_value!(Date32Slice, &'a [Date32Data]);
@@ -277,9 +288,9 @@ impl_try_from_value!(Ipv4Slice, &'a [Ipv4Data]);
 impl_try_from_value!(Ipv6Slice, &'a [Ipv6Data]);
 
 impl_try_from_value!(Bool, bool);
-impl_try_from_value!(Int256, &'a i256);
+impl_try_from_value!(Int256, &'a I256);
 
-impl_try_from_value!(UInt256, &'a u256);
+impl_try_from_value!(UInt256, &'a U256);
 
 impl_try_from_value!(Float64, f64);
 impl_try_from_value!(Float32, f32);
@@ -295,7 +306,7 @@ impl<'a> TryFrom<Value<'a>> for Ipv6Addr {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Ipv6(v) => Ok(Ipv6Addr::from(*v)),
-            other => Err(Error::MismatchedType(other.as_str(), "&\'aIpv6Data")),
+            other => Err(Error::MismatchedType(other.as_str(), "Ipv6Addr")),
         }
     }
 }
@@ -309,7 +320,7 @@ impl<'a> TryFrom<Value<'a>> for Uuid {
                 let [hi, lo] = uuid_data.0;
                 Ok(Uuid::from_u64_pair(hi.get(), lo.get()))
             }
-            other => Err(Error::MismatchedType(other.as_str(), "DateTime")),
+            other => Err(Error::MismatchedType(other.as_str(), "Uuid")),
         }
     }
 }
@@ -349,7 +360,7 @@ impl TryFrom<Value<'_>> for chrono::NaiveDate {
     fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
         match value {
             Value::Date32(dt) | Value::Date(dt) => Ok(dt),
-            other => Err(Error::MismatchedType(other.as_str(), "DateTime")),
+            other => Err(Error::MismatchedType(other.as_str(), "Date/Date64")),
         }
     }
 }
@@ -441,7 +452,7 @@ impl<'a> TryFrom<Value<'a>> for SliceUsizeIterator<'a> {
                 index: 0,
                 len: x.len(),
             }),
-            _ => Err(Error::MismatchedType(value.as_str(), "SliceIndexIterator")),
+            _ => Err(Error::MismatchedType(value.as_str(), "SliceUsizeIterator")),
         }
     }
 }
@@ -525,12 +536,13 @@ impl<'a> Iterator for LowCardinalitySliceIterator<'a> {
     }
 }
 
-pub struct ArraySliceIterator<'a> {
-    mark_array: &'a MarkArray<'a>,
+pub struct ArraySliceIterator<'a, T> {
+    mark_array: &'a Array<'a>,
     slice_indices: Range<usize>,
+    _phantom: PhantomData<T>,
 }
 
-impl<'a> TryFrom<Value<'a>> for ArraySliceIterator<'a> {
+impl<'a, T> TryFrom<Value<'a>> for ArraySliceIterator<'a, T> {
     type Error = Error;
 
     #[inline(always)]
@@ -542,21 +554,26 @@ impl<'a> TryFrom<Value<'a>> for ArraySliceIterator<'a> {
             } => Ok(Self {
                 mark_array,
                 slice_indices: slice_indices.into(),
+                _phantom: Default::default(),
             }),
             other => Err(Error::MismatchedType(other.as_str(), "ArraySliceIterator")),
         }
     }
 }
 
-impl<'a> Iterator for ArraySliceIterator<'a> {
-    type Item = Value<'a>;
+impl<'a, T> Iterator for ArraySliceIterator<'a, T>
+where
+    T: TryFrom<Value<'a>, Error = Error>,
+{
+    type Item = Result<T, Error>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let slice_idx = self.slice_indices.next()?;
 
         let (start, end) = self.mark_array.offsets.offset_indices(slice_idx).unwrap()?;
-        Some(self.mark_array.values.slice(start..end))
+        let res = T::try_from(self.mark_array.values.slice(start..end));
+        Some(res)
     }
 }
 
@@ -631,10 +648,10 @@ impl_try_from_tuple!(9, 0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 
 impl_try_from_tuple!(10, 0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J);
 
 pub struct MapIterator<'a, K, V> {
-    keys: &'a Mark<'a>,
-    values: &'a Mark<'a>,
-    range: Range<usize>,
-    _marker: PhantomData<(K, V)>,
+    pub(crate) keys: &'a Mark<'a>,
+    pub(crate) values: &'a Mark<'a>,
+    pub(crate) range: Range<usize>,
+    pub(crate) _marker: PhantomData<(K, V)>,
 }
 
 impl<'a, K, V> TryFrom<Value<'a>> for MapIterator<'a, K, V>
@@ -696,11 +713,11 @@ where
 }
 
 pub struct MapSliceIterator<'a, K, V> {
-    offsets: &'a Offsets<'a>,
-    keys: &'a Mark<'a>,
-    values: &'a Mark<'a>,
-    slice_indices: Range<usize>,
-    _marker: PhantomData<(K, V)>,
+    pub(crate) offsets: &'a Offsets<'a>,
+    pub(crate) keys: &'a Mark<'a>,
+    pub(crate) values: &'a Mark<'a>,
+    pub(crate) slice_indices: Range<usize>,
+    pub(crate) _marker: PhantomData<(K, V)>,
 }
 
 impl<'a, K, V> TryFrom<Value<'a>> for MapSliceIterator<'a, K, V>
@@ -750,7 +767,7 @@ where
 }
 
 pub struct TupleSliceIterator<'a> {
-    mark: &'a MarkTuple<'a>,
+    mark: &'a Tuple<'a>,
     slice_indices: Range<usize>,
 }
 
@@ -921,7 +938,7 @@ impl Iterator for DateTime64SliceIterator<'_> {
 }
 
 pub struct NullableSliceIterator<'a> {
-    mark_nullable: &'a MarkNullable<'a>,
+    mark_nullable: &'a Nullable<'a>,
     slice_indices: Range<usize>,
 }
 
@@ -1190,7 +1207,7 @@ impl<'a> Iterator for NestedSliceIterator<'a> {
 impl ExactSizeIterator for NestedSliceIterator<'_> {}
 
 pub struct FixedStringSliceIterator<'a> {
-    mark_fs: &'a MarkFixedString<'a>,
+    mark_fs: &'a FixedString<'a>,
     slice_indices: Range<usize>,
 }
 
@@ -1319,5 +1336,51 @@ impl<'a> Iterator for Enum16SliceIterator<'a> {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.data.size_hint()
+    }
+}
+
+pub struct JsonIterator<'a> {
+    mark: &'a Json<'a>,
+    index: usize,
+    path_index: usize,
+}
+
+impl<'a> TryFrom<Value<'a>> for JsonIterator<'a> {
+    type Error = Error;
+
+    #[inline(always)]
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Json { mark, index } => Ok(Self {
+                mark,
+                index,
+                path_index: 0,
+            }),
+            other => Err(Error::MismatchedType(other.as_str(), "JsonIterator")),
+        }
+    }
+}
+
+impl<'a> Iterator for JsonIterator<'a> {
+    type Item = (&'a str, Value<'a>);
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let header = self.mark.headers.get(self.path_index)?;
+
+            if header.discriminators.get(self.index)? == &255 {
+                self.path_index += 1;
+                continue;
+            }
+
+            let path = self.mark.paths.get(self.path_index).copied()?;
+
+            let index = header.offsets.get(self.index).copied()?;
+            let value = header.mark.get(index)?;
+            self.path_index += 1;
+
+            break Some((path, value));
+        }
     }
 }

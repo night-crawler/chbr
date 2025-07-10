@@ -1,16 +1,22 @@
-use crate::ByteSliceExt as _;
-use crate::mark::{Mark, MarkNullable};
-use crate::types::OffsetIndexPair as _;
-use crate::value::Value;
+use std::{marker::PhantomData, ops::Range};
+
 use chrono::{DateTime, TimeZone};
-use std::ops::Range;
+use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
+
+use crate::{
+    Bf16Data, ByteExt as _, Date16Data, Date32Data, I256, Ipv4Data, Ipv6Data, U256, UuidData,
+    macros::define_slice_fns,
+    mark::{Mark, Nullable},
+    types::OffsetIndexPair as _,
+    value::{MapIterator, Value},
+};
 
 impl<'a> Mark<'a> {
     pub fn get(&'a self, index: usize) -> Option<Value<'a>> {
         match self {
             Mark::Empty => None,
             Mark::Bool(is_null) => is_null.get(index).map(|&null| Value::Bool(null == 0)),
-            Mark::Int8(bc) => bc.get(index).copied().map(Value::Int8),
+            Mark::Int8(bv) => bv.get(index).copied().map(Value::Int8),
             Mark::Int16(bv) => bv.get(index).map(|v| v.get()).map(Value::Int16),
             Mark::Int32(bv) => bv.get(index).map(|v| v.get()).map(Value::Int32),
             Mark::Int64(bv) => bv.get(index).map(|v| v.get()).map(Value::Int64),
@@ -29,25 +35,25 @@ impl<'a> Mark<'a> {
                 Some(Value::BFloat16(value.into()))
             }
             Mark::Decimal32(d) => {
-                if d.data.len() < index {
+                if d.data.len() <= index {
                     return None;
                 }
                 Some(Value::Decimal32(index, d))
             }
             Mark::Decimal64(d) => {
-                if d.data.len() < index {
+                if d.data.len() <= index {
                     return None;
                 }
                 Some(Value::Decimal64(index, d))
             }
             Mark::Decimal128(d) => {
-                if d.data.len() < index {
+                if d.data.len() <= index {
                     return None;
                 }
                 Some(Value::Decimal128(index, d))
             }
             Mark::Decimal256(d) => {
-                if d.data.len() < index {
+                if d.data.len() <= index {
                     return None;
                 }
                 Some(Value::Decimal256(index, d))
@@ -100,12 +106,9 @@ impl<'a> Mark<'a> {
             | Mark::MultiPolygon(_)
             | Mark::LineString(_)
             | Mark::MultiLineString(_) => {
-                unreachable!("Geometric types should be covered by arrays)")
+                unreachable!("Geometric types should be covered by arrays")
             }
             Mark::Enum8(v) => {
-                // is there any more efficient way to map into the enum name?
-                // we could allocate vec![<name>; 255] to store names, but it will not
-                // work for enum 16
                 let variant = *v.data.get(index)?;
                 if let Ok(index) = v.variants.binary_search_by_key(&variant, |(_, id)| *id) {
                     return Some(Value::String(v.variants[index].0));
@@ -121,39 +124,22 @@ impl<'a> Mark<'a> {
                 None
             }
             Mark::LowCardinality(lc) => {
-                // https://github.com/ClickHouse/clickhouse-go/blob/main/lib/column/lowcardinality.go#L191
+                // https://github.com/ClickHouse/clickhouse-go/blob/71a2b475e899afe9626f40af513bcf25aa3098a2/lib/column/lowcardinality.go#L191
 
                 let Some(keys) = &lc.additional_keys else {
                     return None;
                 };
 
-                // fast path for LowCardinality with String keys
-                match (lc.indices.as_ref(), keys.as_ref()) {
-                    (Mark::UInt8(indices), Mark::String(keys)) => {
-                        let value_index = indices.get(index).copied()? as usize;
-                        let value = keys.get(value_index).copied()?;
-                        return Some(Value::String(value));
-                    }
-                    (Mark::UInt16(indices), Mark::String(keys)) => {
-                        let value_index = indices.get(index)?.get() as usize;
-                        let value = keys.get(value_index).copied()?;
-                        return Some(Value::String(value));
-                    }
-                    (Mark::UInt32(indices), Mark::String(keys)) => {
-                        let value_index = indices.get(index)?.get() as usize;
-                        let value = keys.get(value_index).copied()?;
-                        return Some(Value::String(value));
-                    }
-                    (Mark::UInt64(indices), Mark::String(keys)) => {
-                        let value_index = usize::try_from(indices.get(index)?.get()).unwrap();
-                        let value = keys.get(value_index).copied()?;
-                        return Some(Value::String(value));
-                    }
-
-                    _ => {}
+                let value_index = lc.value_index(index)?;
+                if value_index == 0 && lc.is_nullable {
+                    return Some(Value::Empty);
                 }
 
-                let value_index: usize = lc.indices.get(index)?.try_into().unwrap();
+                // fast path for LowCardinality with String keys
+                if let Mark::String(keys) = keys.as_ref() {
+                    let value = keys.get(value_index).copied()?;
+                    return Some(Value::String(value));
+                }
 
                 Some(keys.get(value_index)?)
             }
@@ -184,8 +170,12 @@ impl<'a> Mark<'a> {
                     index,
                 })
             }
-            Mark::Dynamic(_) => todo!(),
-            Mark::Json { .. } => todo!(),
+            Mark::Dynamic(d) => {
+                let discriminator = d.discriminators.get(index).copied()?;
+                let in_type_index = d.offsets.get(index).copied()?;
+                d.columns[discriminator].get(in_type_index)
+            }
+            Mark::Json(j) => Some(Value::Json { mark: j, index }),
         }
     }
 
@@ -213,6 +203,13 @@ impl<'a> Mark<'a> {
             Mark::Float32(bv) => Value::Float32Slice(&bv[idx]),
             Mark::Float64(bv) => Value::Float64Slice(&bv[idx]),
             Mark::BFloat16(bv) => Value::BFloat16Slice(&bv[idx]),
+            Mark::Uuid(bv) => Value::UuidSlice(&bv[idx]),
+            Mark::Date(bv) => Value::Date16Slice(&bv[idx]),
+            Mark::Date32(bv) => Value::Date32Slice(&bv[idx]),
+            Mark::Ipv4(bv) => Value::Ipv4Slice(&bv[idx]),
+            Mark::Ipv6(bv) => Value::Ipv6Slice(&bv[idx]),
+            Mark::String(data) => Value::StringSlice(&data[idx]),
+
             Mark::Decimal32(d) => Value::Decimal32Slice {
                 precision: d.precision,
                 slice: &d.data[idx],
@@ -229,14 +226,11 @@ impl<'a> Mark<'a> {
                 precision: d.precision,
                 slice: &d.data[idx],
             },
-            Mark::String(data) => Value::StringSlice(&data[idx]),
             Mark::FixedString(f) => Value::FixedStringSlice {
                 mark_fs: f,
                 indices: idx.try_into().unwrap(),
             },
-            Mark::Uuid(bv) => Value::UuidSlice(&bv[idx]),
-            Mark::Date(bv) => Value::Date16Slice(&bv[idx]),
-            Mark::Date32(bv) => Value::Date32Slice(&bv[idx]),
+
             Mark::DateTime(d) => Value::DateTime32Slice {
                 tz: d.tz,
                 slice: &d.data[idx],
@@ -246,8 +240,7 @@ impl<'a> Mark<'a> {
                 tz: d.tz,
                 slice: &d.data[idx],
             },
-            Mark::Ipv4(bv) => Value::Ipv4Slice(&bv[idx]),
-            Mark::Ipv6(bv) => Value::Ipv6Slice(&bv[idx]),
+
             Mark::Point(_)
             | Mark::Ring(_)
             | Mark::Polygon(_)
@@ -257,12 +250,8 @@ impl<'a> Mark<'a> {
             Mark::Enum8(e) => Value::Enum8Slice {
                 mark: e,
                 slice_indices: idx.try_into().unwrap(),
-                // variants: &e.variants,
-                // data: &e.data[idx],
             },
             Mark::Enum16(e) => Value::Enum16Slice {
-                // variants: &e.variants,
-                // data: &e.data[idx],
                 mark: e,
                 slice_indices: idx.try_into().unwrap(),
             },
@@ -308,52 +297,32 @@ impl<'a> Mark<'a> {
             }
             Mark::LowCardinality(lc) => {
                 let Some(keys) = &lc.additional_keys else {
-                    return Err(crate::error::Error::CorruptedData(
+                    return Err(crate::Error::CorruptedData(
                         "LowCardinality marker without additional keys".to_owned(),
                     ));
                 };
-                // fast path for LowCardinality with String keys
-                match (lc.indices.as_ref(), keys.as_ref()) {
-                    (Mark::UInt8(indices), Mark::String(keys)) => {
-                        let value = indices
-                            .get(index)
-                            .copied()
-                            .and_then(|value_index| keys.get(usize::from(value_index)).copied());
-                        Ok(value)
-                    }
-                    (Mark::UInt16(indices), Mark::String(keys)) => {
-                        let value = indices.get(index).and_then(|value_index| {
-                            let value_index = usize::from(value_index.get());
-                            keys.get(value_index).copied()
-                        });
-                        Ok(value)
-                    }
-                    (Mark::UInt32(indices), Mark::String(keys)) => {
-                        let value = indices.get(index).and_then(|value_index| {
-                            let value_index = value_index.get() as usize;
-                            keys.get(value_index).copied()
-                        });
-                        Ok(value)
-                    }
-                    (Mark::UInt64(indices), Mark::String(keys)) => {
-                        let value = indices
-                            .get(index)
-                            .map(|value_index| usize::try_from(value_index.get()))
-                            .transpose()?
-                            .and_then(|value_index| keys.get(value_index).copied());
-                        Ok(value)
-                    }
 
-                    (_, mark) => Err(crate::error::Error::MismatchedType(mark.as_str(), "&str")),
+                let Some(value_index) = lc.value_index(index) else {
+                    return Ok(None);
+                };
+
+                if value_index == 0 && lc.is_nullable {
+                    return Ok(None);
                 }
+
+                let Mark::String(keys) = keys.as_ref() else {
+                    return Err(crate::Error::MismatchedType(keys.as_str(), "&str"));
+                };
+
+                Ok(keys.get(value_index).copied())
             }
-            mark => Err(crate::error::Error::MismatchedType(mark.as_str(), "&str")),
+            mark => Err(crate::Error::MismatchedType(mark.as_str(), "&str")),
         }
     }
 
     #[inline]
     pub fn get_opt_str(&'a self, index: usize) -> crate::Result<Option<Option<&'a str>>> {
-        let Mark::Nullable(MarkNullable { mask, data }) = self else {
+        let Mark::Nullable(Nullable { mask, data }) = self else {
             // convenience wrapper
             let value = self.get_str(index)?;
             return Ok(Some(value));
@@ -366,6 +335,17 @@ impl<'a> Mark<'a> {
         Ok(Some(data.get_str(index)?))
     }
 
+    #[inline]
+    pub fn get_u128(&'a self, index: usize) -> crate::Result<Option<u128>> {
+        let Mark::UInt128(bv) = self else {
+            return Err(crate::Error::MismatchedType(self.as_str(), "UInt128"));
+        };
+
+        let value = bv.get(index).copied().map(U128::get);
+        Ok(value)
+    }
+
+    #[expect(clippy::needless_pass_by_value)]
     #[inline]
     pub fn get_datetime<T: TimeZone>(
         &'a self,
@@ -395,10 +375,7 @@ impl<'a> Mark<'a> {
 
                 Ok(value)
             }
-            _ => Err(crate::error::Error::MismatchedType(
-                self.as_str(),
-                "DateTime",
-            )),
+            _ => Err(crate::Error::MismatchedType(self.as_str(), "DateTime")),
         }
     }
 
@@ -409,7 +386,7 @@ impl<'a> Mark<'a> {
                 let value = bv.get(index).map(|data| uuid::Uuid::from(*data));
                 Ok(value)
             }
-            _ => Err(crate::error::Error::MismatchedType(self.as_str(), "Uuid")),
+            _ => Err(crate::Error::MismatchedType(self.as_str(), "Uuid")),
         }
     }
 
@@ -420,7 +397,7 @@ impl<'a> Mark<'a> {
                 let value = bv.get(index).copied().map(Into::into);
                 Ok(value)
             }
-            _ => Err(crate::error::Error::MismatchedType(self.as_str(), "Ipv6")),
+            _ => Err(crate::Error::MismatchedType(self.as_str(), "Ipv6")),
         }
     }
 
@@ -429,7 +406,7 @@ impl<'a> Mark<'a> {
         &'a self,
         index: usize,
     ) -> crate::Result<Option<Option<std::net::Ipv6Addr>>> {
-        let Mark::Nullable(MarkNullable { mask, data }) = self else {
+        let Mark::Nullable(Nullable { mask, data }) = self else {
             let value = self.get_ipv6(index)?;
             return Ok(Some(value));
         };
@@ -449,7 +426,7 @@ impl<'a> Mark<'a> {
                 let value = bv.get(index).copied().map(Into::into);
                 Ok(value)
             }
-            _ => Err(crate::error::Error::MismatchedType(self.as_str(), "Ipv4")),
+            _ => Err(crate::Error::MismatchedType(self.as_str(), "Ipv4")),
         }
     }
 
@@ -460,7 +437,7 @@ impl<'a> Mark<'a> {
                 let value = bv.get(index).copied().map(|v| v != 0);
                 Ok(value)
             }
-            _ => Err(crate::error::Error::MismatchedType(self.as_str(), "bool")),
+            _ => Err(crate::Error::MismatchedType(self.as_str(), "bool")),
         }
     }
 
@@ -471,38 +448,42 @@ impl<'a> Mark<'a> {
                 let value = bv.get(index).map(|v| v.get());
                 Ok(value)
             }
-            _ => Err(crate::error::Error::MismatchedType(self.as_str(), "f64")),
+            _ => Err(crate::Error::MismatchedType(self.as_str(), "f64")),
         }
     }
 
     #[inline]
-    pub fn get_lc_strs(
+    pub fn get_u32(&'a self, index: usize) -> crate::Result<Option<u32>> {
+        match self {
+            Mark::UInt32(bv) => {
+                let value = bv.get(index).copied().map(U32::get);
+                Ok(value)
+            }
+            _ => Err(crate::Error::MismatchedType(self.as_str(), "u32")),
+        }
+    }
+
+    #[inline]
+    pub fn slice_lc_strs(
         &'a self,
         idx: Range<usize>,
     ) -> crate::Result<impl Iterator<Item = &'a str>> {
         let Mark::LowCardinality(lc) = self else {
-            return Err(crate::error::Error::MismatchedType(
+            return Err(crate::Error::MismatchedType(
                 self.as_str(),
                 "LowCardinality",
             ));
         };
 
         let Some(keys) = &lc.additional_keys else {
-            return Err(crate::error::Error::CorruptedData(
+            return Err(crate::Error::CorruptedData(
                 "LowCardinality marker without additional keys".to_owned(),
             ));
         };
 
         let Mark::String(keys) = keys.as_ref() else {
-            return Err(crate::error::Error::MismatchedType(keys.as_str(), "String"));
+            return Err(crate::Error::MismatchedType(keys.as_str(), "String"));
         };
-
-        // if idx.end > keys.len() {
-        //     return Err(crate::error::Error::IndexOutOfBounds(
-        //         idx.end,
-        //         "LowCardinality keys",
-        //     ));
-        // }
 
         let index_it: Box<dyn Iterator<Item = usize> + '_> = match lc.indices.as_ref() {
             Mark::UInt8(bv) => Box::new(bv[idx].iter().copied().map(usize::from)),
@@ -520,38 +501,116 @@ impl<'a> Mark<'a> {
         &'a self,
         index: usize,
     ) -> crate::Result<Option<impl Iterator<Item = &'a str>>> {
-        let Mark::Array(a) = self else {
-            return Err(crate::error::Error::MismatchedType(self.as_str(), "Array"));
+        if matches!(self, Mark::Empty) {
+            return Ok(None);
+        }
+
+        let Mark::Array(array) = self else {
+            return Err(crate::Error::MismatchedType(self.as_str(), "Array"));
         };
 
-        let Some((start, end)) = a.offsets.offset_indices(index)? else {
+        let Some((start, end)) = array.offsets.offset_indices(index)? else {
             return Ok(None);
         };
-        let it = a.values.get_lc_strs(start..end)?;
+
+        if matches!(array.values.as_ref(), Mark::Empty) {
+            return Ok(None);
+        }
+
+        let it = array.values.slice_lc_strs(start..end)?;
         Ok(Some(it))
     }
+
+    #[inline]
+    pub fn get_map<K, V>(&'a self, index: usize) -> crate::Result<Option<MapIterator<'a, K, V>>> {
+        let Mark::Map(map) = self else {
+            return Err(crate::Error::MismatchedType(self.as_str(), "Map"));
+        };
+        let Some((start, end)) = map.offsets.offset_indices(index)? else {
+            return Ok(None);
+        };
+
+        let it = MapIterator {
+            keys: &map.keys,
+            values: &map.values,
+            range: start..end,
+            _marker: PhantomData,
+        };
+
+        Ok(Some(it))
+    }
+
+    #[inline]
+    pub fn get_arr_bool_iter(
+        &'a self,
+        index: usize,
+    ) -> crate::Result<Option<impl Iterator<Item = bool>>> {
+        let Mark::Array(arr) = self else {
+            return Err(crate::Error::MismatchedType(self.as_str(), "Array"));
+        };
+
+        let Some((start, end)) = arr.offsets.offset_indices(index)? else {
+            return Ok(None);
+        };
+
+        let slice = match arr.values.as_ref() {
+            Mark::Bool(bv) => &bv[start..end],
+            Mark::Empty => &[],
+            other => return Err(crate::Error::MismatchedType(other.as_str(), "Int8")),
+        };
+
+        Ok(Some(slice.iter().copied().map(|b| b != 0)))
+    }
+
+    define_slice_fns!(
+        (Int8, i8),
+        (Int16, I16),
+        (Int32, I32),
+        (Int64, I64),
+        (Int128, I128),
+        (Int256, I256),
+        (UInt8, u8),
+        (UInt16, U16),
+        (UInt32, U32),
+        (UInt64, U64),
+        (UInt128, U128),
+        (UInt256, U256),
+        (Float32, F32),
+        (Float64, F64),
+        (BFloat16, Bf16Data),
+        (String, &'a str),
+        (Uuid, UuidData),
+        (Date, Date16Data),
+        (Date32, Date32Data),
+        (Ipv4, Ipv4Data),
+        (Ipv6, Ipv6Data),
+    );
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::Bf16Data;
-    use crate::common::load;
-    use crate::parse::block::parse_block;
-    use crate::value::{
-        ArraySliceIterator, BoolSliceIterator, Enum8SliceIterator, Enum16SliceIterator,
-        FixedStringSliceIterator, LowCardinalitySliceIterator, MapIterator, MapSliceIterator,
-        NestedIterator, NestedSliceIterator, NullableSliceIterator, TupleSliceIterator, Value,
-    };
+    use std::{collections::HashMap, str::FromStr as _};
+
     use half::bf16;
-    // use pretty_assertions::assert_eq;
-    use std::collections::HashMap;
-    use std::str::FromStr as _;
+    use pretty_assertions::assert_eq;
     use testresult::TestResult;
-    use zerocopy::little_endian::I64;
+    use zerocopy::little_endian::{I64, U128};
+
+    use crate::{
+        Bf16Data,
+        common::load,
+        parse::block::parse_single,
+        value::{
+            ArraySliceIterator, BoolSliceIterator, Enum8SliceIterator, Enum16SliceIterator,
+            FixedStringSliceIterator, JsonIterator, LowCardinalitySliceIterator, MapIterator,
+            MapSliceIterator, NestedIterator, NestedSliceIterator, NullableSliceIterator,
+            TupleSliceIterator, Value,
+        },
+    };
 
     #[test]
     fn int_array() -> TestResult {
-        let buf = load("./test_data/array.native")?;
+        let buf = load("./testdata/array.native")?;
         // random() for id was a bad idea, it looks like parser is broken
         // 0,[]
         // 128969003,[1]
@@ -565,9 +624,9 @@ mod tests {
         // 2793473513,[]
         // 3697287021,"[1, 2, 3]"
 
-        let (_, block) = parse_block(&buf)?;
+        let (_, block) = parse_single(&buf)?;
 
-        let index_marker = &block.cols[0];
+        let index_marker = &block.markers[0];
 
         let indices = (0..block.num_rows)
             .filter_map(|i| index_marker.get(i))
@@ -595,7 +654,7 @@ mod tests {
             vec![1, 2, 3],
         ];
 
-        let arr_marker = &block.cols[1];
+        let arr_marker = &block.markers[1];
 
         let mut arrays = Vec::new();
         for index in 0..block.num_rows {
@@ -610,7 +669,7 @@ mod tests {
 
     #[test]
     fn plain_strings() -> TestResult {
-        let buf = load("./test_data/plain_strings.native")?;
+        let buf = load("./testdata/plain_strings.native")?;
         // 0,hello
         // 1,world
         // 2,clickhouse
@@ -618,11 +677,11 @@ mod tests {
         // 4,example
         // 5,data
 
-        let (_, block) = parse_block(&buf)?;
+        let (_, block) = parse_single(&buf)?;
 
         let expected_strings = ["hello", "world", "clickhouse", "test", "example", "data"];
 
-        let strings_marker = &block.cols[1];
+        let strings_marker = &block.markers[1];
         for (i, expected) in expected_strings.iter().enumerate() {
             let value: &str = strings_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Mismatch at index {i}");
@@ -633,7 +692,7 @@ mod tests {
 
     #[test]
     fn plain_strings_array() -> TestResult {
-        let buf = load("./test_data/plain_strings_array.native")?;
+        let buf = load("./testdata/plain_strings_array.native")?;
 
         // 0,"['apple', 'banana', 'cherry']"
         // 1,"['date', 'elderberry']"
@@ -642,7 +701,7 @@ mod tests {
         // 4,[]
         // 5,"['lemon', 'mango']"
 
-        let (_, block) = parse_block(&buf)?;
+        let (_, block) = parse_single(&buf)?;
 
         let expected_arrays = [
             vec!["apple", "banana", "cherry"],
@@ -653,7 +712,7 @@ mod tests {
             vec!["lemon", "mango"],
         ];
 
-        let strings_marker = &block.cols[1];
+        let strings_marker = &block.markers[1];
 
         for (i, expected) in expected_arrays.iter().enumerate() {
             let slice: &[&str] = strings_marker.get(i).unwrap().try_into()?;
@@ -667,8 +726,8 @@ mod tests {
 
     #[test]
     fn lc_string() -> TestResult {
-        let buf = load("./test_data/plain_lc_string.native")?;
-        let (_, block) = parse_block(&buf)?;
+        let buf = load("./testdata/plain_lc_string.native")?;
+        let (_, block) = parse_single(&buf)?;
 
         // 0,apple
         // 1,banana
@@ -679,7 +738,7 @@ mod tests {
 
         let expected_strings = ["apple", "banana", "cherry", "date", "elderberry", "fig"];
 
-        let strings_marker = &block.cols[1];
+        let strings_marker = &block.markers[1];
         for (i, expected) in expected_strings.iter().enumerate() {
             let value: &str = strings_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Mismatch at index {i}");
@@ -690,8 +749,8 @@ mod tests {
 
     #[test]
     fn lc_array_string() -> TestResult {
-        let buf = load("./test_data/array_lc_string.native")?;
-        let (_, block) = parse_block(&buf)?;
+        let buf = load("./testdata/array_lc_string.native")?;
+        let (_, block) = parse_single(&buf)?;
 
         // 0,"['apple', 'banana', 'cherry']"
         // 1,"['date', 'elderberry']"
@@ -721,7 +780,7 @@ mod tests {
             vec!["fig", "grape", "honeydew", "kiwi"],
         ];
 
-        let strings_marker = &block.cols[1];
+        let strings_marker = &block.markers[1];
         for (i, expected) in expected_arrays.iter().enumerate() {
             let it: LowCardinalitySliceIterator = strings_marker.get(i).unwrap().try_into()?;
             let mut actual = vec![];
@@ -746,8 +805,8 @@ mod tests {
 
     #[test]
     fn array_in_array_in64() -> TestResult {
-        let buf = load("./test_data/array_in_array_in64.native")?;
-        let (_, block) = parse_block(&buf)?;
+        let buf = load("./testdata/array_in_array_in64.native")?;
+        let (_, block) = parse_single(&buf)?;
 
         // 0,"[[11, 22, 22, 77, 123], [333, 41]]"
         // 1,"[[11, 22], [7, 844, 12, 12, 0], [5, 5, 5]]"
@@ -765,14 +824,13 @@ mod tests {
             vec![vec![]],
         ];
 
-        let arrs_marker = &block.cols[1];
+        let arrs_marker = &block.markers[1];
 
         for (i, expected) in expected_arrays.iter().enumerate() {
             let v = arrs_marker.get(i).unwrap();
-            let outer: ArraySliceIterator = v.try_into()?;
+            let outer: ArraySliceIterator<&[I64]> = v.try_into()?;
             let mut actual_outer = vec![];
-            for slice in outer {
-                let slice: &[I64] = slice.try_into()?;
+            for slice in outer.flatten() {
                 let inner = slice.iter().map(|&v| v.get()).collect::<Vec<_>>();
                 actual_outer.push(inner);
             }
@@ -785,8 +843,8 @@ mod tests {
 
     #[test]
     fn nullable_string() -> TestResult {
-        let buf = load("./test_data/nullable_string.native")?;
-        let (_, block) = parse_block(&buf)?;
+        let buf = load("./testdata/nullable_string.native")?;
+        let (_, block) = parse_single(&buf)?;
 
         // 0,hello
         // 1,
@@ -803,7 +861,7 @@ mod tests {
             Some("test"),
         ];
 
-        let strings_marker = &block.cols[1];
+        let strings_marker = &block.markers[1];
         for (i, expected) in expected_col.iter().enumerate() {
             let value: Option<&str> = strings_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Mismatch at index {i}");
@@ -817,8 +875,8 @@ mod tests {
 
     #[test]
     fn tuple_sample() -> TestResult {
-        let buf = load("./test_data/tuple.native")?;
-        let (_, block) = parse_block(&buf)?;
+        let buf = load("./testdata/tuple.native")?;
+        let (_, block) = parse_single(&buf)?;
 
         // 0,"(1, 'a')"
         // 1,"(3, 'ab')"
@@ -838,7 +896,7 @@ mod tests {
             (3, "ag"),
         ];
 
-        let tuples_marker = &block.cols[1];
+        let tuples_marker = &block.markers[1];
 
         for (i, expected) in expected_tuples.iter().enumerate() {
             let value: (i64, &str) = tuples_marker.get(i).unwrap().try_into()?;
@@ -850,8 +908,8 @@ mod tests {
 
     #[test]
     fn map_sample() -> TestResult {
-        let buf = load("./test_data/map_sample.native")?;
-        let (_, block) = parse_block(&buf)?;
+        let buf = load("./testdata/map_sample.native")?;
+        let (_, block) = parse_single(&buf)?;
 
         // 0,"{'a': 'apple', 'b': 'banana', 'c': 'cherry'}"
         // 1,"{'d': 'date', 'e': 'elderberry'}"
@@ -869,7 +927,7 @@ mod tests {
             HashMap::from([("j", "lemon"), ("k", "mango")]),
         ];
 
-        let map_marker = &block.cols[1];
+        let map_marker = &block.markers[1];
         for (i, expected) in expected.iter().enumerate() {
             let map_value = map_marker.get(i).unwrap();
             let map_iter: MapIterator<&str, &str> = map_value.try_into()?;
@@ -882,8 +940,8 @@ mod tests {
 
     #[test]
     fn array_map_sample() -> TestResult {
-        let buf = load("./test_data/array_map_sample.native")?;
-        let (_, block) = parse_block(&buf)?;
+        let buf = load("./testdata/array_map_sample.native")?;
+        let (_, block) = parse_single(&buf)?;
 
         // 0,"[{'a': 'apple', 'b': 'banana'}, {'c': 'cherry'}]"
         // 1,"[{'d': 'date'}, {'e': 'elderberry', 'f': 'fig'}]"
@@ -907,7 +965,7 @@ mod tests {
             vec![HashMap::from([("j", "lemon"), ("k", "mango")])],
         ];
 
-        let map_marker = &block.cols[1];
+        let map_marker = &block.markers[1];
         for (i, expected) in expected.iter().enumerate() {
             let map_slice_iterator: MapSliceIterator<&str, &str> =
                 map_marker.get(i).unwrap().try_into()?;
@@ -925,8 +983,8 @@ mod tests {
 
     #[test]
     fn map_in_map() -> TestResult {
-        let buf = load("./test_data/map_in_map.native")?;
-        let (_, block) = parse_block(&buf)?;
+        let buf = load("./testdata/map_in_map.native")?;
+        let (_, block) = parse_single(&buf)?;
 
         // 0,"{'a': {'x': 'apple', 'y': 'banana'}, 'b': {'z': 'cherry'}}"
         // 1,{'c': {'d': 'date'}}
@@ -953,7 +1011,7 @@ mod tests {
             ]),
         ];
 
-        let map_marker = &block.cols[1];
+        let map_marker = &block.markers[1];
 
         for (i, expected) in expected.iter().enumerate() {
             let map_value = map_marker.get(i).unwrap();
@@ -973,8 +1031,8 @@ mod tests {
 
     #[test]
     fn array_of_tuples() -> TestResult {
-        let buf = load("./test_data/array_of_tuples.native")?;
-        let (_, block) = parse_block(&buf)?;
+        let buf = load("./testdata/array_of_tuples.native")?;
+        let (_, block) = parse_single(&buf)?;
 
         // 0,"[('apple', 1), ('banana', 2), ('cherry', 3)]"
         // 1,"[('date', 4), ('elderberry', 5)]"
@@ -992,7 +1050,7 @@ mod tests {
             vec![("lemon", 10), ("mango", 11)],
         ];
 
-        let tuples_marker = &block.cols[1];
+        let tuples_marker = &block.markers[1];
 
         for (i, expected) in expected_arrays.iter().enumerate() {
             let slice: TupleSliceIterator = tuples_marker.get(i).unwrap().try_into()?;
@@ -1009,8 +1067,8 @@ mod tests {
 
     #[test]
     fn variant() -> TestResult {
-        let buf = load("./test_data/variant.native")?;
-        let (_, block) = parse_block(&buf)?;
+        let buf = load("./testdata/variant.native")?;
+        let (_, block) = parse_single(&buf)?;
         // Variant(Array(Int64), Int64, String)
         //    ┌─id─┬─var─────┐
         // 1. │  0 │ 1       │
@@ -1022,7 +1080,7 @@ mod tests {
         // 7. │  6 │ 3       │
         //    └────┴─────────┘
 
-        let variant_marker = &block.cols[1];
+        let variant_marker = &block.markers[1];
         // it's hard to write a test for this because Value does not implement equals yet
 
         let expected_str_repr = ["1", "a", "1, 2, 3", "2", "b", "4, 5, 6", "3"];
@@ -1057,15 +1115,15 @@ mod tests {
 
     #[test]
     fn uuid_and_dates() -> TestResult {
-        let buf = load("./test_data/uuid_and_dates.native")?;
-        let (_, block) = parse_block(&buf)?;
+        let buf = load("./testdata/uuid_and_dates.native")?;
+        let (_, block) = parse_single(&buf)?;
         // UUID, Date, Date32, DateTime, DateTime64
         // 00000000-0000-0000-0000-000000000001,2023-01-01,2023-01-01,2023-01-01 12:00:00,2023-01-01T12:00:00.123Z
         // 00000000-0000-0000-0000-000000000002,2023-02-01,2023-02-01,2023-02-01 12:00:00,2023-02-01T12:00:00.456Z
         // 00000000-0000-0000-0000-000000000003,2023-03-01,2023-03-01,2023-03-01 12:00:00,2023-03-01T12:00:00.789Z
         // 00000000-0000-0000-0000-000000000004,2023-03-01,1969-09-23,2023-03-01 12:00:00,2023-03-01T12:00:00.789Z
 
-        let uuid_marker = &block.cols[0];
+        let uuid_marker = &block.markers[0];
         let expected_uuids = [
             uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001")?,
             uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000002")?,
@@ -1077,7 +1135,7 @@ mod tests {
             assert_eq!(value, *expected, "Mismatch at index {i}");
         }
 
-        let date_marker = &block.cols[1];
+        let date_marker = &block.markers[1];
         let expected_dates = [
             chrono::NaiveDate::from_ymd_opt(2023, 1, 1).unwrap(),
             chrono::NaiveDate::from_ymd_opt(2023, 2, 1).unwrap(),
@@ -1089,7 +1147,7 @@ mod tests {
             assert_eq!(value, *expected, "Mismatch at index {i}");
         }
 
-        let date32_marker = &block.cols[2];
+        let date32_marker = &block.markers[2];
         let expected_date32 = [
             chrono::NaiveDate::from_ymd_opt(2023, 1, 1).unwrap(),
             chrono::NaiveDate::from_ymd_opt(2023, 2, 1).unwrap(),
@@ -1101,7 +1159,7 @@ mod tests {
             assert_eq!(value, *expected, "Mismatch at index {i}");
         }
 
-        let datetime_marker = &block.cols[3];
+        let datetime_marker = &block.markers[3];
         let expected_datetimes = [
             chrono::DateTime::parse_from_rfc3339("2023-01-01T12:00:00+00:00")?
                 .with_timezone(&chrono_tz::UTC),
@@ -1121,7 +1179,7 @@ mod tests {
             assert_eq!(value, *expected, "Mismatch at index {i} (get_datetime)");
         }
 
-        let datetime64_marker = &block.cols[4];
+        let datetime64_marker = &block.markers[4];
         let expected_datetime64 = [
             chrono::DateTime::parse_from_rfc3339("2023-01-01T12:00:00.123+00:00")?
                 .with_timezone(&chrono_tz::UTC),
@@ -1144,8 +1202,8 @@ mod tests {
 
     #[test]
     fn decimal_sample() -> TestResult {
-        let buf = load("./test_data/decimal_sample.native")?;
-        let (_, block) = parse_block(&buf)?;
+        let buf = load("./testdata/decimal_sample.native")?;
+        let (_, block) = parse_single(&buf)?;
 
         // 0,1.234,1.234567,1.234567890123,1.234567890123456556104338
         // 1,2.345,2.345678,2.345678901234,2.345678901234567875661641
@@ -1156,7 +1214,7 @@ mod tests {
             rust_decimal::Decimal::new(2345, 3),
             rust_decimal::Decimal::new(3456, 3),
         ];
-        let decimal32_marker = &block.cols[1];
+        let decimal32_marker = &block.markers[1];
         for (i, expected) in expected_d32.iter().enumerate() {
             let value: rust_decimal::Decimal = decimal32_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Mismatch at index {i}");
@@ -1168,7 +1226,7 @@ mod tests {
             rust_decimal::Decimal::new(3456789, 6),
         ];
 
-        let decimal64_marker = &block.cols[2];
+        let decimal64_marker = &block.markers[2];
         for (i, expected) in expected_d64.iter().enumerate() {
             let value: rust_decimal::Decimal = decimal64_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Mismatch at index {i}");
@@ -1179,7 +1237,7 @@ mod tests {
             rust_decimal::Decimal::new(2345678901234, 12),
             rust_decimal::Decimal::new(3456789012345, 12),
         ];
-        let decimal128_marker = &block.cols[3];
+        let decimal128_marker = &block.markers[3];
         for (i, expected) in expected_d128.iter().enumerate() {
             let value: rust_decimal::Decimal = decimal128_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Mismatch at index {i}");
@@ -1192,14 +1250,14 @@ mod tests {
 
     #[test]
     fn ip_sample() -> TestResult {
-        let buf = load("./test_data/ip_sample.native")?;
-        let (_, block) = parse_block(&buf)?;
+        let buf = load("./testdata/ip_sample.native")?;
+        let (_, block) = parse_single(&buf)?;
 
         // 0,100.64.0.2,2001:db8:0:0:0:ff00:42:8329
         // 1,127.0.0.1,0:0:0:0:0:0:0:1
         // 2,10.10.10.10,2001:db8:85a3:0:0:8a2e:370:7334
 
-        let ipv4_marker = &block.cols[1];
+        let ipv4_marker = &block.markers[1];
         let expected_ipv4 = [
             std::net::Ipv4Addr::new(100, 64, 0, 2),
             std::net::Ipv4Addr::new(127, 0, 0, 1),
@@ -1211,7 +1269,7 @@ mod tests {
             assert_eq!(value, *expected, "Mismatch at index {i}");
         }
 
-        let ipv6_marker = &block.cols[2];
+        let ipv6_marker = &block.markers[2];
         let expected_ipv6 = [
             std::net::Ipv6Addr::from_str("2001:db8:0:0:0:ff00:42:8329")?,
             std::net::Ipv6Addr::from_str("0:0:0:0:0:0:0:1")?,
@@ -1227,11 +1285,11 @@ mod tests {
 
     #[test]
     fn geo_sample() -> TestResult {
-        let buf = load("./test_data/geo_sample.native")?;
-        let (_, block) = parse_block(&buf)?;
+        let buf = load("./testdata/geo_sample.native")?;
+        let (_, block) = parse_single(&buf)?;
 
         let expected_points = [(10.0, 10.0), (5.0, 5.0), (0.0, 0.0), (100.0, 100.0)];
-        let points_marker = &block.cols[1];
+        let points_marker = &block.markers[1];
         for (i, expected) in expected_points.iter().enumerate() {
             let value: (f64, f64) = points_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Point mismatch at index {i}");
@@ -1248,7 +1306,7 @@ mod tests {
                 (100.0, 110.0),
             ],
         ];
-        let rings_marker = &block.cols[2];
+        let rings_marker = &block.markers[2];
         for (i, expected) in expected_rings.iter().enumerate() {
             let value: TupleSliceIterator = rings_marker.get(i).unwrap().try_into()?;
             let mut actual = Vec::with_capacity(expected.len());
@@ -1270,12 +1328,12 @@ mod tests {
                 (100.0, 110.0),
             ]],
         ];
-        let polygons_marker = &block.cols[3];
+        let polygons_marker = &block.markers[3];
         for (i, expected) in expected_polygons.iter().enumerate() {
-            let value: ArraySliceIterator = polygons_marker.get(i).unwrap().try_into()?;
+            let value: ArraySliceIterator<TupleSliceIterator> =
+                polygons_marker.get(i).unwrap().try_into()?;
             let mut actual = Vec::with_capacity(expected.len());
-            for slice in value {
-                let points: TupleSliceIterator = slice.try_into()?;
+            for points in value.flatten() {
                 let mut ring = Vec::with_capacity(expected[0].len());
                 for p in points {
                     let (x, y): (f64, f64) = p.try_into()?;
@@ -1315,14 +1373,14 @@ mod tests {
                 ],
             ],
         ];
-        let multipolygons_marker = &block.cols[4];
+        let multipolygons_marker = &block.markers[4];
         for (i, expected) in expected_multipolygons.iter().enumerate() {
-            let polygons: ArraySliceIterator = multipolygons_marker.get(i).unwrap().try_into()?;
+            let polygons: ArraySliceIterator<ArraySliceIterator<TupleSliceIterator>> =
+                multipolygons_marker.get(i).unwrap().try_into()?;
             let mut actual = Vec::new();
 
-            for polygon in polygons {
-                let rings: ArraySliceIterator = polygon.try_into()?;
-                for ring in rings {
+            for polygon in polygons.flatten() {
+                for ring in polygon.flatten() {
                     let pts: TupleSliceIterator = ring.try_into()?;
                     let mut flat_ring = Vec::new();
                     for pt in pts {
@@ -1341,7 +1399,7 @@ mod tests {
             vec![(0.0, 0.0), (3.0, 3.0), (6.0, 0.0)],
             vec![(100.0, 100.0), (110.0, 110.0), (120.0, 100.0)],
         ];
-        let linestrings_marker = &block.cols[5];
+        let linestrings_marker = &block.markers[5];
         for (i, expected) in expected_linestrings.iter().enumerate() {
             let value: TupleSliceIterator = linestrings_marker.get(i).unwrap().try_into()?;
             let mut actual = Vec::with_capacity(expected.len());
@@ -1371,13 +1429,13 @@ mod tests {
                 vec![(150.0, 150.0), (160.0, 160.0)],
             ],
         ];
-        let multilinestrings_marker = &block.cols[6];
+        let multilinestrings_marker = &block.markers[6];
         for (i, expected) in expected_multilinestrings.iter().enumerate() {
-            let lines: ArraySliceIterator = multilinestrings_marker.get(i).unwrap().try_into()?;
+            let lines: ArraySliceIterator<TupleSliceIterator> =
+                multilinestrings_marker.get(i).unwrap().try_into()?;
             let mut actual = Vec::with_capacity(expected.len());
 
-            for slice in lines {
-                let pts: TupleSliceIterator = slice.try_into()?;
+            for pts in lines.flatten() {
                 let mut line = Vec::with_capacity(pts.len());
                 for p in pts {
                     let (x, y): (f64, f64) = p.try_into()?;
@@ -1392,11 +1450,11 @@ mod tests {
     }
 
     //noinspection RsApproxConstant
-    #[allow(clippy::approx_constant)]
+    #[expect(clippy::approx_constant)]
     #[test]
     fn float_sample() -> TestResult {
-        let buf = load("./test_data/float_sample.native")?;
-        let (_, block) = parse_block(&buf)?;
+        let buf = load("./testdata/float_sample.native")?;
+        let (_, block) = parse_single(&buf)?;
 
         //    ┌─id─┬─────f32─┬────────────────f64─┬───────bf16─┐
         // 1. │  0 │    3.14 │  3.141592653589793 │      3.125 │
@@ -1405,7 +1463,7 @@ mod tests {
         // 4. │  3 │ 0.57721 │ 0.5772156649015329 │ 0.57421875 │
         //    └────┴─────────┴────────────────────┴────────────┘
 
-        let f32_marker = &block.cols[1];
+        let f32_marker = &block.markers[1];
         let expected_f32 = [3.14f32, 2.71, 1.41, 0.57721];
 
         for (i, expected) in expected_f32.iter().enumerate() {
@@ -1413,7 +1471,7 @@ mod tests {
             assert_eq!(value, *expected, "Mismatch at index {i}");
         }
 
-        let f64_marker = &block.cols[2];
+        let f64_marker = &block.markers[2];
         let expected_f64 = [
             3.141592653589793,
             2.718281828459045,
@@ -1425,7 +1483,7 @@ mod tests {
             assert_eq!(value, *expected, "Mismatch at index {i}");
         }
 
-        let bf16_marker = &block.cols[3];
+        let bf16_marker = &block.markers[3];
         let expected_bf16 = [
             bf16::from_f32(3.125f32),
             bf16::from_f32(2.703125),
@@ -1442,8 +1500,8 @@ mod tests {
 
     #[test]
     fn bool_array_sample() -> TestResult {
-        let buf = load("./test_data/bool_array_sample.native")?;
-        let (_, block) = parse_block(&buf)?;
+        let buf = load("./testdata/bool_array_sample.native")?;
+        let (_, block) = parse_single(&buf)?;
 
         // 0,"[true, false, true]"
         // 1,"[false, false, true]"
@@ -1460,7 +1518,7 @@ mod tests {
             vec![],
             vec![true],
         ];
-        let bool_array_marker = &block.cols[1];
+        let bool_array_marker = &block.markers[1];
         for (i, expected) in expected.iter().enumerate() {
             let value: BoolSliceIterator = bool_array_marker.get(i).unwrap().try_into()?;
             let mut actual = vec![];
@@ -1475,8 +1533,8 @@ mod tests {
 
     #[test]
     fn nullable_string_array() -> TestResult {
-        let buf = load("./test_data/nullable_string_array.native")?;
-        let (_, block) = parse_block(&buf)?;
+        let buf = load("./testdata/nullable_string_array.native")?;
+        let (_, block) = parse_single(&buf)?;
 
         // 0,"['apple', 'banana', null]"
         // 1,"[null, 'date', 'elderberry']"
@@ -1494,7 +1552,7 @@ mod tests {
             vec![Some("lemon"), None, Some("mango")],
         ];
 
-        let nullable_string_array_marker = &block.cols[1];
+        let nullable_string_array_marker = &block.markers[1];
         for (i, expected) in expected.iter().enumerate() {
             let value: NullableSliceIterator =
                 nullable_string_array_marker.get(i).unwrap().try_into()?;
@@ -1511,11 +1569,11 @@ mod tests {
 
     #[test]
     fn metric_activity() -> TestResult {
-        let data = load("./test_data/metric_activity.native")?;
-        let (_, block) = parse_block(&data)?;
+        let data = load("./testdata/metric_activity.native")?;
+        let (_, block) = parse_single(&data)?;
 
         for index in 0..block.num_rows {
-            for (col, name) in block.cols.iter().zip(block.col_names.iter()) {
+            for (col, name) in block.markers.iter().zip(block.col_names.iter()) {
                 if !name.contains("attrs") {
                     continue;
                 }
@@ -1534,8 +1592,8 @@ mod tests {
 
     #[test]
     fn array_of_nested() -> TestResult {
-        let data = load("./test_data/array_of_nested.native")?;
-        let (_, block) = parse_block(&data)?;
+        let data = load("./testdata/array_of_nested.native")?;
+        let (_, block) = parse_single(&data)?;
 
         let expected: [Vec<Vec<(i64, &str)>>; 6] = [
             vec![vec![(1, "Alice"), (2, "Bob")]],
@@ -1546,7 +1604,7 @@ mod tests {
             vec![vec![(8, "Heidi")]],
         ];
 
-        let nested_mark = &block.cols[1];
+        let nested_mark = &block.markers[1];
 
         for (row_idx, expected_outer) in expected.iter().enumerate() {
             let outer_slice: NestedSliceIterator = nested_mark.get(row_idx).unwrap().try_into()?;
@@ -1589,8 +1647,8 @@ mod tests {
 
     #[test]
     fn simple_nested() -> TestResult {
-        let data = load("./test_data/simple_nested.native")?;
-        let (_, block) = parse_block(&data)?;
+        let data = load("./testdata/simple_nested.native")?;
+        let (_, block) = parse_single(&data)?;
 
         let expected: [Vec<(i64, &str)>; 6] = [
             vec![(1, "Alice"), (2, "Bob")],
@@ -1601,7 +1659,7 @@ mod tests {
             vec![(8, "Heidi")],
         ];
 
-        let nested_marker = &block.cols[1];
+        let nested_marker = &block.markers[1];
 
         for (row_idx, expected_nested) in expected.iter().enumerate() {
             let nested_iter: NestedIterator = nested_marker.get(row_idx).unwrap().try_into()?;
@@ -1636,13 +1694,13 @@ mod tests {
 
     #[test]
     fn fixed_string_sample() -> TestResult {
-        let data = load("./test_data/fixed_string_sample.native")?;
-        let (_, block) = parse_block(&data)?;
+        let data = load("./testdata/fixed_string_sample.native")?;
+        let (_, block) = parse_single(&data)?;
 
-        // 0,fixed string 1  
-        // 1,fixed string 2  
-        // 2,fixed string 3  
-        // 3,fixed string 4  
+        // 0,fixed string 1
+        // 1,fixed string 2
+        // 2,fixed string 3
+        // 3,fixed string 4
         // 4,fixed string 5 q
 
         let expected = [
@@ -1653,7 +1711,7 @@ mod tests {
             "fixed string 5 q",
         ];
 
-        let fixed_string_marker = &block.cols[1];
+        let fixed_string_marker = &block.markers[1];
         for (i, expected) in expected.iter().enumerate() {
             let value: &str = fixed_string_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Mismatch at index {i}");
@@ -1664,8 +1722,8 @@ mod tests {
 
     #[test]
     fn fixed_string_array() -> TestResult {
-        let data = load("./test_data/fixed_string_array.native")?;
-        let (_, block) = parse_block(&data)?;
+        let data = load("./testdata/fixed_string_array.native")?;
+        let (_, block) = parse_single(&data)?;
 
         // 0,"['fixed string 1\u0000\u0000', 'fixed string 2\u0000\u0000']"
         // 1,"['fixed string 3\u0000\u0000', 'fixed string 4\u0000\u0000']"
@@ -1683,7 +1741,7 @@ mod tests {
             vec!["fixed string 8", "fixed string 9"],
         ];
 
-        let fixed_string_array_marker = &block.cols[1];
+        let fixed_string_array_marker = &block.markers[1];
         for (i, expected) in expected.iter().enumerate() {
             let value: FixedStringSliceIterator =
                 fixed_string_array_marker.get(i).unwrap().try_into()?;
@@ -1699,8 +1757,8 @@ mod tests {
 
     #[test]
     fn enums_sample() -> TestResult {
-        let data = load("./test_data/enums_sample.native")?;
-        let (_, block) = parse_block(&data)?;
+        let data = load("./testdata/enums_sample.native")?;
+        let (_, block) = parse_single(&data)?;
 
         // 0,Red,Foo
         // 1,Green,Bar
@@ -1711,14 +1769,14 @@ mod tests {
 
         let expected_e8 = ["Red", "Green", "Blue", "Red", "Green", "Blue"];
 
-        let e8_marker = &block.cols[1];
+        let e8_marker = &block.markers[1];
         for (i, expected) in expected_e8.iter().enumerate() {
             let value: &str = e8_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Mismatch at index {i}");
         }
 
         let expected_e16 = ["Foo", "Bar", "Foo", "Bar", "Foo", "Bar"];
-        let e16_marker = &block.cols[2];
+        let e16_marker = &block.markers[2];
         for (i, expected) in expected_e16.iter().enumerate() {
             let value: &str = e16_marker.get(i).unwrap().try_into()?;
             assert_eq!(value, *expected, "Mismatch at index {i}");
@@ -1729,8 +1787,8 @@ mod tests {
 
     #[test]
     fn enums_array_sample() -> TestResult {
-        let data = load("./test_data/enums_array_sample.native")?;
-        let (_, block) = parse_block(&data)?;
+        let data = load("./testdata/enums_array_sample.native")?;
+        let (_, block) = parse_single(&data)?;
 
         // 0,"['Red', 'Green']",['Foo']
         // 1,"['Blue', 'Red']",['Bar']
@@ -1748,7 +1806,7 @@ mod tests {
             vec!["Green", "Red", "Blue"],
         ];
 
-        let e8_marker = &block.cols[1];
+        let e8_marker = &block.markers[1];
         for (i, expected) in expected_e8.iter().enumerate() {
             let value: Enum8SliceIterator = e8_marker.get(i).unwrap().try_into()?;
             let mut actual = vec![];
@@ -1767,7 +1825,7 @@ mod tests {
             vec!["Bar"],
         ];
 
-        let e16_marker = &block.cols[2];
+        let e16_marker = &block.markers[2];
         for (i, expected) in expected_e16.iter().enumerate() {
             let value: Enum16SliceIterator = e16_marker.get(i).unwrap().try_into()?;
             let mut actual = vec![];
@@ -1782,8 +1840,8 @@ mod tests {
 
     #[test]
     fn bfloat16_array_sample() -> TestResult {
-        let data = load("./test_data/bfloat16_array_sample.native")?;
-        let (_, block) = parse_block(&data)?;
+        let data = load("./testdata/bfloat16_array_sample.native")?;
+        let (_, block) = parse_single(&data)?;
 
         //    ┌─id─┬─arr_bf16─────────────────┐
         // 1. │  0 │ [3.125,2.703125,1.40625] │
@@ -1805,7 +1863,7 @@ mod tests {
             vec![bf16::from_f32(1.4140625), bf16::from_f32(3.140625)],
         ];
 
-        let bfloat16_array_marker = &block.cols[1];
+        let bfloat16_array_marker = &block.markers[1];
         for (i, expected) in expected.iter().enumerate() {
             let value: &[Bf16Data] = bfloat16_array_marker.get(i).unwrap().try_into()?;
             let mut actual: Vec<bf16> = vec![];
@@ -1813,6 +1871,249 @@ mod tests {
                 actual.push(item.into());
             }
             assert_eq!(actual, *expected, "Mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn array_lc_string_empty() -> TestResult {
+        let data = load("./testdata/array_lc_string_empty.native")?;
+        let (_, block) = parse_single(&data)?;
+
+        let marker = &block.markers[1];
+        for i in 0..block.num_rows {
+            let it = marker.get_array_lc_strs(i)?;
+            assert!(it.is_none());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn sample_128() -> TestResult {
+        let data = load("./testdata/sample_128.native")?;
+        let (_, block) = parse_single(&data)?;
+
+        //    ┌─id─┬──────────────────────u128_single─┬─u128_array──────────────────────────────────────────────────────────┬──────────────────────i128_single─┬─i128_array───────────────────────────────────────────────────────────┐
+        // 1. │  0 │ 12345678901234567890123456789012 │ [12345678901234567890123456789012,98765432109876543210987654321098] │ 12345678901234567890123456789012 │ [12345678901234567890123456789012,-98765432109876543210987654321098] │
+        //    └────┴──────────────────────────────────┴─────────────────────────────────────────────────────────────────────┴──────────────────────────────────┴──────────────────────────────────────────────────────────────────────┘
+
+        let u128_marker = &block.markers[1];
+        let expected_u128 = [12345678901234567890123456789012u128];
+        for (i, expected) in expected_u128.iter().enumerate() {
+            let value: u128 = u128_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+        }
+
+        let u128_array_marker = &block.markers[2];
+        let expected_u128_array = [vec![
+            12345678901234567890123456789012u128,
+            98765432109876543210987654321098u128,
+        ]];
+
+        for (i, expected) in expected_u128_array.iter().enumerate() {
+            let value: &[U128] = u128_array_marker.get(i).unwrap().try_into()?;
+            let mut actual = vec![];
+            for item in value {
+                actual.push(item.get());
+            }
+            assert_eq!(actual, *expected, "Mismatch at index {i}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn nullable_lc_str() -> TestResult {
+        let data = load("./testdata/nullable_lc_str.native")?;
+        let (_, block) = parse_single(&data)?;
+
+        //    ┌─id─┬─nlc_str─┐
+        // 1. │  0 │ apple   │
+        // 2. │  1 │ ᴺᵁᴸᴸ    │
+        // 3. │  2 │ banana  │
+        // 4. │  3 │ cherry  │
+        // 5. │  4 │ ᴺᵁᴸᴸ    │
+        // 6. │  5 │ date    │
+        //    └────┴─────────┘
+
+        let expected = [
+            Some("apple"),
+            None,
+            Some("banana"),
+            Some("cherry"),
+            None,
+            Some("date"),
+        ];
+
+        let nlc_str_marker = &block.markers[1];
+        for (i, expected) in expected.iter().enumerate() {
+            let value: Option<&str> = nlc_str_marker.get(i).unwrap().try_into()?;
+            assert_eq!(value, *expected, "Mismatch at index {i}");
+
+            let value = nlc_str_marker.get_opt_str(i)?.unwrap();
+            assert_eq!(value, *expected, "Mismatch at index {i} (get_opt_str)");
+        }
+
+        Ok(())
+    }
+
+    #[expect(clippy::approx_constant)]
+    #[test]
+    fn dynamic() -> TestResult {
+        let data = load("./testdata/dynamic.native")?;
+        let (_, block) = parse_single(&data)?;
+        println!("{}", block.num_rows);
+
+        // ┌─id─┬─dyn──────────────────────────────────┐
+        // │  0 │ string value                         │
+        // │  1 │ 12345                                │
+        // │  2 │ [1,2,3]                              │
+        // │  3 │ {'key':'value'}                      │
+        // │  4 │ 2023-01-01                           │
+        // │  5 │ 0                                    │
+        // │  6 │ 2023-01-01 12:00:00                  │
+        // │  7 │ d60b7c85-0739-4786-a8d9-f1bbc72104df │
+        // │  8 │ 3.14                                 │
+        // │  9 │ 1.23                                 │
+        // └────┴──────────────────────────────────────┘
+
+        let expected = [
+            "string value",
+            "12345",
+            "[1,2,3]",
+            "{'key':'value'}",
+            "2023-01-01",
+            "0",
+            "2023-01-01 12:00:00",
+            "d60b7c85-0739-4786-a8d9-f1bbc72104df",
+            "3.14",
+            "1.23",
+        ];
+
+        let dynamic_marker = &block.markers[1];
+
+        let row0: &str = dynamic_marker.get(0).unwrap().try_into()?;
+        assert_eq!(row0, expected[0], "Mismatch at index 0");
+
+        let row1: i64 = dynamic_marker.get(1).unwrap().try_into()?;
+        assert_eq!(row1, 12345, "Mismatch at index 1");
+
+        let row2: &[I64] = dynamic_marker.get(2).unwrap().try_into()?;
+        assert_eq!(row2, &[1, 2, 3], "Mismatch at index 2");
+
+        let row3: MapIterator<&str, &str> = dynamic_marker.get(3).unwrap().try_into()?;
+        let mut map = HashMap::new();
+        for (key, value) in row3.flatten() {
+            map.insert(key, value);
+        }
+        assert_eq!(map.get("key"), Some(&"value"), "Mismatch at index 3");
+
+        let row4: chrono::NaiveDate = dynamic_marker.get(4).unwrap().try_into()?;
+        assert_eq!(
+            row4,
+            chrono::NaiveDate::from_ymd_opt(2023, 1, 1).unwrap(),
+            "Mismatch at index 4"
+        );
+
+        let row5: i64 = dynamic_marker.get(5).unwrap().try_into()?;
+        assert_eq!(row5, 0, "Mismatch at index 5");
+
+        let row6: chrono::DateTime<chrono_tz::Tz> = dynamic_marker.get(6).unwrap().try_into()?;
+        assert_eq!(row6.to_string(), "2023-01-01 12:00:00 UTC");
+
+        let row7: uuid::Uuid = dynamic_marker.get(7).unwrap().try_into()?;
+        assert_eq!(
+            row7,
+            uuid::Uuid::parse_str("d60b7c85-0739-4786-a8d9-f1bbc72104df")?,
+            "Mismatch at index 7"
+        );
+
+        let row8: f64 = dynamic_marker.get(8).unwrap().try_into()?;
+        assert_eq!(row8, 3.14, "Mismatch at index 8");
+
+        let row9: rust_decimal::Decimal = dynamic_marker.get(9).unwrap().try_into()?;
+        assert_eq!(
+            row9,
+            rust_decimal::Decimal::try_from(1.23f32)?,
+            "Mismatch at index 9"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn json() -> TestResult {
+        let data = load("./testdata/json.native")?;
+        let (_, block) = parse_single(&data)?;
+
+        //    ┌─id─┬─json──────────────────────────────────────────────────────────┐
+        //  1. │  0 │ {"key":"value"}                                               │
+        //  2. │  1 │ {"array":["1","2","3"]}                                       │
+        //  3. │  2 │ {"nested":{"a":"1","b":"2"}}                                  │
+        //  4. │  3 │ {"boolean":true}                                              │
+        //  5. │  4 │ {}                                                            │
+        //  6. │  5 │ {"date":"2023-01-01"}                                         │
+        //  7. │  6 │ {"datetime":"2023-01-01T12:00:00Z"}                           │
+        //  8. │  7 │ {"array":{"haha":true}}                                       │
+        //  9. │  8 │ {"complex":{"nested":{"array":["1","2","3"],"value":"test"}}} │
+        // 10. │  9 │ {}                                                            │
+        // 11. │ 10 │ {"empty_array":[]}                                            │
+        // 12. │ 11 │ {"mixed_types":["1","string","true",null]}                    │
+        // 13. │ 12 │ {"uuid":"bb679be2-e161-4e5e-b09b-d66f3ed12464"}               │
+        //     └────┴───────────────────────────────────────────────────────────────┘
+
+        let expected_paths = &[
+            ["key"].as_slice(),
+            ["array"].as_slice(),
+            ["nested.a", "nested.b"].as_slice(),
+            ["boolean"].as_slice(),
+            [].as_slice(),
+            ["date"].as_slice(),
+            ["datetime"].as_slice(),
+            ["array.haha"].as_slice(),
+            ["complex.nested.array", "complex.nested.value"].as_slice(),
+            [].as_slice(),
+            ["empty_array"].as_slice(),
+            ["mixed_types"].as_slice(),
+            ["uuid"].as_slice(),
+        ];
+
+        let json_marker = &block.markers[1];
+        for (i, expected_paths) in expected_paths.iter().copied().enumerate() {
+            let mut expected_paths = Vec::from(expected_paths);
+            expected_paths.sort_unstable();
+
+            let it: JsonIterator = json_marker.get(i).unwrap().try_into()?;
+            let mut actual_paths: Vec<&str> = Vec::new();
+            for (path, _value) in it {
+                actual_paths.push(path);
+            }
+            actual_paths.sort_unstable();
+            assert_eq!(
+                actual_paths, expected_paths,
+                "Mismatch at index {i}: expected {:?}, got {:?}",
+                expected_paths, actual_paths
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn lc_empty_string_bug() -> TestResult {
+        let data = load("./testdata/activity_hw.native")?;
+        let (rem, block) = parse_single(&data)?;
+        assert!(rem.is_empty());
+
+        // ["first_seen", "last_seen", "name", "resource_attrs", "scope_attrs", "attrs", "type", "temporality", "is_monotonic"]
+        let marker = &block.markers[3];
+        for i in 0..block.num_rows {
+            let map_it: MapIterator<&str, &str> = marker.get(i).unwrap().try_into()?;
+            for kv in map_it {
+                assert!(kv.is_ok(), "empty strings should not be Value::Empty");
+            }
         }
 
         Ok(())

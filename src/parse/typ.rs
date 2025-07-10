@@ -1,16 +1,18 @@
-use crate::types::{Field, Type};
-use chrono_tz::Tz;
-use chrono_tz::Tz::UTC;
 use std::str::{FromStr, from_utf8};
 
-use nom::branch::alt;
-use nom::bytes::complete::take_while1;
-use nom::character::complete::{alphanumeric1, char, digit1, multispace0, multispace1};
-use nom::combinator::{map, map_res, opt, recognize};
-use nom::error::{ErrorKind, FromExternalError as _, ParseError};
-use nom::multi::{many0, separated_list1};
-use nom::sequence::{delimited, pair, preceded, separated_pair};
-use nom::{IResult, Parser, bytes::complete::tag};
+use chrono_tz::{Tz, Tz::UTC};
+use nom::{
+    IResult, Parser,
+    branch::alt,
+    bytes::complete::{tag, take_while1},
+    character::complete::{alphanumeric1, char, digit1, multispace0, multispace1},
+    combinator::{map, map_res, opt, recognize},
+    error::{ErrorKind, FromExternalError as _, ParseError},
+    multi::{many0, separated_list1},
+    sequence::{delimited, pair, preceded, separated_pair},
+};
+
+use crate::types::{Field, Type};
 
 fn parse_num<T>(input: &[u8]) -> Result<T, nom::error::Error<&[u8]>>
 where
@@ -183,6 +185,7 @@ fn parse_other_primitives(input: &[u8]) -> IResult<&[u8], Type> {
     alt((
         map(tag("Dynamic"), |_| Type::Dynamic),
         map(tag("JSON"), |_| Type::Json),
+        map(tag("SharedVariant"), |_| Type::SharedVariant),
     ))
     .parse(input)
 }

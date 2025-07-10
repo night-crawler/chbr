@@ -1,123 +1,144 @@
-use crate::slice::ByteView;
-use crate::types::{JsonColumnHeader, Offsets};
-use crate::{
-    Bf16Data, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
-    Decimal128Data, Decimal256Data, Ipv4Data, Ipv6Data, UuidData, i256, u256,
-};
-use chrono_tz::Tz;
 use core::fmt;
 use std::fmt::Debug;
-use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
-use zerocopy::{FromBytes, Unaligned};
+
+use chrono_tz::Tz;
+use zerocopy::{
+    FromBytes, Unaligned,
+    little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128},
+};
+
+use crate::{
+    Bf16Data, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
+    Decimal128Data, Decimal256Data, I256, Ipv4Data, Ipv6Data, U256, UuidData,
+    slice::ByteView,
+    types::{JsonColumnHeader, Offsets},
+};
 
 #[derive(Debug)]
-pub struct MarkMap<'a> {
+pub struct Map<'a> {
     pub offsets: Offsets<'a>,
     pub keys: Box<Mark<'a>>,
     pub values: Box<Mark<'a>>,
 }
 
 #[derive(Debug)]
-pub struct MarkVariant<'a> {
+pub struct Variant<'a> {
     pub offsets: Vec<usize>,
     pub discriminators: &'a [u8],
     pub types: Vec<Mark<'a>>,
 }
 
 #[derive(Debug)]
-pub struct MarkLowCardinality<'a> {
+pub struct LowCardinality<'a> {
+    pub is_nullable: bool,
     pub indices: Box<Mark<'a>>,
     pub global_dictionary: Option<Box<Mark<'a>>>,
     pub additional_keys: Option<Box<Mark<'a>>>,
 }
 
+impl LowCardinality<'_> {
+    #[inline]
+    pub fn value_index(&self, index: usize) -> Option<usize> {
+        let value_index = match self.indices.as_ref() {
+            Mark::UInt8(indices) => indices.get(index).copied()? as usize,
+            Mark::UInt16(indices) => indices.get(index)?.get() as usize,
+            Mark::UInt32(indices) => indices.get(index)?.get() as usize,
+            Mark::UInt64(indices) => usize::try_from(indices.get(index)?.get()).unwrap(),
+            _ => unreachable!("unexpected indices type in LowCardinality "),
+        };
+
+        Some(value_index)
+    }
+}
+
 #[derive(Debug)]
-pub struct MarkNested<'a> {
+pub struct Nested<'a> {
     pub col_names: Vec<&'a str>,
     pub array_of_tuples: Box<Mark<'a>>,
 }
 
 #[derive(Debug)]
-pub struct MarkJson<'a> {
-    pub columns: Box<Mark<'a>>,
+pub struct Json<'a> {
+    pub paths: Vec<&'a str>,
     pub headers: Vec<JsonColumnHeader<'a>>,
 }
 
 #[derive(Debug)]
-pub struct MarkArray<'a> {
+pub struct Array<'a> {
     pub offsets: Offsets<'a>,
     pub values: Box<Mark<'a>>,
 }
 
 #[derive(Debug)]
-pub struct MarkDecimal32<'a> {
+pub struct Decimal32<'a> {
     pub precision: u8,
     pub data: ByteView<'a, Decimal32Data>,
 }
 
 #[derive(Debug)]
-pub struct MarkDecimal64<'a> {
+pub struct Decimal64<'a> {
     pub precision: u8,
     pub data: ByteView<'a, Decimal64Data>,
 }
 
 #[derive(Debug)]
-pub struct MarkDecimal128<'a> {
+pub struct Decimal128<'a> {
     pub precision: u8,
     pub data: ByteView<'a, Decimal128Data>,
 }
 
 #[derive(Debug)]
-pub struct MarkDecimal256<'a> {
+pub struct Decimal256<'a> {
     pub precision: u8,
     pub data: ByteView<'a, Decimal256Data>,
 }
 
 #[derive(Debug)]
-pub struct MarkFixedString<'a> {
+pub struct FixedString<'a> {
     pub size: usize,
     pub data: &'a [u8],
 }
 
 #[derive(Debug)]
-pub struct MarkDateTime<'a> {
+pub struct DateTime<'a> {
     pub tz: Tz,
     pub data: ByteView<'a, DateTime32Data>,
 }
 
 #[derive(Debug)]
-pub struct MarkDateTime64<'a> {
+pub struct DateTime64<'a> {
     pub precision: u8,
     pub tz: Tz,
     pub data: ByteView<'a, DateTime64Data>,
 }
 
 #[derive(Debug)]
-pub struct MarkEnum8<'a> {
+pub struct Enum8<'a> {
     pub variants: Vec<(&'a str, i8)>,
     pub data: ByteView<'a, i8>,
 }
 
 #[derive(Debug)]
-pub struct MarkEnum16<'a> {
+pub struct Enum16<'a> {
     pub variants: Vec<(&'a str, i16)>,
     pub data: ByteView<'a, I16>,
 }
 
 #[derive(Debug)]
-pub struct MarkDynamic<'a> {
+pub struct Dynamic<'a> {
+    pub offsets: Vec<usize>,
     pub discriminators: Vec<usize>,
     pub columns: Vec<Mark<'a>>,
 }
 
 #[derive(Debug)]
-pub struct MarkNullable<'a> {
+pub struct Nullable<'a> {
     pub mask: &'a [u8],
     pub data: Box<Mark<'a>>,
 }
 
 #[derive(Debug)]
-pub struct MarkTuple<'a> {
+pub struct Tuple<'a> {
     pub values: Vec<Mark<'a>>,
 }
 
@@ -129,27 +150,27 @@ pub enum Mark<'a> {
     Int32(ByteView<'a, I32>),
     Int64(ByteView<'a, I64>),
     Int128(ByteView<'a, I128>),
-    Int256(ByteView<'a, i256>),
+    Int256(ByteView<'a, I256>),
     UInt8(ByteView<'a, u8>),
     UInt16(ByteView<'a, U16>),
     UInt32(ByteView<'a, U32>),
     UInt64(ByteView<'a, U64>),
     UInt128(ByteView<'a, U128>),
-    UInt256(ByteView<'a, u256>),
+    UInt256(ByteView<'a, U256>),
     Float32(ByteView<'a, F32>),
     Float64(ByteView<'a, F64>),
     BFloat16(ByteView<'a, Bf16Data>),
-    Decimal32(MarkDecimal32<'a>),
-    Decimal64(MarkDecimal64<'a>),
-    Decimal128(MarkDecimal128<'a>),
-    Decimal256(MarkDecimal256<'a>),
+    Decimal32(Decimal32<'a>),
+    Decimal64(Decimal64<'a>),
+    Decimal128(Decimal128<'a>),
+    Decimal256(Decimal256<'a>),
     String(Vec<&'a str>),
-    FixedString(MarkFixedString<'a>),
+    FixedString(FixedString<'a>),
     Uuid(ByteView<'a, UuidData>),
     Date(ByteView<'a, Date16Data>),
     Date32(ByteView<'a, Date32Data>),
-    DateTime(MarkDateTime<'a>),
-    DateTime64(MarkDateTime64<'a>),
+    DateTime(DateTime<'a>),
+    DateTime64(DateTime64<'a>),
     Ipv4(ByteView<'a, Ipv4Data>),
     Ipv6(ByteView<'a, Ipv6Data>),
     Point(&'a [u8]),
@@ -159,24 +180,24 @@ pub enum Mark<'a> {
     LineString(Box<Mark<'a>>),
     MultiLineString(Box<Mark<'a>>),
 
-    Enum8(MarkEnum8<'a>),
-    Enum16(MarkEnum16<'a>),
+    Enum8(Enum8<'a>),
+    Enum16(Enum16<'a>),
 
-    LowCardinality(MarkLowCardinality<'a>),
-    Array(MarkArray<'a>),
-    Tuple(MarkTuple<'a>),
-    Nullable(MarkNullable<'a>),
-    Map(MarkMap<'a>),
-    Variant(MarkVariant<'a>),
-    Nested(MarkNested<'a>),
-    Dynamic(MarkDynamic<'a>),
+    LowCardinality(LowCardinality<'a>),
+    Array(Array<'a>),
+    Tuple(Tuple<'a>),
+    Nullable(Nullable<'a>),
+    Map(Map<'a>),
+    Variant(Variant<'a>),
+    Nested(Nested<'a>),
+    Dynamic(Dynamic<'a>),
 
-    Json(MarkJson<'a>),
+    Json(Json<'a>),
 }
 
 impl Mark<'_> {
     pub const fn size(&self) -> Option<usize> {
-        #[allow(clippy::match_same_arms)]
+        #[expect(clippy::match_same_arms)]
         match self {
             Self::Bool(_) => Some(1),
             Self::Int8(_) => Some(1),
@@ -396,7 +417,7 @@ impl Debug for Mark<'_> {
 
             Json(j) => f
                 .debug_struct("Json")
-                .field("columns", &j.columns)
+                .field("paths", &j.paths)
                 .field("headers", &j.headers)
                 .finish(),
         }

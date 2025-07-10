@@ -1,8 +1,11 @@
-use crate::error::Error;
-use crate::parse::typ::parse_type;
-use crate::slice::ByteView;
-use crate::types::{Offsets, Type};
 use zerocopy::{LittleEndian, U64};
+
+use crate::{
+    error::Error,
+    parse::typ::parse_type,
+    slice::ByteView,
+    types::{Offsets, Type},
+};
 
 pub mod block;
 pub mod column;

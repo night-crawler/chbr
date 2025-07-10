@@ -43,6 +43,9 @@ pub enum Error {
 
     #[error("TryFromIntError: {0}")]
     TryFromIntError(#[from] std::num::TryFromIntError),
+
+    #[error("Invalid column order: {0}")]
+    InvalidColumnOrder(String),
 }
 
 impl<T> From<nom::Err<T>> for Error

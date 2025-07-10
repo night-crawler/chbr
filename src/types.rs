@@ -1,13 +1,14 @@
-#![allow(dead_code)]
-
-use crate::mark::{
-    Mark, MarkDateTime, MarkDateTime64, MarkDecimal32, MarkDecimal64, MarkDecimal128,
-    MarkDecimal256, MarkEnum8, MarkEnum16, MarkFixedString,
-};
-use crate::parse::typ::parse_type;
-use crate::slice::ByteView;
 pub use chrono_tz::Tz;
 use zerocopy::little_endian::U64;
+
+use crate::{
+    mark::{
+        DateTime, DateTime64, Decimal32, Decimal64, Decimal128, Decimal256, Enum8, Enum16,
+        FixedString, Mark,
+    },
+    parse::typ::parse_type,
+    slice::ByteView,
+};
 
 pub type Offsets<'a> = ByteView<'a, U64>;
 
@@ -44,15 +45,14 @@ impl OffsetIndexPair for Offsets<'_> {
         let Some(value) = self.get(index).map(|v| v.get()) else {
             return Ok(None);
         };
-        let value =
-            T::try_from(value).map_err(|_| crate::error::Error::Overflow(value.to_string()))?;
+        let value = T::try_from(value).map_err(|_| crate::Error::Overflow(value.to_string()))?;
         Ok(Some(value))
     }
 
     fn last_or_default(&self) -> crate::Result<usize> {
         if let Some(last) = self.last().map(|last| last.get()) {
-            let last = usize::try_from(last)
-                .map_err(|_| crate::error::Error::Overflow(last.to_string()))?;
+            let last =
+                usize::try_from(last).map_err(|_| crate::Error::Overflow(last.to_string()))?;
             Ok(last)
         } else {
             Ok(usize::default())
@@ -139,6 +139,8 @@ pub enum Type<'a> {
 
     Dynamic,
     Json,
+
+    SharedVariant,
 }
 
 impl<'a> Type<'a> {
@@ -161,6 +163,8 @@ pub struct JsonColumnHeader<'a> {
     pub typ: Box<Type<'a>>,
     pub variant_version: u64,
     pub mark: Mark<'a>,
+    pub discriminators: &'a [u8],
+    pub offsets: Vec<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -171,7 +175,7 @@ pub struct Field<'a> {
 
 impl<'a> Type<'a> {
     pub fn size(&self) -> Option<usize> {
-        #[allow(clippy::match_same_arms)]
+        #[expect(clippy::match_same_arms)]
         match self {
             Self::Bool => Some(1),
             Self::Int8 => Some(1),
@@ -236,14 +240,14 @@ impl<'a> Type<'a> {
             Self::LowCardinality(_) => None,
             Self::String => None,
             Self::Nested(_) => None,
+            Self::SharedVariant => None,
         }
     }
 
-    pub fn from_bytes(s: &[u8]) -> Result<Type, crate::error::Error> {
-        let (remainder, typ) =
-            parse_type(s).map_err(|e| crate::error::Error::Parse(e.to_string()))?;
+    pub fn from_bytes(s: &[u8]) -> Result<Type, crate::Error> {
+        let (remainder, typ) = parse_type(s).map_err(|e| crate::Error::Parse(e.to_string()))?;
         if !remainder.trim_ascii().is_empty() {
-            return Err(crate::error::Error::Parse(format!(
+            return Err(crate::Error::Parse(format!(
                 "Unparsed remainder: {remainder:?}"
             )));
         }
@@ -269,31 +273,31 @@ impl<'a> Type<'a> {
             Type::Float32 => Mark::Float32(ByteView::try_from(data)?),
             Type::Float64 => Mark::Float64(ByteView::try_from(data)?),
             Type::BFloat16 => Mark::BFloat16(ByteView::try_from(data)?),
-            Type::Decimal32(precision) => Mark::Decimal32(MarkDecimal32 {
+            Type::Decimal32(precision) => Mark::Decimal32(Decimal32 {
                 precision,
                 data: ByteView::try_from(data)?,
             }),
-            Type::Decimal64(precision) => Mark::Decimal64(MarkDecimal64 {
+            Type::Decimal64(precision) => Mark::Decimal64(Decimal64 {
                 precision,
                 data: ByteView::try_from(data)?,
             }),
-            Type::Decimal128(precision) => Mark::Decimal128(MarkDecimal128 {
+            Type::Decimal128(precision) => Mark::Decimal128(Decimal128 {
                 precision,
                 data: ByteView::try_from(data)?,
             }),
-            Type::Decimal256(precision) => Mark::Decimal256(MarkDecimal256 {
+            Type::Decimal256(precision) => Mark::Decimal256(Decimal256 {
                 precision,
                 data: ByteView::try_from(data)?,
             }),
-            Type::FixedString(size) => Mark::FixedString(MarkFixedString { size, data }),
+            Type::FixedString(size) => Mark::FixedString(FixedString { size, data }),
             Type::Uuid => Mark::Uuid(ByteView::try_from(data)?),
             Type::Date => Mark::Date(ByteView::try_from(data)?),
             Type::Date32 => Mark::Date32(ByteView::try_from(data)?),
-            Type::DateTime(tz) => Mark::DateTime(MarkDateTime {
+            Type::DateTime(tz) => Mark::DateTime(DateTime {
                 tz,
                 data: ByteView::try_from(data)?,
             }),
-            Type::DateTime64(precision, tz) => Mark::DateTime64(MarkDateTime64 {
+            Type::DateTime64(precision, tz) => Mark::DateTime64(DateTime64 {
                 precision,
                 tz,
                 data: ByteView::try_from(data)?,
@@ -301,11 +305,11 @@ impl<'a> Type<'a> {
             Type::Ipv4 => Mark::Ipv4(ByteView::try_from(data)?),
             Type::Ipv6 => Mark::Ipv6(ByteView::try_from(data)?),
 
-            Type::Enum8(variants) => Mark::Enum8(MarkEnum8 {
+            Type::Enum8(variants) => Mark::Enum8(Enum8 {
                 variants,
                 data: ByteView::try_from(data)?,
             }),
-            Type::Enum16(variants) => Mark::Enum16(MarkEnum16 {
+            Type::Enum16(variants) => Mark::Enum16(Enum16 {
                 variants,
                 data: ByteView::try_from(data)?,
             }),
@@ -315,24 +319,4 @@ impl<'a> Type<'a> {
 
         Ok(mark)
     }
-}
-
-#[macro_export]
-macro_rules! t {
-    ($name:ident) => {
-        Type::$name
-    };
-    ($name:ident ( $($inner:tt)* )) => {
-        Type::$name( $($inner)* )
-    };
-}
-
-#[macro_export]
-macro_rules! bt {
-    ($name:ident) => {
-        Box::new(Type::$name)
-    };
-    ($name:ident ( $($inner:tt)* )) => {
-        Box::new(Type::$name( $($inner)* ))
-    };
 }
