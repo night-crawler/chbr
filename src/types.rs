@@ -148,6 +148,7 @@ impl<'a> TypeHeader<'a> {
     pub fn into_nullable(self) -> TypeHeader<'a> {
         match self {
             TypeHeader::Nullable(inner) => *inner,
+            TypeHeader::Empty => TypeHeader::Empty,
             e => unreachable!("Wrong type header: {e:?}"),
         }
     }

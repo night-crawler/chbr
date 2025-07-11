@@ -74,7 +74,7 @@ impl<'a> Type<'a> {
             }
             Type::Array(inner) => {
                 let (input, th) = inner.decode_header(ctx.clone())?;
-                return Ok((input, th));
+                return Ok((input, TypeHeader::Array(th.into())));
             }
             Type::Dynamic => {
                 let (mut input, version) = parse_u64::<u64>(ctx.input)?;

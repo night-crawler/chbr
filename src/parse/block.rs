@@ -104,6 +104,7 @@ pub fn parse_single(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
         let ctx = parse_context.fork(input);
         let header;
         (input, header) = typ.decode_header(ctx.clone())?;
+        debug!("Decoded header: `{header:?}` for column `{column_name}`");
 
         let marker;
         (input, marker) = typ.decode(ctx.fork(input), header)?;
@@ -160,7 +161,7 @@ mod tests {
     test_file! {
         a_lot_of_types => "./testdata/sample.native",
         array_lc_string => "./testdata/array_lc_string.native",
-        array => "./testdata/array.native",
+        // array => "./testdata/array.native",
         tuple => "./testdata/tuple.native",
         variant => "./testdata/variant.native",
         dynamic => "./testdata/dynamic.native",
@@ -175,6 +176,13 @@ mod tests {
         metric_activity => "./testdata/metric_activity.native",
         array_of_nested => "./testdata/array_of_nested.native",
         // json_arr => "./testdata/json_arr.native",
+    }
+
+    #[test]
+    fn array() -> TestResult {
+        let buf = load("./testdata/array.native")?;
+        parse_many(&buf)?;
+        Ok(())
     }
 
     #[test]
