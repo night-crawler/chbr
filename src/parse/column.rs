@@ -2,6 +2,7 @@ use std::hint::unreachable_unchecked;
 
 use log::debug;
 
+use crate::types::{DynamicHeader, JsonHeader, MapHeader, NestedHeader, TypeHeader};
 use crate::{
     error::Error,
     macros::{bt, t},
@@ -19,10 +20,12 @@ use crate::{
     },
     types::{Field, JsonColumnHeader, OffsetIndexPair as _, Type},
 };
-use crate::types::TypeHeader;
 
 impl<'a> Type<'a> {
-    pub(crate) fn decode_header(&self, mut ctx: ParseContext<'a>) -> IResult<&'a [u8], TypeHeader<'a>> {
+    pub(crate) fn decode_header(
+        &self,
+        mut ctx: ParseContext<'a>,
+    ) -> IResult<&'a [u8], TypeHeader<'a>> {
         debug!("Decoding header for type: {self:?}");
         match self {
             Type::Nullable(inner) => {
@@ -43,7 +46,11 @@ impl<'a> Type<'a> {
                 let (input, key_th) = key.decode_header(ctx.clone())?;
                 ctx = ctx.fork(input);
                 let (input, val_th) = val.decode_header(ctx)?;
-                return Ok((input, TypeHeader::Map(key_th.into(), val_th.into())));
+                let h = MapHeader {
+                    key: key_th,
+                    value: val_th,
+                };
+                return Ok((input, TypeHeader::Map(h.into())));
             }
             Type::Variant(inner) => {
                 let mut headers = Vec::with_capacity(inner.len());
@@ -92,7 +99,11 @@ impl<'a> Type<'a> {
         Ok((ctx.input, TypeHeader::Empty))
     }
 
-    pub(crate) fn decode(self, ctx: ParseContext<'a>, header: &'a TypeHeader<'a>) -> IResult<&'a [u8], Mark<'a>> {
+    pub(crate) fn decode(
+        self,
+        ctx: ParseContext<'a>,
+        header: TypeHeader<'a>,
+    ) -> IResult<&'a [u8], Mark<'a>> {
         if let Some(size) = self.size() {
             let (data, input) = ctx.input.split_at(size * ctx.num_rows);
             let marker = self.into_fixed_size_marker(data)?;
@@ -101,26 +112,26 @@ impl<'a> Type<'a> {
 
         match self {
             Type::String => string(ctx),
-            Type::Array(inner) => array(*inner, &ctx),
+            Type::Array(inner) => array(*inner, &ctx, header.into_array()),
             Type::Point => {
                 // Point is represented by its X and Y coordinates, stored as a Tuple(Float64, Float64).
                 let inner = t!(Tuple(vec![t!(Float64), t!(Float64)]));
-                inner.decode(ctx, &TypeHeader::Empty)
+                inner.decode(ctx, TypeHeader::Empty)
             }
             #[expect(clippy::match_same_arms)]
-            Type::Ring => t!(Array(bt!(Point))).decode(ctx, header.as_array()),
-            Type::Polygon => t!(Array(bt!(Ring))).decode(ctx, header.as_array()),
-            Type::MultiPolygon => t!(Array(bt!(Polygon))).decode(ctx, header.as_array()),
-            Type::LineString => t!(Array(bt!(Point))).decode(ctx, header.as_array()),
-            Type::MultiLineString => t!(Array(bt!(LineString))).decode(ctx, header.as_array()),
-            Type::Tuple(inner) => tuple(inner, &ctx),
-            Type::Map(key, value) => map(*key, *value, &ctx),
-            Type::Variant(inner) => variant(inner, &ctx),
+            Type::Ring => t!(Array(bt!(Point))).decode(ctx, header.into_array()),
+            Type::Polygon => t!(Array(bt!(Ring))).decode(ctx, header.into_array()),
+            Type::MultiPolygon => t!(Array(bt!(Polygon))).decode(ctx, header.into_array()),
+            Type::LineString => t!(Array(bt!(Point))).decode(ctx, header.into_array()),
+            Type::MultiLineString => t!(Array(bt!(LineString))).decode(ctx, header.into_array()),
+            Type::Tuple(inner) => tuple(inner, &ctx, header.into_tuple()),
+            Type::Map(key, value) => map(*key, *value, &ctx, header.into_map()),
+            Type::Variant(inner) => variant(inner, &ctx, header.into_variant()),
             Type::LowCardinality(inner) => lc(inner.as_ref(), &ctx),
-            Type::Nullable(inner) => nullable(*inner, &ctx),
-            Type::Dynamic => dynamic(&ctx),
-            Type::Json => json(&ctx),
-            Type::Nested(fields) => nested(fields, ctx),
+            Type::Nullable(inner) => nullable(*inner, &ctx, header.into_nullable()),
+            Type::Dynamic => dynamic(&ctx, header.into_dynamic()),
+            Type::Json => json(&ctx, header.into_json()),
+            Type::Nested(fields) => nested(fields, ctx, header.into_nested()),
             _ => {
                 todo!("Not implemented for {self:?}")
             }
@@ -128,12 +139,12 @@ impl<'a> Type<'a> {
     }
 }
 
-fn json<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
+fn json<'a>(ctx: &ParseContext<'a>, _x: JsonHeader<'a>) -> IResult<&'a [u8], Mark<'a>> {
     let (input, num_paths_old) = parse_varuint::<u64>(ctx.input)?;
     debug!("num_paths_old: {num_paths_old}");
 
     let (input, num_paths) = parse_varuint(input)?;
-    let (mut input, paths) = Type::String.decode(ctx.fork(input).with_num_rows(num_paths), &TypeHeader::Empty)?;
+    let (mut input, paths) = string(ctx.fork(input).with_num_rows(num_paths))?;
     let Mark::String(paths) = paths else {
         unsafe { unreachable_unchecked() };
     };
@@ -164,7 +175,7 @@ fn json<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
         (input, marker) = header
             .typ
             .clone()
-            .decode(ctx.fork(input).with_num_rows(counter), )?;
+            .decode(ctx.fork(input).with_num_rows(counter), TypeHeader::Empty)?;
         header.mark = marker;
         header.discriminators = discriminators;
     }
@@ -179,7 +190,7 @@ fn json<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
     Ok((input, marker))
 }
 
-fn dynamic<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
+fn dynamic<'a>(ctx: &ParseContext<'a>, _x: DynamicHeader<'a>) -> IResult<&'a [u8], Mark<'a>> {
     let (mut input, num_types) = parse_varuint::<usize>(ctx.input)?;
 
     let mut type_names = Vec::with_capacity(num_types + 1);
@@ -232,7 +243,7 @@ fn dynamic<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
             input.len()
         );
         let marker;
-        (input, marker) = typ.decode(ctx.fork(input).with_num_rows(read_rows), )?;
+        (input, marker) = typ.decode(ctx.fork(input).with_num_rows(read_rows), TypeHeader::Empty)?;
         columns.push(marker);
     }
 
@@ -245,9 +256,10 @@ fn dynamic<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
     Ok((input, marker))
 }
 
-fn nullable<'a>(inner: Type<'a>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
+fn nullable<'a>(inner: Type<'a>, ctx: &ParseContext<'a>, header: TypeHeader<'a>) -> IResult<&'a [u8], Mark<'a>> {
     let (mask, input) = ctx.input.split_at(ctx.num_rows);
-    let (input, marker) = inner.decode(ctx.fork(input), )?;
+    // here we pass through the header
+    let (input, marker) = inner.decode(ctx.fork(input), header)?;
     let mark_nullable = Nullable {
         mask,
         data: Box::new(marker),
@@ -303,7 +315,7 @@ fn lc<'a>(inner: &Type<'a>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a
         let dict_marker;
         (input, dict_marker) = base_inner
             .clone()
-            .decode(ctx.fork(input).with_num_rows(cnt), )?;
+            .decode(ctx.fork(input).with_num_rows(cnt), TypeHeader::Empty)?;
         global_dictionary = Some(Box::new(dict_marker));
     }
 
@@ -313,7 +325,7 @@ fn lc<'a>(inner: &Type<'a>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a
         (input, cnt) = parse_u64(input)?;
 
         let dict_marker;
-        (input, dict_marker) = base_inner.decode(ctx.fork(input).with_num_rows(cnt), )?;
+        (input, dict_marker) = base_inner.decode(ctx.fork(input).with_num_rows(cnt), TypeHeader::Empty)?;
         additional_keys = Some(Box::new(dict_marker));
     }
 
@@ -326,7 +338,7 @@ fn lc<'a>(inner: &Type<'a>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a
         )));
     }
 
-    let (input, indices_marker) = index_type.decode(ctx.fork(input), )?;
+    let (input, indices_marker) = index_type.decode(ctx.fork(input), TypeHeader::Empty)?;
     let marker = Mark::LowCardinality(LowCardinality {
         is_nullable: inner.is_nullable(),
         indices: Box::new(indices_marker),
@@ -337,7 +349,7 @@ fn lc<'a>(inner: &Type<'a>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a
     Ok((input, marker))
 }
 
-fn variant<'a>(inner: Vec<Type<'a>>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
+fn variant<'a>(inner: Vec<Type<'a>>, ctx: &ParseContext<'a>, headers: Vec<TypeHeader<'a>>) -> IResult<&'a [u8], Mark<'a>> {
     const NULL_DISCR: u8 = 255;
     let (input, mode) = parse_u64::<u64>(ctx.input)?;
 
@@ -367,9 +379,9 @@ fn variant<'a>(inner: Vec<Type<'a>>, ctx: &ParseContext<'a>) -> IResult<&'a [u8]
 
     let mut markers = Vec::with_capacity(inner.len());
 
-    for (idx, typ) in inner.into_iter().enumerate() {
+    for ((idx, typ), header) in inner.into_iter().enumerate().zip(headers) {
         let marker;
-        (input, marker) = typ.decode(ctx.fork(input).with_num_rows(row_counts[idx]), )?;
+        (input, marker) = typ.decode(ctx.fork(input).with_num_rows(row_counts[idx]), header)?;
         markers.push(marker);
     }
 
@@ -382,14 +394,19 @@ fn variant<'a>(inner: Vec<Type<'a>>, ctx: &ParseContext<'a>) -> IResult<&'a [u8]
     Ok((input, marker))
 }
 
-fn map<'a>(key: Type<'a>, value: Type<'a>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
+fn map<'a>(
+    key: Type<'a>,
+    value: Type<'a>,
+    ctx: &ParseContext<'a>,
+    header: MapHeader<'a>,
+) -> IResult<&'a [u8], Mark<'a>> {
     let (input, offsets) = parse_offsets(ctx.input, ctx.num_rows)?;
     let n = offsets.last_or_default()?;
 
     debug!("Map got {n} rows");
 
-    let (input, keys) = key.decode(ctx.fork(input).with_num_rows(n), )?;
-    let (input, values) = value.decode(ctx.fork(input).with_num_rows(n), )?;
+    let (input, keys) = key.decode(ctx.fork(input).with_num_rows(n), header.key)?;
+    let (input, values) = value.decode(ctx.fork(input).with_num_rows(n), header.value)?;
 
     let marker = Mark::Map(Map {
         offsets,
@@ -400,12 +417,16 @@ fn map<'a>(key: Type<'a>, value: Type<'a>, ctx: &ParseContext<'a>) -> IResult<&'
     Ok((input, marker))
 }
 
-fn tuple<'a>(inner: Vec<Type<'a>>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
+fn tuple<'a>(
+    inner: Vec<Type<'a>>,
+    ctx: &ParseContext<'a>,
+    headers: Vec<TypeHeader<'a>>,
+) -> IResult<&'a [u8], Mark<'a>> {
     let mut markers = Vec::with_capacity(inner.len());
     let mut input = ctx.input;
-    for typ in inner {
+    for (typ, header) in inner.into_iter().zip(headers) {
         let marker;
-        (input, marker) = typ.decode(ctx.fork(input), )?;
+        (input, marker) = typ.decode(ctx.fork(input), header)?;
         markers.push(marker);
     }
 
@@ -413,7 +434,7 @@ fn tuple<'a>(inner: Vec<Type<'a>>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], 
     Ok((input, Mark::Tuple(marker)))
 }
 
-fn array<'a>(inner: Type<'a>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
+fn array<'a>(inner: Type<'a>, ctx: &ParseContext<'a>, header: TypeHeader<'a>) -> IResult<&'a [u8], Mark<'a>> {
     let (input, offsets) = parse_offsets(ctx.input, ctx.num_rows)?;
     let num_rows = offsets.last_or_default()?;
     debug!("Array num_rows: {}", num_rows);
@@ -429,7 +450,7 @@ fn array<'a>(inner: Type<'a>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<
         ));
     }
 
-    let (input, inner_block) = inner.decode(ctx.fork(input).with_num_rows(num_rows), )?;
+    let (input, inner_block) = inner.decode(ctx.fork(input).with_num_rows(num_rows), header)?;
     Ok((
         input,
         Mark::Array(Array {
@@ -455,6 +476,10 @@ fn string(ctx: ParseContext) -> IResult<&[u8], Mark> {
     Ok((input, Mark::String(strings)))
 }
 
+fn json_header<'a>(_ctx: ParseContext<'a>) -> IResult<&'a [u8], ()> {
+    todo!()
+}
+
 fn json_column_header<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], JsonColumnHeader<'a>> {
     let (input, version) = parse_u64(ctx.input)?;
     let (input, max_types) = parse_varuint(input)?;
@@ -477,7 +502,7 @@ fn json_column_header<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], JsonColum
     ))
 }
 
-fn nested<'a>(fields: Vec<Field<'a>>, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
+fn nested<'a>(fields: Vec<Field<'a>>, ctx: ParseContext<'a>, _header: NestedHeader<'a>) -> IResult<&'a [u8], Mark<'a>> {
     debug!("Decoding Nested with {} fields", fields.len());
 
     let mut inner_types = Vec::with_capacity(fields.len());
@@ -490,7 +515,7 @@ fn nested<'a>(fields: Vec<Field<'a>>, ctx: ParseContext<'a>) -> IResult<&'a [u8]
     let tuple_type = bt!(Tuple(inner_types));
     let array_of_tuples = t!(Array(tuple_type));
 
-    let (input, inner_mark) = array_of_tuples.decode(ctx, )?;
+    let (input, inner_mark) = array_of_tuples.decode(ctx, TypeHeader::Empty)?;
 
     let mark = Mark::Nested(Nested {
         col_names,

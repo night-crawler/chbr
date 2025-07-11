@@ -61,27 +61,94 @@ impl OffsetIndexPair for Offsets<'_> {
 }
 
 #[derive(Debug)]
+pub struct MapHeader <'a> {
+    pub key: TypeHeader<'a>,
+    pub value: TypeHeader<'a>,
+}
+
+
+#[derive(Debug)]
+pub struct DynamicHeader<'a> {
+    _phantom: std::marker::PhantomData<&'a ()>,
+}
+
+#[derive(Debug)]
+pub struct JsonHeader<'a> {
+    _phantom: std::marker::PhantomData<&'a ()>,
+}
+
+#[derive(Debug)]
+pub struct NestedHeader<'a> {
+    _phantom: std::marker::PhantomData<&'a ()>,
+}
+
+#[derive(Debug)]
 pub enum TypeHeader<'a> {
     Empty,
     Tuple(Vec<TypeHeader<'a>>),
-    Json(Box<JsonColumnHeader<'a>>),
-    Map(Box<TypeHeader<'a>>, Box<TypeHeader<'a>>),
+    Json(Box<JsonHeader<'a>>),
+    Map(Box<MapHeader<'a>>),
     Variant(Vec<TypeHeader<'a>>),
     Array(Box<TypeHeader<'a>>),
+    Dynamic(Box<DynamicHeader<'a>>),
+    Nullable(Box<TypeHeader<'a>>),
+    Nested(Box<NestedHeader<'a>>),
 }
 
-impl TypeHeader<'_> {
-    pub fn as_array(&self) -> &TypeHeader {
+impl<'a> TypeHeader<'a> {
+    pub fn into_array(self) -> TypeHeader<'a> {
         match self {
-            TypeHeader::Array(inner) => inner,
+            TypeHeader::Array(inner) => *inner,
             e => unreachable!("Wrong type header: {e:?}")
         }
     }
 
-    pub fn as_tuple(&self) -> &[TypeHeader] {
+    pub fn into_tuple(self) -> Vec<TypeHeader<'a>> {
         match self {
             TypeHeader::Tuple(t) => t,
             e => unreachable!("Wrong type header: {e:?}")
+        }
+    }
+
+    pub fn into_map(self) -> MapHeader<'a> {
+        match self {
+            TypeHeader::Map(map) => *map,
+            e => unreachable!("Wrong type header: {e:?}")
+        }
+    }
+
+    pub fn into_variant(self) -> Vec<TypeHeader<'a>> {
+        match self {
+            TypeHeader::Variant(variants) => variants,
+            e => unreachable!("Wrong type header: {e:?}")
+        }
+    }
+
+    pub fn into_json(self) -> JsonHeader<'a> {
+        match self {
+            TypeHeader::Json(json) => *json,
+            e => unreachable!("Wrong type header: {e:?}")
+        }
+    }
+
+    pub fn into_dynamic(self) -> DynamicHeader<'a> {
+        match self {
+            TypeHeader::Dynamic(d) => *d,
+            e => unreachable!("Wrong type header: {e:?}")
+        }
+    }
+
+    pub fn into_nested(self) -> NestedHeader<'a> {
+        match self {
+            TypeHeader::Nested(n) => *n,
+            _ => unreachable!("Wrong type header: {self:?}"),
+        }
+    }
+
+    pub fn into_nullable(self) -> TypeHeader<'a> {
+        match self {
+            TypeHeader::Nullable(inner) => *inner,
+            e => unreachable!("Wrong type header: {e:?}"),
         }
     }
 }
