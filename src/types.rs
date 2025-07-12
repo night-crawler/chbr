@@ -61,15 +61,15 @@ impl OffsetIndexPair for Offsets<'_> {
 }
 
 #[derive(Debug)]
-pub struct MapHeader <'a> {
+pub struct MapHeader<'a> {
     pub key: TypeHeader<'a>,
     pub value: TypeHeader<'a>,
 }
 
-
 #[derive(Debug)]
 pub struct DynamicHeader<'a> {
-    _phantom: std::marker::PhantomData<&'a ()>,
+    pub types: Vec<Type<'a>>,
+    pub headers: Vec<TypeHeader<'a>>,
 }
 
 #[derive(Debug)]
@@ -99,42 +99,44 @@ impl<'a> TypeHeader<'a> {
     pub fn into_array(self) -> TypeHeader<'a> {
         match self {
             TypeHeader::Array(inner) => *inner,
-            e => unreachable!("Wrong type header: {e:?}")
+            // TypeHeader::Empty => TypeHeader::Empty,
+            e => unreachable!("Wrong type header: {e:?}"),
         }
     }
 
     pub fn into_tuple(self) -> Vec<TypeHeader<'a>> {
         match self {
             TypeHeader::Tuple(t) => t,
-            e => unreachable!("Wrong type header: {e:?}")
+            e => unreachable!("Wrong type header: {e:?}"),
         }
     }
 
     pub fn into_map(self) -> MapHeader<'a> {
         match self {
             TypeHeader::Map(map) => *map,
-            e => unreachable!("Wrong type header: {e:?}")
+            // TypeHeader::Empty => MapHeader { key: TypeHeader::Empty, value: TypeHeader::Empty },
+            e => unreachable!("Wrong type header: {e:?}"),
         }
     }
 
     pub fn into_variant(self) -> Vec<TypeHeader<'a>> {
         match self {
             TypeHeader::Variant(variants) => variants,
-            e => unreachable!("Wrong type header: {e:?}")
+            e => unreachable!("Wrong type header: {e:?}"),
         }
     }
 
     pub fn into_json(self) -> JsonHeader<'a> {
         match self {
             TypeHeader::Json(json) => *json,
-            e => unreachable!("Wrong type header: {e:?}")
+            e => unreachable!("Wrong type header: {e:?}"),
         }
     }
 
     pub fn into_dynamic(self) -> DynamicHeader<'a> {
         match self {
             TypeHeader::Dynamic(d) => *d,
-            e => unreachable!("Wrong type header: {e:?}")
+            e => unreachable!("Wrong type header: {e:?}"),
         }
     }
 

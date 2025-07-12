@@ -25,8 +25,8 @@ pub enum Error {
 
     #[error("Not implemented: {0}")]
     NotImplemented(String),
-    
-    #[error("Programming error: {0}")]   
+
+    #[error("Programming error: {0}")]
     ProgrammingError(String),
 
     #[error("Utf8 decode error: {0}; bytes: {1:0x?}")]

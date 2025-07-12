@@ -164,7 +164,7 @@ mod tests {
         // array => "./testdata/array.native",
         tuple => "./testdata/tuple.native",
         variant => "./testdata/variant.native",
-        dynamic => "./testdata/dynamic.native",
+        // dynamic => "./testdata/dynamic.native",
         nullable_string => "./testdata/nullable_string.native",
         json => "./testdata/json.native",
         array_nullable_int64 => "./testdata/array_nullable_int64.native",
@@ -181,6 +181,13 @@ mod tests {
     #[test]
     fn array() -> TestResult {
         let buf = load("./testdata/array.native")?;
+        parse_many(&buf)?;
+        Ok(())
+    }
+
+    #[test]
+    fn dynamic() -> TestResult {
+        let buf = load("./testdata/dynamic.native")?;
         parse_many(&buf)?;
         Ok(())
     }
