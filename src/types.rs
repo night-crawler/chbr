@@ -94,7 +94,6 @@ impl<'a> TypeHeader<'a> {
     pub fn into_array(self) -> TypeHeader<'a> {
         match self {
             TypeHeader::Array(inner) => *inner,
-            // TypeHeader::Empty => TypeHeader::Empty,
             e => unreachable!("Wrong type header: {e:?}"),
         }
     }
@@ -191,6 +190,7 @@ pub enum Type<'a> {
     Ipv4,
     Ipv6,
 
+    /// Point is represented by its X and Y coordinates, stored as a Tuple(Float64, Float64).
     Point,
 
     /// Ring is a simple polygon without holes stored as an array of points: Array(Point).

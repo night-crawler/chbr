@@ -2,7 +2,10 @@ use std::hint::unreachable_unchecked;
 
 use log::debug;
 
-use crate::parse::header::{dynamic_header, map_header, nested_header, variant_header};
+use crate::parse::header::{
+    dynamic_header, map_header, multi_polygon_header, nested_header, point_header, polygon_header,
+    ring_header, tuple_header, variant_header,
+};
 use crate::types::{DynamicHeader, JsonHeader, MapHeader, TypeHeader};
 use crate::{
     error::Error,
@@ -23,31 +26,25 @@ use crate::{
 impl<'a> Type<'a> {
     pub(crate) fn decode_header(
         &self,
-        mut ctx: ParseContext<'a>,
+        ctx: &ParseContext<'a>,
     ) -> IResult<&'a [u8], TypeHeader<'a>> {
         debug!("Decoding header for type: {self:?}");
         match self {
             Type::Nullable(inner) => {
-                let (input, th) = inner.decode_header(ctx.clone())?;
-                return Ok((input, th));
+                let (input, th) = inner.decode_header(ctx)?;
+                Ok((input, th))
             }
             Type::Tuple(inner) => {
-                let mut headers = Vec::with_capacity(inner.len());
-                for typ in inner {
-                    let (input, th) = typ.decode_header(ctx.clone())?;
-                    headers.push(th);
-                    ctx = ctx.fork(input);
-                }
-
-                return Ok((ctx.input, TypeHeader::Tuple(headers)));
+                let (input, headers) = tuple_header(ctx.clone(), inner)?;
+                Ok((input, TypeHeader::Tuple(headers)))
             }
             Type::Map(key, val) => {
-                let (input, h) = map_header(&ctx, key, val)?;
-                return Ok((input, TypeHeader::Map(h.into())));
+                let (input, h) = map_header(ctx, key, val)?;
+                Ok((input, TypeHeader::Map(h.into())))
             }
             Type::Variant(inner) => {
-                let (input, headers) = variant_header(&ctx, inner)?;
-                return Ok((input, TypeHeader::Variant(headers)));
+                let (input, headers) = variant_header(ctx, inner)?;
+                Ok((input, TypeHeader::Variant(headers)))
             }
             Type::LowCardinality(_) => {
                 let (input, version) = parse_u64::<u64>(ctx.input)?;
@@ -58,30 +55,35 @@ impl<'a> Type<'a> {
                          {LOW_CARDINALITY_VERSION} is allowed"
                     )));
                 }
-                return Ok((input, TypeHeader::Empty));
+                Ok((input, TypeHeader::Empty))
             }
             Type::Array(inner) => {
-                let (input, th) = inner.decode_header(ctx.clone())?;
-                return Ok((input, TypeHeader::Array(th.into())));
+                let (input, th) = inner.decode_header(ctx)?;
+                Ok((input, TypeHeader::Array(th.into())))
             }
             Type::Dynamic => {
-                let (input, header) = dynamic_header(&ctx)?;
-                return Ok((input, TypeHeader::Dynamic(header.into())));
+                let (input, header) = dynamic_header(ctx)?;
+                Ok((input, TypeHeader::Dynamic(header.into())))
             }
             Type::Json => {
                 let (input, version) = parse_u64::<u64>(ctx.input)?;
                 debug!("JSON version: {version}");
                 // todo: parse
-                return Ok((input, TypeHeader::Empty));
+                Ok((input, TypeHeader::Empty))
             }
             Type::Nested(fields) => {
-                let (input, header) = nested_header(&ctx, fields)?;
-                return Ok((input, TypeHeader::Nested(header.into())));
+                let (input, header) = nested_header(ctx, fields)?;
+                Ok((input, TypeHeader::Nested(header)))
             }
-            _ => {}
+            Type::Point => Ok((ctx.input, point_header())),
+            Type::Ring | Type::LineString => Ok((ctx.input, ring_header())),
+            Type::Polygon | Type::MultiLineString => Ok((ctx.input, polygon_header())),
+            Type::MultiPolygon => Ok((ctx.input, multi_polygon_header())),
+            _ => {
+                debug!("Nothing decoded for {:?}", self);
+                Ok((ctx.input, TypeHeader::Empty))
+            }
         }
-        debug!("Nothing decoded for {:?}", self);
-        Ok((ctx.input, TypeHeader::Empty))
     }
 
     pub(crate) fn decode(
@@ -89,6 +91,8 @@ impl<'a> Type<'a> {
         ctx: ParseContext<'a>,
         header: TypeHeader<'a>,
     ) -> IResult<&'a [u8], Mark<'a>> {
+        debug!("Decoding type: {self:?} with header: {header:?}");
+
         if let Some(size) = self.size() {
             let (data, input) = ctx.input.split_at(size * ctx.num_rows);
             let marker = self.into_fixed_size_marker(data)?;
@@ -98,17 +102,10 @@ impl<'a> Type<'a> {
         match self {
             Type::String => string(ctx),
             Type::Array(inner) => array(*inner, &ctx, header.into_array()),
-            Type::Point => {
-                // Point is represented by its X and Y coordinates, stored as a Tuple(Float64, Float64).
-                let inner = t!(Tuple(vec![t!(Float64), t!(Float64)]));
-                inner.decode(ctx, TypeHeader::Empty)
-            }
-            #[expect(clippy::match_same_arms)]
-            Type::Ring => t!(Array(bt!(Point))).decode(ctx, header.into_array()),
-            Type::Polygon => t!(Array(bt!(Ring))).decode(ctx, header.into_array()),
-            Type::MultiPolygon => t!(Array(bt!(Polygon))).decode(ctx, header.into_array()),
-            Type::LineString => t!(Array(bt!(Point))).decode(ctx, header.into_array()),
-            Type::MultiLineString => t!(Array(bt!(LineString))).decode(ctx, header.into_array()),
+            Type::Point => t!(Tuple(vec![t!(Float64), t!(Float64)])).decode(ctx, header),
+            Type::Ring | Type::LineString => t!(Array(bt!(Point))).decode(ctx, header),
+            Type::Polygon | Type::MultiLineString => t!(Array(bt!(Ring))).decode(ctx, header),
+            Type::MultiPolygon => t!(Array(bt!(Polygon))).decode(ctx, header),
             Type::Tuple(inner) => tuple(inner, &ctx, header.into_tuple()),
             Type::Map(key, value) => map(*key, *value, &ctx, header.into_map()),
             Type::Variant(inner) => variant(inner, &ctx, header.into_variant()),
@@ -118,7 +115,7 @@ impl<'a> Type<'a> {
             Type::Json => json(&ctx, header.into_json()),
             Type::Nested(fields) => nested(fields, ctx, header.into_nested()),
             _ => {
-                todo!("Not implemented for {self:?}")
+                unimplemented!("decode is not implemented for {self:?}")
             }
         }
     }

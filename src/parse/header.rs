@@ -19,7 +19,7 @@ pub(crate) fn variant_header<'a>(
     let mut headers = Vec::with_capacity(inner.len());
     for typ in inner {
         let th;
-        (input, th) = typ.decode_header(ctx.fork(input))?;
+        (input, th) = typ.decode_header(&ctx.fork(input))?;
         headers.push(th);
     }
     Ok((input, headers))
@@ -61,11 +61,13 @@ pub(crate) fn dynamic_header<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Dy
     Ok((input, DynamicHeader { types, headers }))
 }
 
-
-pub(crate) fn map_header<'a>(ctx: &ParseContext<'a>, key: &Type<'a>, val: &Type<'a>) -> IResult<&'a [u8], MapHeader<'a>> {
-    let (input, key_th) = key.decode_header(ctx.clone())?;
-    let ctx = ctx.fork(input);
-    let (input, val_th) = val.decode_header(ctx)?;
+pub(crate) fn map_header<'a>(
+    ctx: &ParseContext<'a>,
+    key: &Type<'a>,
+    val: &Type<'a>,
+) -> IResult<&'a [u8], MapHeader<'a>> {
+    let (input, key_th) = key.decode_header(ctx)?;
+    let (input, val_th) = val.decode_header(&ctx.fork(input))?;
     let h = MapHeader {
         key: key_th,
         value: val_th,
@@ -74,14 +76,47 @@ pub(crate) fn map_header<'a>(ctx: &ParseContext<'a>, key: &Type<'a>, val: &Type<
     Ok((input, h))
 }
 
-pub(crate) fn nested_header<'a>(ctx: &ParseContext<'a>, fields: &[Field<'a>]) -> IResult<&'a [u8], Vec<TypeHeader<'a>>> {
+pub(crate) fn nested_header<'a>(
+    ctx: &ParseContext<'a>,
+    fields: &[Field<'a>],
+) -> IResult<&'a [u8], Vec<TypeHeader<'a>>> {
     let mut input = ctx.input;
     let mut headers = Vec::with_capacity(fields.len());
     for field in fields {
         let th;
-        (input, th) = field.typ.decode_header(ctx.fork(input))?;
+        (input, th) = field.typ.decode_header(&ctx.fork(input))?;
         headers.push(th);
     }
 
     Ok((input, headers))
+}
+
+pub(crate) fn point_header<'a>() -> TypeHeader<'a> {
+    TypeHeader::Tuple(vec![TypeHeader::Empty, TypeHeader::Empty])
+}
+
+pub(crate) fn ring_header<'a>() -> TypeHeader<'a> {
+    TypeHeader::Array(Box::new(point_header()))
+}
+
+pub(crate) fn polygon_header<'a>() -> TypeHeader<'a> {
+    TypeHeader::Array(Box::new(ring_header()))
+}
+
+pub(crate) fn multi_polygon_header<'a>() -> TypeHeader<'a> {
+    TypeHeader::Array(Box::new(polygon_header()))
+}
+
+pub(crate) fn tuple_header<'a>(
+    mut ctx: ParseContext<'a>,
+    inner: &[Type<'a>],
+) -> IResult<&'a [u8], Vec<TypeHeader<'a>>> {
+    let mut headers = Vec::with_capacity(inner.len());
+    for typ in inner {
+        let (input, th) = typ.decode_header(&ctx)?;
+        headers.push(th);
+        ctx = ctx.fork(input);
+    }
+
+    Ok((ctx.input, headers))
 }

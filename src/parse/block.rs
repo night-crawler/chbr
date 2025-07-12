@@ -103,7 +103,7 @@ pub fn parse_single(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
 
         let ctx = parse_context.fork(input);
         let header;
-        (input, header) = typ.decode_header(ctx.clone())?;
+        (input, header) = typ.decode_header(&ctx)?;
         debug!("Decoded header: `{header:?}` for column `{column_name}`");
 
         let marker;
@@ -174,6 +174,7 @@ mod tests {
         events => "./testdata/events.native",
         plain_strings => "./testdata/plain_strings.native",
         metric_activity => "./testdata/metric_activity.native",
+        // geo_sample => "./testdata/geo_sample.native",
         // array_of_nested => "./testdata/array_of_nested.native",
         // json_arr => "./testdata/json_arr.native",
     }
@@ -202,6 +203,13 @@ mod tests {
     #[test]
     fn array_of_nested() -> TestResult {
         let buf = load("./testdata/array_of_nested.native")?;
+        parse_many(&buf)?;
+        Ok(())
+    }
+
+    #[test]
+    fn geo_sample() -> TestResult {
+        let buf = load("./testdata/geo_sample.native")?;
         parse_many(&buf)?;
         Ok(())
     }
