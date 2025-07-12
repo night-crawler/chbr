@@ -2,8 +2,8 @@ use std::hint::unreachable_unchecked;
 
 use log::debug;
 
-use crate::parse::header::{dynamic_header, variant_header};
-use crate::types::{DynamicHeader, JsonHeader, MapHeader, NestedHeader, TypeHeader};
+use crate::parse::header::{dynamic_header, map_header, nested_header, variant_header};
+use crate::types::{DynamicHeader, JsonHeader, MapHeader, TypeHeader};
 use crate::{
     error::Error,
     macros::{bt, t},
@@ -42,13 +42,7 @@ impl<'a> Type<'a> {
                 return Ok((ctx.input, TypeHeader::Tuple(headers)));
             }
             Type::Map(key, val) => {
-                let (input, key_th) = key.decode_header(ctx.clone())?;
-                ctx = ctx.fork(input);
-                let (input, val_th) = val.decode_header(ctx)?;
-                let h = MapHeader {
-                    key: key_th,
-                    value: val_th,
-                };
+                let (input, h) = map_header(&ctx, key, val)?;
                 return Ok((input, TypeHeader::Map(h.into())));
             }
             Type::Variant(inner) => {
@@ -79,6 +73,10 @@ impl<'a> Type<'a> {
                 debug!("JSON version: {version}");
                 // todo: parse
                 return Ok((input, TypeHeader::Empty));
+            }
+            Type::Nested(fields) => {
+                let (input, header) = nested_header(&ctx, fields)?;
+                return Ok((input, TypeHeader::Nested(header.into())));
             }
             _ => {}
         }
@@ -474,7 +472,7 @@ fn json_column_header<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], JsonColum
 fn nested<'a>(
     fields: Vec<Field<'a>>,
     ctx: ParseContext<'a>,
-    _header: NestedHeader<'a>,
+    headers: Vec<TypeHeader<'a>>,
 ) -> IResult<&'a [u8], Mark<'a>> {
     debug!("Decoding Nested with {} fields", fields.len());
 
@@ -487,8 +485,9 @@ fn nested<'a>(
 
     let tuple_type = bt!(Tuple(inner_types));
     let array_of_tuples = t!(Array(tuple_type));
+    let header = TypeHeader::Array(Box::new(TypeHeader::Tuple(headers)));
 
-    let (input, inner_mark) = array_of_tuples.decode(ctx, TypeHeader::Empty)?;
+    let (input, inner_mark) = array_of_tuples.decode(ctx, header)?;
 
     let mark = Mark::Nested(Nested {
         col_names,

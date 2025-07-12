@@ -78,11 +78,6 @@ pub struct JsonHeader<'a> {
 }
 
 #[derive(Debug)]
-pub struct NestedHeader<'a> {
-    _phantom: std::marker::PhantomData<&'a ()>,
-}
-
-#[derive(Debug)]
 pub enum TypeHeader<'a> {
     Empty,
     Tuple(Vec<TypeHeader<'a>>),
@@ -92,7 +87,7 @@ pub enum TypeHeader<'a> {
     Array(Box<TypeHeader<'a>>),
     Dynamic(Box<DynamicHeader<'a>>),
     Nullable(Box<TypeHeader<'a>>),
-    Nested(Box<NestedHeader<'a>>),
+    Nested(Vec<TypeHeader<'a>>),
 }
 
 impl<'a> TypeHeader<'a> {
@@ -140,9 +135,9 @@ impl<'a> TypeHeader<'a> {
         }
     }
 
-    pub fn into_nested(self) -> NestedHeader<'a> {
+    pub fn into_nested(self) -> Vec<TypeHeader<'a>> {
         match self {
-            TypeHeader::Nested(n) => *n,
+            TypeHeader::Nested(n) => n,
             _ => unreachable!("Wrong type header: {self:?}"),
         }
     }

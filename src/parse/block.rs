@@ -174,7 +174,7 @@ mod tests {
         events => "./testdata/events.native",
         plain_strings => "./testdata/plain_strings.native",
         metric_activity => "./testdata/metric_activity.native",
-        array_of_nested => "./testdata/array_of_nested.native",
+        // array_of_nested => "./testdata/array_of_nested.native",
         // json_arr => "./testdata/json_arr.native",
     }
 
@@ -195,6 +195,13 @@ mod tests {
     #[test]
     fn json_arr() -> TestResult {
         let buf = load("./testdata/json_arr.native")?;
+        parse_many(&buf)?;
+        Ok(())
+    }
+
+    #[test]
+    fn array_of_nested() -> TestResult {
+        let buf = load("./testdata/array_of_nested.native")?;
         parse_many(&buf)?;
         Ok(())
     }

@@ -2,7 +2,7 @@ use crate::Error;
 use crate::parse::block::ParseContext;
 use crate::parse::typ::parse_type;
 use crate::parse::{IResult, parse_u64, parse_var_str, parse_varuint};
-use crate::types::{DynamicHeader, Type, TypeHeader};
+use crate::types::{DynamicHeader, Field, MapHeader, Type, TypeHeader};
 use log::debug;
 
 pub(crate) fn variant_header<'a>(
@@ -59,4 +59,29 @@ pub(crate) fn dynamic_header<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Dy
     (input, headers) = variant_header(&ctx.fork(input), &types)?;
 
     Ok((input, DynamicHeader { types, headers }))
+}
+
+
+pub(crate) fn map_header<'a>(ctx: &ParseContext<'a>, key: &Type<'a>, val: &Type<'a>) -> IResult<&'a [u8], MapHeader<'a>> {
+    let (input, key_th) = key.decode_header(ctx.clone())?;
+    let ctx = ctx.fork(input);
+    let (input, val_th) = val.decode_header(ctx)?;
+    let h = MapHeader {
+        key: key_th,
+        value: val_th,
+    };
+
+    Ok((input, h))
+}
+
+pub(crate) fn nested_header<'a>(ctx: &ParseContext<'a>, fields: &[Field<'a>]) -> IResult<&'a [u8], Vec<TypeHeader<'a>>> {
+    let mut input = ctx.input;
+    let mut headers = Vec::with_capacity(fields.len());
+    for field in fields {
+        let th;
+        (input, th) = field.typ.decode_header(ctx.fork(input))?;
+        headers.push(th);
+    }
+
+    Ok((input, headers))
 }
