@@ -74,7 +74,9 @@ pub struct DynamicHeader<'a> {
 
 #[derive(Debug)]
 pub struct JsonHeader<'a> {
-    _phantom: std::marker::PhantomData<&'a ()>,
+    pub paths: Vec<&'a str>,
+    pub col_headers: Vec<JsonColumnHeader<'a>>,
+    pub type_headers: Vec<TypeHeader<'a>>,
 }
 
 #[derive(Debug)]
@@ -108,7 +110,6 @@ impl<'a> TypeHeader<'a> {
     pub fn into_map(self) -> MapHeader<'a> {
         match self {
             TypeHeader::Map(map) => *map,
-            // TypeHeader::Empty => MapHeader { key: TypeHeader::Empty, value: TypeHeader::Empty },
             e => unreachable!("Wrong type header: {e:?}"),
         }
     }

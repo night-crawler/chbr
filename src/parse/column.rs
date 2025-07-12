@@ -1,11 +1,6 @@
-use std::hint::unreachable_unchecked;
-
 use log::debug;
 
-use crate::parse::header::{
-    dynamic_header, map_header, multi_polygon_header, nested_header, point_header, polygon_header,
-    ring_header, tuple_header, variant_header,
-};
+use crate::parse::header;
 use crate::types::{DynamicHeader, JsonHeader, MapHeader, TypeHeader};
 use crate::{
     error::Error,
@@ -15,12 +10,12 @@ use crate::{
         IResult,
         block::ParseContext,
         consts::{
-            HAS_ADDITIONAL_KEYS_BIT, LOW_CARDINALITY_VERSION, NEED_GLOBAL_DICTIONARY_BIT,
-            NEED_UPDATE_DICTIONARY_BIT, TUINT8, TUINT16, TUINT32, TUINT64,
+            HAS_ADDITIONAL_KEYS_BIT, NEED_GLOBAL_DICTIONARY_BIT, NEED_UPDATE_DICTIONARY_BIT,
+            TUINT8, TUINT16, TUINT32, TUINT64,
         },
-        parse_offsets, parse_u64, parse_var_str_bytes, parse_var_str_type, parse_varuint,
+        parse_offsets, parse_u64, parse_var_str_bytes, parse_varuint,
     },
-    types::{Field, JsonColumnHeader, OffsetIndexPair as _, Type},
+    types::{Field, OffsetIndexPair as _, Type},
 };
 
 impl<'a> Type<'a> {
@@ -35,50 +30,41 @@ impl<'a> Type<'a> {
                 Ok((input, th))
             }
             Type::Tuple(inner) => {
-                let (input, headers) = tuple_header(ctx.clone(), inner)?;
+                let (input, headers) = header::tuple(ctx, inner)?;
                 Ok((input, TypeHeader::Tuple(headers)))
             }
             Type::Map(key, val) => {
-                let (input, h) = map_header(ctx, key, val)?;
+                let (input, h) = header::map(ctx, key, val)?;
                 Ok((input, TypeHeader::Map(h.into())))
             }
             Type::Variant(inner) => {
-                let (input, headers) = variant_header(ctx, inner)?;
+                let (input, headers) = header::variant(ctx, inner)?;
                 Ok((input, TypeHeader::Variant(headers)))
             }
             Type::LowCardinality(_) => {
-                let (input, version) = parse_u64::<u64>(ctx.input)?;
-                debug!("LowCardinality version: {version}");
-                if version != LOW_CARDINALITY_VERSION {
-                    return Err(Error::Parse(format!(
-                        "LowCardinality version {version} is not supported, only \
-                         {LOW_CARDINALITY_VERSION} is allowed"
-                    )));
-                }
-                Ok((input, TypeHeader::Empty))
+                let (input, header) = header::lc(ctx)?;
+                Ok((input, header))
             }
             Type::Array(inner) => {
                 let (input, th) = inner.decode_header(ctx)?;
                 Ok((input, TypeHeader::Array(th.into())))
             }
             Type::Dynamic => {
-                let (input, header) = dynamic_header(ctx)?;
+                let (input, header) = header::dynamic(ctx)?;
                 Ok((input, TypeHeader::Dynamic(header.into())))
             }
             Type::Json => {
-                let (input, version) = parse_u64::<u64>(ctx.input)?;
-                debug!("JSON version: {version}");
-                // todo: parse
-                Ok((input, TypeHeader::Empty))
+                let (input, header) = header::json(ctx)?;
+                Ok((input, TypeHeader::Json(header.into())))
             }
             Type::Nested(fields) => {
-                let (input, header) = nested_header(ctx, fields)?;
+                let (input, header) = header::nested(ctx, fields)?;
                 Ok((input, TypeHeader::Nested(header)))
             }
-            Type::Point => Ok((ctx.input, point_header())),
-            Type::Ring | Type::LineString => Ok((ctx.input, ring_header())),
-            Type::Polygon | Type::MultiLineString => Ok((ctx.input, polygon_header())),
-            Type::MultiPolygon => Ok((ctx.input, multi_polygon_header())),
+            Type::Point => Ok((ctx.input, header::point())),
+            Type::Ring | Type::LineString => Ok((ctx.input, header::ring())),
+            Type::Polygon | Type::MultiLineString => Ok((ctx.input, header::polygon())),
+            Type::MultiPolygon => Ok((ctx.input, header::multi_polygon())),
             _ => {
                 debug!("Nothing decoded for {:?}", self);
                 Ok((ctx.input, TypeHeader::Empty))
@@ -100,7 +86,7 @@ impl<'a> Type<'a> {
         }
 
         match self {
-            Type::String => string(ctx),
+            Type::String => string(&ctx),
             Type::Array(inner) => array(*inner, &ctx, header.into_array()),
             Type::Point => t!(Tuple(vec![t!(Float64), t!(Float64)])).decode(ctx, header),
             Type::Ring | Type::LineString => t!(Array(bt!(Point))).decode(ctx, header),
@@ -121,29 +107,21 @@ impl<'a> Type<'a> {
     }
 }
 
-fn json<'a>(ctx: &ParseContext<'a>, _x: JsonHeader<'a>) -> IResult<&'a [u8], Mark<'a>> {
-    let (input, num_paths_old) = parse_varuint::<u64>(ctx.input)?;
-    debug!("num_paths_old: {num_paths_old}");
+fn json<'a>(
+    ctx: &ParseContext<'a>,
+    JsonHeader {
+        paths,
+        mut col_headers,
+        type_headers,
+    }: JsonHeader<'a>,
+) -> IResult<&'a [u8], Mark<'a>> {
+    let mut input = ctx.input;
 
-    let (input, num_paths) = parse_varuint(input)?;
-    let (mut input, paths) = string(ctx.fork(input).with_num_rows(num_paths))?;
-    let Mark::String(paths) = paths else {
-        unsafe { unreachable_unchecked() };
-    };
-
-    let mut headers = Vec::with_capacity(num_paths);
-
-    for _ in 0..num_paths {
-        let header;
-        (input, header) = json_column_header(&ctx.fork(input))?;
-        headers.push(header);
-    }
-
-    for header in &mut headers {
+    for (col_header, type_header) in col_headers.iter_mut().zip(type_headers) {
         let discriminators;
         (discriminators, input) = input.split_at(ctx.num_rows);
 
-        let offsets = &mut header.offsets;
+        let offsets = &mut col_header.offsets;
         let mut counter = 0usize;
 
         for (discriminator, offset) in discriminators.iter().copied().zip(offsets.iter_mut()) {
@@ -154,15 +132,18 @@ fn json<'a>(ctx: &ParseContext<'a>, _x: JsonHeader<'a>) -> IResult<&'a [u8], Mar
         }
 
         let marker;
-        (input, marker) = header
+        (input, marker) = col_header
             .typ
             .clone()
-            .decode(ctx.fork(input).with_num_rows(counter), TypeHeader::Empty)?;
-        header.mark = marker;
-        header.discriminators = discriminators;
+            .decode(ctx.fork(input).with_num_rows(counter), type_header)?;
+        col_header.mark = marker;
+        col_header.discriminators = discriminators;
     }
 
-    let marker = Mark::Json(Json { paths, headers });
+    let marker = Mark::Json(Json {
+        paths,
+        headers: col_headers,
+    });
 
     // https://github.com/ClickHouse/clickhouse-go/blob/71a2b475e899afe9626f40af513bcf25aa3098a2/lib/column/json.go#L569-L572
     let shared_data_size = ctx.num_rows * 8;
@@ -428,11 +409,7 @@ fn array<'a>(
     ))
 }
 
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "ParseContext can't be consumed"
-)]
-fn string(ctx: ParseContext) -> IResult<&[u8], Mark> {
+pub(super) fn string<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
     let mut input = ctx.input;
     let mut strings = Vec::with_capacity(ctx.num_rows);
     for _ in 0..ctx.num_rows {
@@ -442,28 +419,6 @@ fn string(ctx: ParseContext) -> IResult<&[u8], Mark> {
     }
 
     Ok((input, Mark::String(strings)))
-}
-
-fn json_column_header<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], JsonColumnHeader<'a>> {
-    let (input, version) = parse_u64(ctx.input)?;
-    let (input, max_types) = parse_varuint(input)?;
-    let (input, total_types) = parse_varuint(input)?;
-    let (input, typ) = parse_var_str_type(input)?;
-    let (input, variant) = parse_u64(input)?;
-
-    Ok((
-        input,
-        JsonColumnHeader {
-            path_version: version,
-            max_types,
-            total_types,
-            typ: Box::new(typ),
-            variant_version: variant,
-            mark: Mark::Empty,
-            discriminators: &[],
-            offsets: vec![0; ctx.num_rows],
-        },
-    ))
 }
 
 fn nested<'a>(
