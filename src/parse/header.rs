@@ -169,7 +169,13 @@ fn json_column<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], JsonColumnHeader
             variant_version: variant,
             mark: Mark::Empty,
             discriminators: &[],
-            offsets: vec![0; ctx.num_rows],
+
+            // The JSON header has been parsed and initialized with num_rows coming from the top
+            // level. In case it's a stand-alone JSON, then everything is fine: we could initialize
+            // the right number of offsets here. But if we have Array(JSON), then on this level
+            // we get num_rows of the Array itself, and not the number of rows we need to read of
+            // the JSON itself. For this reason, this field will be resized later.
+            offsets: vec![],
         },
     ))
 }

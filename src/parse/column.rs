@@ -116,12 +116,15 @@ fn json<'a>(
     }: JsonHeader<'a>,
 ) -> IResult<&'a [u8], Mark<'a>> {
     let mut input = ctx.input;
+    let num_rows = ctx.num_rows;
 
     for (col_header, type_header) in col_headers.iter_mut().zip(type_headers) {
         let discriminators;
-        (discriminators, input) = input.split_at(ctx.num_rows);
+        (discriminators, input) = input.split_at(num_rows);
 
         let offsets = &mut col_header.offsets;
+
+        offsets.resize(num_rows, 0);
         let mut counter = 0usize;
 
         for (discriminator, offset) in discriminators.iter().copied().zip(offsets.iter_mut()) {
@@ -146,7 +149,7 @@ fn json<'a>(
     });
 
     // https://github.com/ClickHouse/clickhouse-go/blob/71a2b475e899afe9626f40af513bcf25aa3098a2/lib/column/json.go#L569-L572
-    let shared_data_size = ctx.num_rows * 8;
+    let shared_data_size = num_rows * 8;
     let _shared_data;
     (_shared_data, input) = input.split_at(shared_data_size);
 

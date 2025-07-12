@@ -161,10 +161,10 @@ mod tests {
     test_file! {
         a_lot_of_types => "./testdata/sample.native",
         array_lc_string => "./testdata/array_lc_string.native",
-        // array => "./testdata/array.native",
+        array => "./testdata/array.native",
         tuple => "./testdata/tuple.native",
         variant => "./testdata/variant.native",
-        // dynamic => "./testdata/dynamic.native",
+        dynamic => "./testdata/dynamic.native",
         nullable_string => "./testdata/nullable_string.native",
         json => "./testdata/json.native",
         array_nullable_int64 => "./testdata/array_nullable_int64.native",
@@ -174,43 +174,8 @@ mod tests {
         events => "./testdata/events.native",
         plain_strings => "./testdata/plain_strings.native",
         metric_activity => "./testdata/metric_activity.native",
-        // geo_sample => "./testdata/geo_sample.native",
-        // array_of_nested => "./testdata/array_of_nested.native",
-        // json_arr => "./testdata/json_arr.native",
-    }
-
-    #[test]
-    fn array() -> TestResult {
-        let buf = load("./testdata/array.native")?;
-        parse_many(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn dynamic() -> TestResult {
-        let buf = load("./testdata/dynamic.native")?;
-        parse_many(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn json_arr() -> TestResult {
-        let buf = load("./testdata/json_arr.native")?;
-        parse_many(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn array_of_nested() -> TestResult {
-        let buf = load("./testdata/array_of_nested.native")?;
-        parse_many(&buf)?;
-        Ok(())
-    }
-
-    #[test]
-    fn geo_sample() -> TestResult {
-        let buf = load("./testdata/geo_sample.native")?;
-        parse_many(&buf)?;
-        Ok(())
+        geo_sample => "./testdata/geo_sample.native",
+        array_of_nested => "./testdata/array_of_nested.native",
+        json_arr => "./testdata/json_arr.native",
     }
 }
