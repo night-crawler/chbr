@@ -16,7 +16,7 @@ impl<'a> Mark<'a> {
     pub fn get(&'a self, index: usize) -> Option<Value<'a>> {
         match self {
             Mark::Empty => None,
-            Mark::Bool(is_null) => is_null.get(index).map(|&null| Value::Bool(null == 1)),
+            Mark::Bool(b) => b.get(index).map(|&val| Value::Bool(val == 1)),
             Mark::Int8(bv) => bv.get(index).copied().map(Value::Int8),
             Mark::Int16(bv) => bv.get(index).map(|v| v.get()).map(Value::Int16),
             Mark::Int32(bv) => bv.get(index).map(|v| v.get()).map(Value::Int32),
