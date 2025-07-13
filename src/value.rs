@@ -11,7 +11,7 @@ use rust_decimal::Decimal;
 use uuid::Uuid;
 use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
 
-use crate::mark::Variant;
+use crate::mark::{Dynamic, Variant};
 use crate::{
     Bf16Data, ByteExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data,
     Decimal64Data, Decimal128Data, Decimal256Data, I256, Ipv4Data, Ipv6Data, TinyRange, U256,
@@ -180,6 +180,11 @@ pub enum Value<'a> {
         mark: &'a Variant<'a>,
         slice_indices: TinyRange,
     },
+
+    DynamicSlice {
+        mark: &'a Dynamic<'a>,
+        slice_indices: TinyRange,
+    },
 }
 
 impl Value<'_> {
@@ -256,6 +261,7 @@ impl Value<'_> {
             Value::Json { .. } => "Json",
             Value::JsonSlice { .. } => "JsonSlice",
             Value::VariantSlice { .. } => "VariantSlice",
+            Value::DynamicSlice { .. } => "DynamicSlice",
         }
     }
 }
@@ -327,6 +333,7 @@ impl<'a> TryFrom<Value<'a>> for Ipv6Addr {
 impl<'a> TryFrom<Value<'a>> for Uuid {
     type Error = Error;
 
+    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Uuid(uuid_data) => {
@@ -1483,6 +1490,47 @@ impl<'a> TryFrom<Value<'a>> for VariantSliceIterator<'a> {
 }
 
 impl<'a> Iterator for VariantSliceIterator<'a> {
+    type Item = Value<'a>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        let index = self.slice_indices.next()?;
+        self.mark.get(index)
+    }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.slice_indices.size_hint()
+    }
+}
+
+pub struct DynamicSliceIterator<'a> {
+    mark: &'a Dynamic<'a>,
+    slice_indices: Range<usize>,
+}
+
+impl<'a> TryFrom<Value<'a>> for DynamicSliceIterator<'a> {
+    type Error = Error;
+
+    #[inline(always)]
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::DynamicSlice {
+                mark,
+                slice_indices,
+            } => Ok(Self {
+                mark,
+                slice_indices: slice_indices.into(),
+            }),
+            other => Err(Error::MismatchedType(
+                other.as_str(),
+                "DynamicSliceIterator",
+            )),
+        }
+    }
+}
+
+impl<'a> Iterator for DynamicSliceIterator<'a> {
     type Item = Value<'a>;
 
     #[inline(always)]

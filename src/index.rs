@@ -16,7 +16,7 @@ impl<'a> Mark<'a> {
     pub fn get(&'a self, index: usize) -> Option<Value<'a>> {
         match self {
             Mark::Empty => None,
-            Mark::Bool(is_null) => is_null.get(index).map(|&null| Value::Bool(null == 0)),
+            Mark::Bool(is_null) => is_null.get(index).map(|&null| Value::Bool(null == 1)),
             Mark::Int8(bv) => bv.get(index).copied().map(Value::Int8),
             Mark::Int16(bv) => bv.get(index).map(|v| v.get()).map(Value::Int16),
             Mark::Int32(bv) => bv.get(index).map(|v| v.get()).map(Value::Int32),
@@ -35,39 +35,12 @@ impl<'a> Mark<'a> {
                 let value = *bv.get(index)?;
                 Some(Value::BFloat16(value.into()))
             }
-            Mark::Decimal32(d) => {
-                if d.data.len() <= index {
-                    return None;
-                }
-                Some(Value::Decimal32(index, d))
-            }
-            Mark::Decimal64(d) => {
-                if d.data.len() <= index {
-                    return None;
-                }
-                Some(Value::Decimal64(index, d))
-            }
-            Mark::Decimal128(d) => {
-                if d.data.len() <= index {
-                    return None;
-                }
-                Some(Value::Decimal128(index, d))
-            }
-            Mark::Decimal256(d) => {
-                if d.data.len() <= index {
-                    return None;
-                }
-                Some(Value::Decimal256(index, d))
-            }
+            Mark::Decimal32(d) => d.get(index),
+            Mark::Decimal64(d) => d.get(index),
+            Mark::Decimal128(d) => d.get(index),
+            Mark::Decimal256(d) => d.get(index),
             Mark::String(strings) => Some(Value::String(strings.get(index)?)),
-            Mark::FixedString(f) => {
-                let offset = f.size * index;
-                let slice = f.data[offset..offset + f.size].rtrim_zeros();
-
-                Some(Value::String(unsafe {
-                    std::str::from_utf8_unchecked(slice)
-                }))
-            }
+            Mark::FixedString(fs) => fs.get(index),
             Mark::Uuid(bv) => {
                 let value = bv.get(index)?;
                 Some(Value::Uuid(value))
@@ -80,19 +53,8 @@ impl<'a> Mark<'a> {
                 let value = *bv.get(index)?;
                 Some(Value::Date32(value.into()))
             }
-            Mark::DateTime(d) => {
-                if d.data.len() < index {
-                    return None;
-                }
-                Some(Value::DateTime(index, d))
-            }
-            Mark::DateTime64(d) => {
-                if d.data.len() < index {
-                    return None;
-                }
-
-                Some(Value::DateTime64(index, d))
-            }
+            Mark::DateTime(d) => d.get(index),
+            Mark::DateTime64(d) => d.get(index),
             Mark::Ipv4(data) => {
                 let value = *data.get(index)?;
                 Some(Value::Ipv4(value.into()))
@@ -114,7 +76,7 @@ impl<'a> Mark<'a> {
                 if let Ok(index) = v.variants.binary_search_by_key(&variant, |(_, id)| *id) {
                     return Some(Value::String(v.variants[index].0));
                 }
-                // actually at this point it's broken, but we trust clickhouse!
+                // actually, at this point it's broken, but we trust clickhouse!
                 None
             }
             Mark::Enum16(v) => {
@@ -124,39 +86,14 @@ impl<'a> Mark<'a> {
                 }
                 None
             }
-            Mark::LowCardinality(lc) => {
-                // https://github.com/ClickHouse/clickhouse-go/blob/71a2b475e899afe9626f40af513bcf25aa3098a2/lib/column/lowcardinality.go#L191
-
-                let Some(keys) = &lc.additional_keys else {
-                    return None;
-                };
-
-                let value_index = lc.value_index(index)?;
-                if value_index == 0 && lc.is_nullable {
-                    return Some(Value::Empty);
-                }
-
-                // fast path for LowCardinality with String keys
-                if let Mark::String(keys) = keys.as_ref() {
-                    let value = keys.get(value_index).copied()?;
-                    return Some(Value::String(value));
-                }
-
-                Some(keys.get(value_index)?)
-            }
+            Mark::LowCardinality(lc) => lc.get(index),
             Mark::Array(a) => {
                 let (start, end) = a.offsets.offset_indices(index).unwrap()?;
                 Some(a.values.slice(start..end))
             }
 
             Mark::Tuple(inner) => Some(Value::Tuple { mark: inner, index }),
-            Mark::Nullable(n) => {
-                if n.mask.get(index) == Some(&1) {
-                    return Some(Value::Empty);
-                }
-
-                n.data.get(index)
-            }
+            Mark::Nullable(n) => n.get(index),
             Mark::Map(mark_map) => Some(Value::Map {
                 mark: mark_map,
                 index,
@@ -167,11 +104,7 @@ impl<'a> Mark<'a> {
                 let _ = n.array_of_tuples.get(index)?;
                 Some(Value::Nested { mark: n, index })
             }
-            Mark::Dynamic(d) => {
-                let discriminator = d.discriminators.get(index).copied()?;
-                let in_type_index = d.offsets.get(index).copied()?;
-                d.columns[discriminator].get(in_type_index)
-            }
+            Mark::Dynamic(d) => d.get(index),
             Mark::Json(j) => Some(Value::Json { mark: j, index }),
         }
     }
@@ -280,7 +213,10 @@ impl<'a> Mark<'a> {
                 mark,
                 slice_indices: idx.try_into().unwrap(),
             },
-            Mark::Dynamic(_) => todo!(),
+            Mark::Dynamic(mark) => Value::DynamicSlice {
+                mark,
+                slice_indices: idx.try_into().unwrap(),
+            },
             Mark::Json(mark) => JsonSlice {
                 mark,
                 slice_indices: idx.try_into().unwrap(),
@@ -599,7 +535,7 @@ mod tests {
     use testresult::TestResult;
     use zerocopy::little_endian::{I64, U64, U128};
 
-    use crate::value::{JsonSliceIterator, VariantSliceIterator};
+    use crate::value::{DynamicSliceIterator, JsonSliceIterator, VariantSliceIterator};
     use crate::{
         Bf16Data,
         common::load,
@@ -2199,6 +2135,85 @@ mod tests {
 
                 assert_eq!(total, 1, "some types were not parsed");
             }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn dynamic_arr() -> TestResult {
+        let data = load("./testdata/dynamic_arr.native")?;
+        let (_, block) = parse_single(&data)?;
+
+        // │  0 │ [1,2,3]                                       │
+        // │  1 │ ['a','b','c']                                 │
+        // │  2 │ [true,false,true]                             │
+        // │  3 │ [1.23,4.5600000000000005,7.89]                │
+        // │  4 │ ['2023-01-01','2023-01-02']                   │
+        // │  5 │ ['2023-01-01 12:00:00','2023-01-02 12:00:00'] │
+        // │  6 │ ['{"sample":true}']                           │
+
+        let marker = &block.markers[1];
+
+        assert_eq!(block.num_rows, 7, "Expected 7 rows in dynamic_arr");
+
+        {
+            let arr: DynamicSliceIterator = marker.get(0).unwrap().try_into()?;
+            let actual: Vec<i64> = arr.map(TryFrom::try_from).collect::<Result<_, _>>()?;
+            assert_eq!(actual, [1, 2, 3], "Row 0 mismatch");
+        }
+
+        {
+            let arr: DynamicSliceIterator = marker.get(1).unwrap().try_into()?;
+            let actual: Vec<&str> = arr.map(TryFrom::try_from).collect::<Result<_, _>>()?;
+            assert_eq!(actual, ["a", "b", "c"], "Row 1 mismatch");
+        }
+
+        {
+            let arr: DynamicSliceIterator = marker.get(2).unwrap().try_into()?;
+            let actual: Vec<bool> = arr.map(TryFrom::try_from).collect::<Result<_, _>>()?;
+            assert_eq!(actual, [true, false, true], "Row 2 mismatch");
+        }
+
+        {
+            let arr: DynamicSliceIterator = marker.get(3).unwrap().try_into()?;
+            let actual: Vec<f64> = arr.map(TryFrom::try_from).collect::<Result<_, _>>()?;
+            // 4.56: meh
+            let expected = [1.23, 4.5600000000000005, 7.89];
+            assert_eq!(actual, expected, "Row 3 mismatch");
+        }
+
+        {
+            let arr: DynamicSliceIterator = marker.get(4).unwrap().try_into()?;
+            let actual: Vec<chrono::NaiveDate> =
+                arr.map(TryFrom::try_from).collect::<Result<_, _>>()?;
+            let expected = [
+                chrono::NaiveDate::from_ymd_opt(2023, 1, 1).unwrap(),
+                chrono::NaiveDate::from_ymd_opt(2023, 1, 2).unwrap(),
+            ];
+            assert_eq!(actual, expected, "Row 4 mismatch");
+        }
+
+        {
+            let arr: DynamicSliceIterator = marker.get(5).unwrap().try_into()?;
+            let actual: Vec<chrono::DateTime<chrono_tz::Tz>> =
+                arr.map(TryFrom::try_from).collect::<Result<_, _>>()?;
+            let expected = [
+                chrono::DateTime::parse_from_rfc3339("2023-01-01T12:00:00+00:00")?
+                    .with_timezone(&chrono_tz::UTC),
+                chrono::DateTime::parse_from_rfc3339("2023-01-02T12:00:00+00:00")?
+                    .with_timezone(&chrono_tz::UTC),
+            ];
+            assert_eq!(actual, expected, "Row 5 mismatch");
+        }
+
+        {
+            let mut it: DynamicSliceIterator = marker.get(6).unwrap().try_into()?;
+            let json_it: JsonIterator = it.next().unwrap().try_into()?;
+
+            let mut paths: Vec<&str> = json_it.map(|(p, _)| p).collect();
+            paths.sort_unstable();
+            assert_eq!(paths, ["sample"], "Row 6 mismatch");
         }
 
         Ok(())
