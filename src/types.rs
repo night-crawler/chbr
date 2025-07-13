@@ -93,60 +93,68 @@ pub enum TypeHeader<'a> {
 }
 
 impl<'a> TypeHeader<'a> {
+    #[inline]
     pub fn into_array(self) -> TypeHeader<'a> {
         match self {
             TypeHeader::Array(inner) => *inner,
-            e => unreachable!("Wrong type header: {e:?}"),
+            e => unreachable!("Unexpected type header: {e:?}"),
         }
     }
 
+    #[inline]
     pub fn into_tuple(self) -> Vec<TypeHeader<'a>> {
         match self {
             TypeHeader::Tuple(t) => t,
-            e => unreachable!("Wrong type header: {e:?}"),
+            e => unreachable!("Unexpected type header: {e:?}"),
         }
     }
 
+    #[inline]
     pub fn into_map(self) -> MapHeader<'a> {
         match self {
             TypeHeader::Map(map) => *map,
-            e => unreachable!("Wrong type header: {e:?}"),
+            e => unreachable!("Unexpected type header: {e:?}"),
         }
     }
 
+    #[inline]
     pub fn into_variant(self) -> Vec<TypeHeader<'a>> {
         match self {
             TypeHeader::Variant(variants) => variants,
-            e => unreachable!("Wrong type header: {e:?}"),
+            e => unreachable!("Unexpected type header: {e:?}"),
         }
     }
 
+    #[inline]
     pub fn into_json(self) -> JsonHeader<'a> {
         match self {
             TypeHeader::Json(json) => *json,
-            e => unreachable!("Wrong type header: {e:?}"),
+            e => unreachable!("Unexpected type header: {e:?}"),
         }
     }
 
+    #[inline]
     pub fn into_dynamic(self) -> DynamicHeader<'a> {
         match self {
             TypeHeader::Dynamic(d) => *d,
-            e => unreachable!("Wrong type header: {e:?}"),
+            e => unreachable!("Unexpected type header: {e:?}"),
         }
     }
 
+    #[inline]
     pub fn into_nested(self) -> Vec<TypeHeader<'a>> {
         match self {
             TypeHeader::Nested(n) => n,
-            _ => unreachable!("Wrong type header: {self:?}"),
+            e => unreachable!("Unexpected type header: {e:?}"),
         }
     }
 
+    #[inline]
     pub fn into_nullable(self) -> TypeHeader<'a> {
         match self {
             TypeHeader::Nullable(inner) => *inner,
             TypeHeader::Empty => TypeHeader::Empty,
-            e => unreachable!("Wrong type header: {e:?}"),
+            e => unreachable!("Unexpected type header: {e:?}"),
         }
     }
 }
