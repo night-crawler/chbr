@@ -308,13 +308,13 @@ fn variant<'a>(
     let input = ctx.input;
 
     let (discriminators, mut input) = input.split_at(ctx.num_rows);
-    let mut offsets = Vec::with_capacity(ctx.num_rows);
+    let mut offsets = vec![0; ctx.num_rows];
     let mut row_counts = vec![0; inner.len()];
-    for &discriminator in discriminators {
-        offsets.push(row_counts[discriminator as usize]);
+    for (discriminator, offset) in discriminators.iter().copied().zip(offsets.iter_mut()) {
         if discriminator == NULL_DISCR {
             continue;
         }
+        *offset = row_counts[discriminator as usize];
         if let Some(count) = row_counts.get_mut(discriminator as usize) {
             *count += 1;
         } else {

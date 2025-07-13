@@ -177,5 +177,6 @@ mod tests {
         geo_sample => "./testdata/geo_sample.native",
         array_of_nested => "./testdata/array_of_nested.native",
         json_arr => "./testdata/json_arr.native",
+        variant_arr => "./testdata/variant_arr.native",
     }
 }

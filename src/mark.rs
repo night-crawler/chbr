@@ -7,6 +7,7 @@ use zerocopy::{
     little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128},
 };
 
+use crate::value::Value;
 use crate::{
     Bf16Data, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
     Decimal128Data, Decimal256Data, I256, Ipv4Data, Ipv6Data, U256, UuidData,
@@ -26,6 +27,17 @@ pub struct Variant<'a> {
     pub offsets: Vec<usize>,
     pub discriminators: &'a [u8],
     pub types: Vec<Mark<'a>>,
+}
+
+impl Variant<'_> {
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<Value> {
+        let discriminator = (*self.discriminators.get(index)?) as usize;
+        let in_type_index = *self.offsets.get(index)?;
+        self.types
+            .get(discriminator)
+            .and_then(|mark| mark.get(in_type_index))
+    }
 }
 
 #[derive(Debug)]

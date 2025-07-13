@@ -157,19 +157,15 @@ impl<'a> Mark<'a> {
 
                 n.data.get(index)
             }
-            Mark::Map(mark_map) => Some(Value::Map { mark_map, index }),
-            Mark::Variant(v) => {
-                let discriminator = (*v.discriminators.get(index)?) as usize;
-                let in_type_index = *v.offsets.get(index)?;
-                v.types[discriminator].get(in_type_index)
-            }
+            Mark::Map(mark_map) => Some(Value::Map {
+                mark: mark_map,
+                index,
+            }),
+            Mark::Variant(v) => v.get(index),
             Mark::Nested(n) => {
                 // verify the index is present
                 let _ = n.array_of_tuples.get(index)?;
-                Some(Value::Nested {
-                    mark_nested: n,
-                    index,
-                })
+                Some(Value::Nested { mark: n, index })
             }
             Mark::Dynamic(d) => {
                 let discriminator = d.discriminators.get(index).copied()?;
@@ -227,9 +223,9 @@ impl<'a> Mark<'a> {
                 precision: d.precision,
                 slice: &d.data[idx],
             },
-            Mark::FixedString(f) => Value::FixedStringSlice {
-                mark_fs: f,
-                indices: idx.try_into().unwrap(),
+            Mark::FixedString(mark) => Value::FixedStringSlice {
+                mark,
+                slice_indices: idx.try_into().unwrap(),
             },
 
             Mark::DateTime(d) => Value::DateTime32Slice {
@@ -248,42 +244,45 @@ impl<'a> Mark<'a> {
             | Mark::MultiPolygon(_)
             | Mark::LineString(_)
             | Mark::MultiLineString(_) => unreachable!("must be covered by array marker already"),
-            Mark::Enum8(e) => Value::Enum8Slice {
-                mark: e,
+            Mark::Enum8(mark) => Value::Enum8Slice {
+                mark,
                 slice_indices: idx.try_into().unwrap(),
             },
-            Mark::Enum16(e) => Value::Enum16Slice {
-                mark: e,
+            Mark::Enum16(mark) => Value::Enum16Slice {
+                mark,
                 slice_indices: idx.try_into().unwrap(),
             },
-            Mark::LowCardinality(lc) => Value::LowCardinalitySlice {
-                idx: idx.try_into().unwrap(),
-                mark_lc: lc,
+            Mark::LowCardinality(mark) => Value::LowCardinalitySlice {
+                slice_indices: idx.try_into().unwrap(),
+                mark,
             },
-            Mark::Array(a) => Value::ArraySlice {
-                mark_array: a,
+            Mark::Array(mark) => Value::ArraySlice {
+                mark,
+                range: idx.try_into().unwrap(),
+            },
+            Mark::Tuple(mark) => Value::TupleSlice {
+                mark,
                 slice_indices: idx.try_into().unwrap(),
             },
-            Mark::Tuple(inner) => Value::TupleSlice {
-                mark: inner,
+            Mark::Nullable(mark) => Value::NullableSlice {
+                mark,
                 slice_indices: idx.try_into().unwrap(),
             },
-            Mark::Nullable(n) => Value::NullableSlice {
-                mark_nullable: n,
+            Mark::Map(mark) => Value::MapSlice {
+                mark,
                 slice_indices: idx.try_into().unwrap(),
             },
-            Mark::Map(m) => Value::MapSlice {
-                mark_map: m,
+            Mark::Nested(mark) => Value::NestedSlice {
+                mark,
                 slice_indices: idx.try_into().unwrap(),
             },
-            Mark::Nested(n) => Value::NestedSlice {
-                mark_nested: n,
+            Mark::Variant(mark) => Value::VariantSlice {
+                mark,
                 slice_indices: idx.try_into().unwrap(),
             },
-            Mark::Variant { .. } => todo!(),
             Mark::Dynamic(_) => todo!(),
-            Mark::Json(j) => JsonSlice {
-                mark_json: j,
+            Mark::Json(mark) => JsonSlice {
+                mark,
                 slice_indices: idx.try_into().unwrap(),
             },
         }
@@ -598,9 +597,9 @@ mod tests {
     use half::bf16;
     use pretty_assertions::assert_eq;
     use testresult::TestResult;
-    use zerocopy::little_endian::{I64, U128};
+    use zerocopy::little_endian::{I64, U64, U128};
 
-    use crate::value::JsonSliceIterator;
+    use crate::value::{JsonSliceIterator, VariantSliceIterator};
     use crate::{
         Bf16Data,
         common::load,
@@ -2165,6 +2164,41 @@ mod tests {
                 "Mismatch in row {row_idx}: expected {:?}, got {:?}",
                 expected_paths, actual_paths
             );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn variant_arr() -> TestResult {
+        let data = load("./testdata/variant_arr.native")?;
+        let (_, block) = parse_single(&data)?;
+
+        // │  0 │ ['string value',12345,[1,2,3],'{"key":"value"}'] │
+        // │  1 │ ['another string',1232,[4,5],'{"array":[6,7]}']  │
+        // │  2 │ ['more strings',3333,[],'{"nested":{"a":"1"}}']  │
+        // │  3 │ ['test json',44,[8,9],'{"boolean":true}']        │
+
+        let variant_marker = &block.markers[1];
+        assert_eq!(block.num_rows, 4, "Expected 4 rows in variant_arr");
+
+        for i in 0..block.num_rows {
+            let it: VariantSliceIterator = variant_marker.get(i).unwrap().try_into()?;
+            for val in it {
+                let str_value: Result<&str, _> = val.clone().try_into();
+                let int_value: Result<i64, _> = val.clone().try_into();
+                let arr_value: Result<&[U64], _> = val.clone().try_into();
+                let json_value: Result<JsonIterator, _> = val.try_into();
+
+                // We should have exactly one successful conversion for each row.
+                // TODO: check actual values returned
+                let total = usize::from(str_value.is_ok())
+                    + usize::from(int_value.is_ok())
+                    + usize::from(arr_value.is_ok())
+                    + usize::from(json_value.is_ok());
+
+                assert_eq!(total, 1, "some types were not parsed");
+            }
         }
 
         Ok(())
