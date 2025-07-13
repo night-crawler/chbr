@@ -169,6 +169,11 @@ pub enum Value<'a> {
         mark: &'a Json<'a>,
         index: usize,
     },
+
+    JsonSlice {
+        mark_json: &'a Json<'a>,
+        slice_indices: TinyRange,
+    },
 }
 
 impl Value<'_> {
@@ -243,6 +248,7 @@ impl Value<'_> {
             Value::Enum16Slice { .. } => "Enum16SliceIterator",
             Value::BFloat16Slice(_) => "BFloat16Slice",
             Value::Json { .. } => "Json",
+            Value::JsonSlice { .. } => "JsonSlice",
         }
     }
 }
@@ -1384,3 +1390,49 @@ impl<'a> Iterator for JsonIterator<'a> {
         }
     }
 }
+
+pub struct JsonSliceIterator<'a> {
+    mark: &'a Json<'a>,
+    slice_indices: Range<usize>,
+}
+
+impl<'a> TryFrom<Value<'a>> for JsonSliceIterator<'a> {
+    type Error = Error;
+
+    #[inline(always)]
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::JsonSlice {
+                mark_json,
+                slice_indices,
+            } => Ok(Self {
+                mark: mark_json,
+                slice_indices: slice_indices.into(),
+            }),
+            other => Err(Error::MismatchedType(other.as_str(), "JsonSliceIterator")),
+        }
+    }
+}
+
+impl<'a> Iterator for JsonSliceIterator<'a> {
+    type Item = JsonIterator<'a>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        let index = self.slice_indices.next()?;
+
+        Some(JsonIterator {
+            mark: self.mark,
+            index,
+            path_index: 0,
+        })
+    }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.slice_indices.end - self.slice_indices.start;
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for JsonSliceIterator<'_> {}

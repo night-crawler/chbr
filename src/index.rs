@@ -3,6 +3,7 @@ use std::{marker::PhantomData, ops::Range};
 use chrono::{DateTime, TimeZone};
 use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
 
+use crate::value::Value::JsonSlice;
 use crate::{
     Bf16Data, ByteExt as _, Date16Data, Date32Data, I256, Ipv4Data, Ipv6Data, U256, UuidData,
     macros::define_slice_fns,
@@ -281,7 +282,10 @@ impl<'a> Mark<'a> {
             },
             Mark::Variant { .. } => todo!(),
             Mark::Dynamic(_) => todo!(),
-            Mark::Json { .. } => todo!(),
+            Mark::Json(j) => JsonSlice {
+                mark_json: j,
+                slice_indices: idx.try_into().unwrap(),
+            },
         }
     }
 
@@ -596,6 +600,7 @@ mod tests {
     use testresult::TestResult;
     use zerocopy::little_endian::{I64, U128};
 
+    use crate::value::JsonSliceIterator;
     use crate::{
         Bf16Data,
         common::load,
@@ -2114,6 +2119,52 @@ mod tests {
             for kv in map_it {
                 assert!(kv.is_ok(), "empty strings should not be Value::Empty");
             }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn json_arr() -> TestResult {
+        let data = load("./testdata/json_arr.native")?;
+        let (_, block) = parse_single(&data)?;
+
+        // ┌─id─┬─json_arr──────────────────────────────────────────────────────────────────────────────────┐
+        // │  0 │ ['{"key":"value"}','{"array":["1","2","3"]}']                                             │
+        // │  1 │ ['{"nested":{"a":"1","b":"2"}}','{"boolean":true}']                                       │
+        // │  2 │ ['{}','{"date":"2023-01-01"}']                                                            │
+        // │  3 │ ['{"datetime":"2023-01-01T12:00:00Z"}','{"uuid":"c995b14b-ff14-4f4f-8d25-8eb934785e90"}'] │
+        // └────┴───────────────────────────────────────────────────────────────────────────────────────────┘
+
+        let json_arr_marker = &block.markers[1];
+        assert_eq!(block.num_rows, 4, "Expected 4 rows in json_arr");
+
+        let expected: [&[_]; 4] = [
+            &["key", "array"],
+            &["nested.a", "nested.b", "boolean"],
+            &["date"],
+            &["datetime", "uuid"],
+        ];
+
+        for (row_idx, exp_paths) in expected.iter().enumerate() {
+            let slice: JsonSliceIterator = json_arr_marker.get(row_idx).unwrap().try_into()?;
+
+            let mut actual_paths: Vec<&str> = Vec::new();
+            for mut json_it in slice {
+                for (path, _value) in &mut json_it {
+                    actual_paths.push(path);
+                }
+            }
+
+            actual_paths.sort_unstable();
+            let mut expected_paths = exp_paths.to_vec();
+            expected_paths.sort_unstable();
+
+            assert_eq!(
+                actual_paths, expected_paths,
+                "Mismatch in row {row_idx}: expected {:?}, got {:?}",
+                expected_paths, actual_paths
+            );
         }
 
         Ok(())
