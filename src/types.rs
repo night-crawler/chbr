@@ -60,6 +60,105 @@ impl OffsetIndexPair for Offsets<'_> {
     }
 }
 
+#[derive(Debug)]
+pub struct MapHeader<'a> {
+    pub key: TypeHeader<'a>,
+    pub value: TypeHeader<'a>,
+}
+
+#[derive(Debug)]
+pub struct DynamicHeader<'a> {
+    pub types: Vec<Type<'a>>,
+    pub headers: Vec<TypeHeader<'a>>,
+}
+
+#[derive(Debug)]
+pub struct JsonHeader<'a> {
+    pub paths: Vec<&'a str>,
+    pub col_headers: Vec<JsonColumnHeader<'a>>,
+    pub type_headers: Vec<TypeHeader<'a>>,
+}
+
+#[derive(Debug)]
+pub enum TypeHeader<'a> {
+    Empty,
+    Tuple(Vec<TypeHeader<'a>>),
+    Json(Box<JsonHeader<'a>>),
+    Map(Box<MapHeader<'a>>),
+    Variant(Vec<TypeHeader<'a>>),
+    Array(Box<TypeHeader<'a>>),
+    Dynamic(Box<DynamicHeader<'a>>),
+    Nullable(Box<TypeHeader<'a>>),
+    Nested(Vec<TypeHeader<'a>>),
+}
+
+impl<'a> TypeHeader<'a> {
+    #[inline]
+    pub fn into_array(self) -> TypeHeader<'a> {
+        match self {
+            TypeHeader::Array(inner) => *inner,
+            e => unreachable!("Unexpected type header: {e:?}"),
+        }
+    }
+
+    #[inline]
+    pub fn into_tuple(self) -> Vec<TypeHeader<'a>> {
+        match self {
+            TypeHeader::Tuple(t) => t,
+            e => unreachable!("Unexpected type header: {e:?}"),
+        }
+    }
+
+    #[inline]
+    pub fn into_map(self) -> MapHeader<'a> {
+        match self {
+            TypeHeader::Map(map) => *map,
+            e => unreachable!("Unexpected type header: {e:?}"),
+        }
+    }
+
+    #[inline]
+    pub fn into_variant(self) -> Vec<TypeHeader<'a>> {
+        match self {
+            TypeHeader::Variant(variants) => variants,
+            e => unreachable!("Unexpected type header: {e:?}"),
+        }
+    }
+
+    #[inline]
+    pub fn into_json(self) -> JsonHeader<'a> {
+        match self {
+            TypeHeader::Json(json) => *json,
+            e => unreachable!("Unexpected type header: {e:?}"),
+        }
+    }
+
+    #[inline]
+    pub fn into_dynamic(self) -> DynamicHeader<'a> {
+        match self {
+            TypeHeader::Dynamic(d) => *d,
+            e => unreachable!("Unexpected type header: {e:?}"),
+        }
+    }
+
+    #[inline]
+    pub fn into_nested(self) -> Vec<TypeHeader<'a>> {
+        match self {
+            TypeHeader::Nested(n) => n,
+            e => unreachable!("Unexpected type header: {e:?}"),
+        }
+    }
+
+    #[inline]
+    pub fn into_nullable(self) -> TypeHeader<'a> {
+        match self {
+            TypeHeader::Nullable(inner) => *inner,
+            TypeHeader::Empty => TypeHeader::Empty,
+            e => unreachable!("Unexpected type header: {e:?}"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type<'a> {
     Bool,
@@ -100,6 +199,7 @@ pub enum Type<'a> {
     Ipv4,
     Ipv6,
 
+    /// Point is represented by its X and Y coordinates, stored as a Tuple(Float64, Float64).
     Point,
 
     /// Ring is a simple polygon without holes stored as an array of points: Array(Point).

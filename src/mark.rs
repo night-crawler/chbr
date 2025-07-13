@@ -7,12 +7,34 @@ use zerocopy::{
     little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128},
 };
 
+use crate::value::Value;
 use crate::{
-    Bf16Data, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
-    Decimal128Data, Decimal256Data, I256, Ipv4Data, Ipv6Data, U256, UuidData,
+    Bf16Data, ByteExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data,
+    Decimal64Data, Decimal128Data, Decimal256Data, I256, Ipv4Data, Ipv6Data, U256, UuidData,
     slice::ByteView,
     types::{JsonColumnHeader, Offsets},
 };
+
+macro_rules! impl_get {
+    ($ty:ident, $variant:ident) => {
+        impl<'a> $ty<'a> {
+            #[inline]
+            pub fn get(&'a self, index: usize) -> Option<Value<'a>> {
+                if self.data.len() <= index {
+                    None
+                } else {
+                    Some(Value::$variant(index, self))
+                }
+            }
+        }
+    };
+}
+
+macro_rules! impl_get_many {
+    ($($ty:ident),+ $(,)?) => {
+        $( impl_get!($ty, $ty); )+
+    };
+}
 
 #[derive(Debug)]
 pub struct Map<'a> {
@@ -26,6 +48,17 @@ pub struct Variant<'a> {
     pub offsets: Vec<usize>,
     pub discriminators: &'a [u8],
     pub types: Vec<Mark<'a>>,
+}
+
+impl Variant<'_> {
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<Value> {
+        let discriminator = (*self.discriminators.get(index)?) as usize;
+        let in_type_index = *self.offsets.get(index)?;
+        self.types
+            .get(discriminator)
+            .and_then(|mark| mark.get(in_type_index))
+    }
 }
 
 #[derive(Debug)]
@@ -48,6 +81,27 @@ impl LowCardinality<'_> {
         };
 
         Some(value_index)
+    }
+
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<Value> {
+        // https://github.com/ClickHouse/clickhouse-go/blob/71a2b475e899afe9626f40af513bcf25aa3098a2/lib/column/lowcardinality.go#L191
+        let Some(keys) = &self.additional_keys else {
+            return None;
+        };
+
+        let value_index = self.value_index(index)?;
+        if value_index == 0 && self.is_nullable {
+            return Some(Value::Empty);
+        }
+
+        // fast path for LowCardinality with String keys
+        if let Mark::String(keys) = keys.as_ref() {
+            let value = keys.get(value_index).copied()?;
+            return Some(Value::String(value));
+        }
+
+        keys.get(value_index)
     }
 }
 
@@ -99,6 +153,18 @@ pub struct FixedString<'a> {
     pub data: &'a [u8],
 }
 
+impl FixedString<'_> {
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<Value> {
+        let offset = self.size * index;
+        let slice = self.data[offset..offset + self.size].rtrim_zeros();
+
+        Some(Value::String(unsafe {
+            std::str::from_utf8_unchecked(slice)
+        }))
+    }
+}
+
 #[derive(Debug)]
 pub struct DateTime<'a> {
     pub tz: Tz,
@@ -111,6 +177,10 @@ pub struct DateTime64<'a> {
     pub tz: Tz,
     pub data: ByteView<'a, DateTime64Data>,
 }
+
+impl_get_many!(
+    Decimal32, Decimal64, Decimal128, Decimal256, DateTime, DateTime64
+);
 
 #[derive(Debug)]
 pub struct Enum8<'a> {
@@ -131,10 +201,32 @@ pub struct Dynamic<'a> {
     pub columns: Vec<Mark<'a>>,
 }
 
+impl Dynamic<'_> {
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<Value> {
+        let discriminator = self.discriminators.get(index).copied()?;
+        let in_type_index = self.offsets.get(index).copied()?;
+        self.columns
+            .get(discriminator)
+            .and_then(|m| m.get(in_type_index))
+    }
+}
+
 #[derive(Debug)]
 pub struct Nullable<'a> {
     pub mask: &'a [u8],
     pub data: Box<Mark<'a>>,
+}
+
+impl Nullable<'_> {
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<Value> {
+        if self.mask.get(index) == Some(&1) {
+            return Some(Value::Empty);
+        }
+
+        self.data.get(index)
+    }
 }
 
 #[derive(Debug)]

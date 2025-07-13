@@ -10,6 +10,7 @@ use crate::{
 pub mod block;
 pub mod column;
 mod consts;
+pub mod header;
 pub mod typ;
 
 pub type IResult<I, O, E = Error> = Result<(I, O), E>;

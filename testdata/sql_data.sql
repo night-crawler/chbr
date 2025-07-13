@@ -983,3 +983,68 @@ insert into sample_128 (id, u128_single, u128_array, i128_single, i128_array) va
             toInt128('-98765432109876543210987654321098')
         ]
     );
+
+
+SET enable_json_type = 1;
+SET allow_experimental_variant_type = 1;
+SET use_variant_as_common_type = 1;
+drop table if exists variant_arr;
+create table variant_arr
+(
+    id Int64,
+    variant Array(Variant(String, UInt64, Array(UInt64), JSON))
+) engine = MergeTree order by tuple();
+
+INSERT INTO variant_arr (id, variant)
+VALUES (0,
+        array(
+                CAST('string value', 'Variant(String, UInt64, Array(UInt64), JSON)'),
+                CAST(toUInt64(12345), 'Variant(String, UInt64, Array(UInt64), JSON)'),
+                CAST(array(toUInt64(1), toUInt64(2), toUInt64(3)),
+                     'Variant(String, UInt64, Array(UInt64), JSON)'),
+                CAST('{"key":"value"}'::JSON,
+                     'Variant(String, UInt64, Array(UInt64), JSON)')
+        )),
+       (1,
+        array(
+                CAST('another string', 'Variant(String, UInt64, Array(UInt64), JSON)'),
+                CAST(toUInt64(1232), 'Variant(String, UInt64, Array(UInt64), JSON)'),
+                CAST(array(toUInt64(4), toUInt64(5)),
+                     'Variant(String, UInt64, Array(UInt64), JSON)'),
+                CAST('{"array":[6,7]}'::JSON,
+                     'Variant(String, UInt64, Array(UInt64), JSON)')
+        )),
+       (2,
+        array(
+                CAST('more strings', 'Variant(String, UInt64, Array(UInt64), JSON)'),
+                CAST(toUInt64(3333), 'Variant(String, UInt64, Array(UInt64), JSON)'),
+                CAST(CAST(array(), 'Array(UInt64)'),
+                     'Variant(String, UInt64, Array(UInt64), JSON)'),
+                CAST('{"nested":{"a":1}}'::JSON,
+                     'Variant(String, UInt64, Array(UInt64), JSON)')
+        )),
+       (3,
+        array(
+                CAST('test json', 'Variant(String, UInt64, Array(UInt64), JSON)'),
+                CAST(toUInt64(44), 'Variant(String, UInt64, Array(UInt64), JSON)'),
+                CAST(array(toUInt64(8), toUInt64(9)),
+                     'Variant(String, UInt64, Array(UInt64), JSON)'),
+                CAST('{"boolean":true}'::JSON,
+                     'Variant(String, UInt64, Array(UInt64), JSON)')
+        ));
+
+create table dynamic_arr
+(
+    id Int64,
+    arr Array(Dynamic)
+) engine = MergeTree order by tuple();
+
+insert into dynamic_arr (id, arr)
+values (0, [1, 2, 3]),
+       (1, ['a', 'b', 'c']),
+       (2, [true, false, true]),
+       (3, [1.23, 4.56, 7.89]),
+       (4, [toDate('2023-01-01'), toDate('2023-01-02')]),
+       (5, [toDateTime('2023-01-01 12:00:00'), toDateTime('2023-01-02 12:00:00')])
+       (6, ['{"sample": true}'::JSON])
+;

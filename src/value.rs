@@ -11,6 +11,7 @@ use rust_decimal::Decimal;
 use uuid::Uuid;
 use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
 
+use crate::mark::{Dynamic, Variant};
 use crate::{
     Bf16Data, ByteExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data,
     Decimal64Data, Decimal128Data, Decimal256Data, I256, Ipv4Data, Ipv6Data, TinyRange, U256,
@@ -107,13 +108,13 @@ pub enum Value<'a> {
     Ipv6Slice(&'a [Ipv6Data]),
 
     LowCardinalitySlice {
-        idx: TinyRange,
-        mark_lc: &'a LowCardinality<'a>,
+        slice_indices: TinyRange,
+        mark: &'a LowCardinality<'a>,
     },
 
     ArraySlice {
-        mark_array: &'a Array<'a>,
-        slice_indices: TinyRange,
+        mark: &'a Array<'a>,
+        range: TinyRange,
     },
 
     Tuple {
@@ -121,12 +122,12 @@ pub enum Value<'a> {
         mark: &'a Tuple<'a>,
     },
     Map {
-        mark_map: &'a Map<'a>,
+        mark: &'a Map<'a>,
         index: usize,
     },
 
     MapSlice {
-        mark_map: &'a Map<'a>,
+        mark: &'a Map<'a>,
         slice_indices: TinyRange,
     },
 
@@ -136,23 +137,23 @@ pub enum Value<'a> {
     },
 
     NullableSlice {
-        mark_nullable: &'a Nullable<'a>,
+        mark: &'a Nullable<'a>,
         slice_indices: TinyRange,
     },
 
     Nested {
-        mark_nested: &'a Nested<'a>,
+        mark: &'a Nested<'a>,
         index: usize,
     },
 
     NestedSlice {
-        mark_nested: &'a Nested<'a>,
+        mark: &'a Nested<'a>,
         slice_indices: TinyRange,
     },
 
     FixedStringSlice {
-        mark_fs: &'a FixedString<'a>,
-        indices: TinyRange,
+        mark: &'a FixedString<'a>,
+        slice_indices: TinyRange,
     },
 
     Enum8Slice {
@@ -168,6 +169,21 @@ pub enum Value<'a> {
     Json {
         mark: &'a Json<'a>,
         index: usize,
+    },
+
+    JsonSlice {
+        mark: &'a Json<'a>,
+        slice_indices: TinyRange,
+    },
+
+    VariantSlice {
+        mark: &'a Variant<'a>,
+        slice_indices: TinyRange,
+    },
+
+    DynamicSlice {
+        mark: &'a Dynamic<'a>,
+        slice_indices: TinyRange,
     },
 }
 
@@ -243,6 +259,9 @@ impl Value<'_> {
             Value::Enum16Slice { .. } => "Enum16SliceIterator",
             Value::BFloat16Slice(_) => "BFloat16Slice",
             Value::Json { .. } => "Json",
+            Value::JsonSlice { .. } => "JsonSlice",
+            Value::VariantSlice { .. } => "VariantSlice",
+            Value::DynamicSlice { .. } => "DynamicSlice",
         }
     }
 }
@@ -314,6 +333,7 @@ impl<'a> TryFrom<Value<'a>> for Ipv6Addr {
 impl<'a> TryFrom<Value<'a>> for Uuid {
     type Error = Error;
 
+    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Uuid(uuid_data) => {
@@ -503,15 +523,18 @@ impl<'a> TryFrom<Value<'a>> for LowCardinalitySliceIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::LowCardinalitySlice { idx, mark_lc: lc } => {
-                let Some(additional_keys) = lc.additional_keys.as_ref() else {
+            Value::LowCardinalitySlice {
+                slice_indices,
+                mark,
+            } => {
+                let Some(additional_keys) = mark.additional_keys.as_ref() else {
                     return Err(Error::MismatchedType(
                         "LowCardinalitySliceIterator",
                         "LowCardinalitySlice with no additional keys",
                     ));
                 };
 
-                let sliced = lc.indices.slice(idx.into());
+                let sliced = mark.indices.slice(slice_indices.into());
 
                 Ok(Self {
                     indices: SliceUsizeIterator::try_from(sliced)?,
@@ -549,8 +572,8 @@ impl<'a, T> TryFrom<Value<'a>> for ArraySliceIterator<'a, T> {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::ArraySlice {
-                mark_array,
-                slice_indices,
+                mark: mark_array,
+                range: slice_indices,
             } => Ok(Self {
                 mark_array,
                 slice_indices: slice_indices.into(),
@@ -664,7 +687,10 @@ where
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::Map { mark_map, index } => {
+            Value::Map {
+                mark: mark_map,
+                index,
+            } => {
                 // Resolve (start, end) for the requested row in the Map column
                 let (start, end) = mark_map
                     .offsets
@@ -731,7 +757,7 @@ where
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::MapSlice {
-                mark_map,
+                mark: mark_map,
                 slice_indices,
             } => Ok(Self {
                 offsets: &mark_map.offsets,
@@ -949,7 +975,7 @@ impl<'a> TryFrom<Value<'a>> for NullableSliceIterator<'a> {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::NullableSlice {
-                mark_nullable,
+                mark: mark_nullable,
                 slice_indices,
             } => Ok(Self {
                 mark_nullable,
@@ -1102,7 +1128,10 @@ impl<'a> TryFrom<Value<'a>> for NestedIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::Nested { mark_nested, index } => {
+            Value::Nested {
+                mark: mark_nested,
+                index,
+            } => {
                 let value = mark_nested
                     .array_of_tuples
                     .get(index)
@@ -1166,7 +1195,7 @@ impl<'a> TryFrom<Value<'a>> for NestedSliceIterator<'a> {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::NestedSlice {
-                mark_nested,
+                mark: mark_nested,
                 slice_indices,
             } => Ok(Self {
                 col_names: &mark_nested.col_names,
@@ -1207,7 +1236,7 @@ impl<'a> Iterator for NestedSliceIterator<'a> {
 impl ExactSizeIterator for NestedSliceIterator<'_> {}
 
 pub struct FixedStringSliceIterator<'a> {
-    mark_fs: &'a FixedString<'a>,
+    mark: &'a FixedString<'a>,
     slice_indices: Range<usize>,
 }
 
@@ -1217,8 +1246,11 @@ impl<'a> TryFrom<Value<'a>> for FixedStringSliceIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::FixedStringSlice { mark_fs, indices } => Ok(Self {
-                mark_fs,
+            Value::FixedStringSlice {
+                mark,
+                slice_indices: indices,
+            } => Ok(Self {
+                mark,
                 slice_indices: indices.into(),
             }),
             other => Err(Error::MismatchedType(
@@ -1234,14 +1266,14 @@ impl<'a> Iterator for FixedStringSliceIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let slice_idx = self.slice_indices.next()?;
-        let start = slice_idx * self.mark_fs.size;
-        let end = start + self.mark_fs.size;
+        let start = slice_idx * self.mark.size;
+        let end = start + self.mark.size;
 
-        if end > self.mark_fs.data.len() {
+        if end > self.mark.data.len() {
             return None;
         }
 
-        let slice = &self.mark_fs.data[start..end].rtrim_zeros();
+        let slice = &self.mark.data[start..end].rtrim_zeros();
         Some(unsafe { std::str::from_utf8_unchecked(slice) })
     }
 
@@ -1382,5 +1414,133 @@ impl<'a> Iterator for JsonIterator<'a> {
 
             break Some((path, value));
         }
+    }
+}
+
+pub struct JsonSliceIterator<'a> {
+    mark: &'a Json<'a>,
+    slice_indices: Range<usize>,
+}
+
+impl<'a> TryFrom<Value<'a>> for JsonSliceIterator<'a> {
+    type Error = Error;
+
+    #[inline(always)]
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::JsonSlice {
+                mark: mark_json,
+                slice_indices,
+            } => Ok(Self {
+                mark: mark_json,
+                slice_indices: slice_indices.into(),
+            }),
+            other => Err(Error::MismatchedType(other.as_str(), "JsonSliceIterator")),
+        }
+    }
+}
+
+impl<'a> Iterator for JsonSliceIterator<'a> {
+    type Item = JsonIterator<'a>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        let index = self.slice_indices.next()?;
+
+        Some(JsonIterator {
+            mark: self.mark,
+            index,
+            path_index: 0,
+        })
+    }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.slice_indices.end - self.slice_indices.start;
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for JsonSliceIterator<'_> {}
+
+pub struct VariantSliceIterator<'a> {
+    mark: &'a Variant<'a>,
+    slice_indices: Range<usize>,
+}
+
+impl<'a> TryFrom<Value<'a>> for VariantSliceIterator<'a> {
+    type Error = Error;
+
+    #[inline(always)]
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::VariantSlice {
+                mark,
+                slice_indices,
+            } => Ok(Self {
+                mark,
+                slice_indices: slice_indices.into(),
+            }),
+            other => Err(Error::MismatchedType(
+                other.as_str(),
+                "VariantSliceIterator",
+            )),
+        }
+    }
+}
+
+impl<'a> Iterator for VariantSliceIterator<'a> {
+    type Item = Value<'a>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        let index = self.slice_indices.next()?;
+        self.mark.get(index)
+    }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.slice_indices.size_hint()
+    }
+}
+
+pub struct DynamicSliceIterator<'a> {
+    mark: &'a Dynamic<'a>,
+    slice_indices: Range<usize>,
+}
+
+impl<'a> TryFrom<Value<'a>> for DynamicSliceIterator<'a> {
+    type Error = Error;
+
+    #[inline(always)]
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::DynamicSlice {
+                mark,
+                slice_indices,
+            } => Ok(Self {
+                mark,
+                slice_indices: slice_indices.into(),
+            }),
+            other => Err(Error::MismatchedType(
+                other.as_str(),
+                "DynamicSliceIterator",
+            )),
+        }
+    }
+}
+
+impl<'a> Iterator for DynamicSliceIterator<'a> {
+    type Item = Value<'a>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        let index = self.slice_indices.next()?;
+        self.mark.get(index)
+    }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.slice_indices.size_hint()
     }
 }
