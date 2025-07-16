@@ -11,15 +11,14 @@ use rust_decimal::Decimal;
 use uuid::Uuid;
 use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
 
-use crate::mark::{Dynamic, Variant};
 use crate::{
     Bf16Data, ByteExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data,
     Decimal64Data, Decimal128Data, Decimal256Data, I256, Ipv4Data, Ipv6Data, TinyRange, U256,
     UuidData,
     error::Error,
     mark::{
-        Array, DateTime, DateTime64, Decimal32, Decimal64, Decimal128, Decimal256, Enum8, Enum16,
-        FixedString, Json, LowCardinality, Map, Mark, Nested, Nullable, Tuple,
+        Array, DateTime, DateTime64, Decimal32, Decimal64, Decimal128, Decimal256, Dynamic, Enum8,
+        Enum16, FixedString, Json, LowCardinality, Map, Mark, Nested, Nullable, Tuple, Variant,
     },
     types::{OffsetIndexPair as _, Offsets},
 };
@@ -108,7 +107,7 @@ pub enum Value<'a> {
     Ipv6Slice(&'a [Ipv6Data]),
 
     LowCardinalitySlice {
-        slice_indices: TinyRange,
+        range: TinyRange,
         mark: &'a LowCardinality<'a>,
     },
 
@@ -125,65 +124,53 @@ pub enum Value<'a> {
         mark: &'a Map<'a>,
         index: usize,
     },
-
     MapSlice {
         mark: &'a Map<'a>,
-        slice_indices: TinyRange,
+        range: TinyRange,
     },
-
     TupleSlice {
         mark: &'a Tuple<'a>,
-        slice_indices: TinyRange,
+        range: TinyRange,
     },
-
     NullableSlice {
         mark: &'a Nullable<'a>,
-        slice_indices: TinyRange,
+        range: TinyRange,
     },
-
     Nested {
         mark: &'a Nested<'a>,
         index: usize,
     },
-
     NestedSlice {
         mark: &'a Nested<'a>,
-        slice_indices: TinyRange,
+        range: TinyRange,
     },
-
     FixedStringSlice {
         mark: &'a FixedString<'a>,
-        slice_indices: TinyRange,
+        range: TinyRange,
     },
-
     Enum8Slice {
         mark: &'a Enum8<'a>,
-        slice_indices: TinyRange,
+        range: TinyRange,
     },
-
     Enum16Slice {
         mark: &'a Enum16<'a>,
-        slice_indices: TinyRange,
+        range: TinyRange,
     },
-
     Json {
         mark: &'a Json<'a>,
         index: usize,
     },
-
     JsonSlice {
         mark: &'a Json<'a>,
-        slice_indices: TinyRange,
+        range: TinyRange,
     },
-
     VariantSlice {
         mark: &'a Variant<'a>,
-        slice_indices: TinyRange,
+        range: TinyRange,
     },
-
     DynamicSlice {
         mark: &'a Dynamic<'a>,
-        slice_indices: TinyRange,
+        range: TinyRange,
     },
 }
 
@@ -504,6 +491,7 @@ impl Iterator for SliceUsizeIterator<'_> {
         result
     }
 
+    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = self.len - self.index;
         (remaining, Some(remaining))
@@ -523,10 +511,7 @@ impl<'a> TryFrom<Value<'a>> for LowCardinalitySliceIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::LowCardinalitySlice {
-                slice_indices,
-                mark,
-            } => {
+            Value::LowCardinalitySlice { range, mark } => {
                 let Some(additional_keys) = mark.additional_keys.as_ref() else {
                     return Err(Error::MismatchedType(
                         "LowCardinalitySliceIterator",
@@ -534,7 +519,7 @@ impl<'a> TryFrom<Value<'a>> for LowCardinalitySliceIterator<'a> {
                     ));
                 };
 
-                let sliced = mark.indices.slice(slice_indices.into());
+                let sliced = mark.indices.slice(range.into());
 
                 Ok(Self {
                     indices: SliceUsizeIterator::try_from(sliced)?,
@@ -557,11 +542,18 @@ impl<'a> Iterator for LowCardinalitySliceIterator<'a> {
         let index = self.indices.next()?;
         self.additional_keys.get(index)
     }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.indices.size_hint()
+    }
 }
 
+impl ExactSizeIterator for LowCardinalitySliceIterator<'_> {}
+
 pub struct ArraySliceIterator<'a, T> {
-    mark_array: &'a Array<'a>,
-    slice_indices: Range<usize>,
+    mark: &'a Array<'a>,
+    range: Range<usize>,
     _phantom: PhantomData<T>,
 }
 
@@ -571,12 +563,9 @@ impl<'a, T> TryFrom<Value<'a>> for ArraySliceIterator<'a, T> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::ArraySlice {
-                mark: mark_array,
-                range: slice_indices,
-            } => Ok(Self {
-                mark_array,
-                slice_indices: slice_indices.into(),
+            Value::ArraySlice { mark, range } => Ok(Self {
+                mark,
+                range: range.into(),
                 _phantom: Default::default(),
             }),
             other => Err(Error::MismatchedType(other.as_str(), "ArraySliceIterator")),
@@ -592,12 +581,22 @@ where
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        let slice_idx = self.slice_indices.next()?;
+        let slice_idx = self.range.next()?;
 
-        let (start, end) = self.mark_array.offsets.offset_indices(slice_idx).unwrap()?;
-        let res = T::try_from(self.mark_array.values.slice(start..end));
+        let (start, end) = self.mark.offsets.offset_indices(slice_idx).unwrap()?;
+        let res = T::try_from(self.mark.values.slice(start..end));
         Some(res)
     }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.range.size_hint()
+    }
+}
+
+impl<'a, T> ExactSizeIterator for ArraySliceIterator<'a, T> where
+    T: TryFrom<Value<'a>, Error = Error>
+{
 }
 
 impl<'a, T> TryFrom<Value<'a>> for Option<T>
@@ -687,19 +686,16 @@ where
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::Map {
-                mark: mark_map,
-                index,
-            } => {
+            Value::Map { mark, index } => {
                 // Resolve (start, end) for the requested row in the Map column
-                let (start, end) = mark_map
+                let (start, end) = mark
                     .offsets
                     .offset_indices(index)?
                     .ok_or(Error::IndexOutOfBounds(index, "Map"))?;
 
                 Ok(Self {
-                    keys: &mark_map.keys,
-                    values: &mark_map.values,
+                    keys: &mark.keys,
+                    values: &mark.values,
                     range: start..end,
                     _marker: PhantomData,
                 })
@@ -725,9 +721,9 @@ where
         Some(K::try_from(raw_key).and_then(|k| V::try_from(raw_value).map(|v| (k, v))))
     }
 
+    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.range.end - self.range.start;
-        (remaining, Some(remaining))
+        self.range.size_hint()
     }
 }
 
@@ -742,7 +738,7 @@ pub struct MapSliceIterator<'a, K, V> {
     pub(crate) offsets: &'a Offsets<'a>,
     pub(crate) keys: &'a Mark<'a>,
     pub(crate) values: &'a Mark<'a>,
-    pub(crate) slice_indices: Range<usize>,
+    pub(crate) range: Range<usize>,
     pub(crate) _marker: PhantomData<(K, V)>,
 }
 
@@ -756,14 +752,11 @@ where
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::MapSlice {
-                mark: mark_map,
-                slice_indices,
-            } => Ok(Self {
-                offsets: &mark_map.offsets,
-                keys: &mark_map.keys,
-                values: &mark_map.values,
-                slice_indices: slice_indices.into(),
+            Value::MapSlice { mark, range } => Ok(Self {
+                offsets: &mark.offsets,
+                keys: &mark.keys,
+                values: &mark.values,
+                range: range.into(),
                 _marker: PhantomData,
             }),
             other => Err(Error::MismatchedType(other.as_str(), "MapSliceIterator")),
@@ -780,7 +773,7 @@ where
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        let slice_idx = self.slice_indices.next()?;
+        let slice_idx = self.range.next()?;
         let (start, end) = self.offsets.offset_indices(slice_idx).unwrap()?;
 
         Some(Ok(MapIterator {
@@ -790,11 +783,23 @@ where
             _marker: PhantomData,
         }))
     }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.range.size_hint()
+    }
+}
+
+impl<'a, K, V> ExactSizeIterator for MapSliceIterator<'a, K, V>
+where
+    K: TryFrom<Value<'a>, Error = Error>,
+    V: TryFrom<Value<'a>, Error = Error>,
+{
 }
 
 pub struct TupleSliceIterator<'a> {
     mark: &'a Tuple<'a>,
-    slice_indices: Range<usize>,
+    range: Range<usize>,
 }
 
 impl<'a> TryFrom<Value<'a>> for TupleSliceIterator<'a> {
@@ -803,12 +808,9 @@ impl<'a> TryFrom<Value<'a>> for TupleSliceIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::TupleSlice {
+            Value::TupleSlice { mark, range } => Ok(Self {
                 mark,
-                slice_indices,
-            } => Ok(Self {
-                mark,
-                slice_indices: slice_indices.into(),
+                range: range.into(),
             }),
             other => Err(Error::MismatchedType(other.as_str(), "TupleSliceIterator")),
         }
@@ -820,16 +822,16 @@ impl<'a> Iterator for TupleSliceIterator<'a> {
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        let row_idx = self.slice_indices.next()?;
+        let row_idx = self.range.next()?;
         Some(Value::Tuple {
             index: row_idx,
             mark: self.mark,
         })
     }
 
+    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.slice_indices.end - self.slice_indices.start;
-        (remaining, Some(remaining))
+        self.range.size_hint()
     }
 }
 
@@ -876,6 +878,7 @@ impl Iterator for BoolSliceIterator<'_> {
         self.data.next().map(|&byte| byte != 0)
     }
 
+    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.data.size_hint()
     }
@@ -914,10 +917,13 @@ impl Iterator for DateTime32SliceIterator<'_> {
         self.slice.next().map(|dt| dt.with_tz(self.tz))
     }
 
+    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.slice.size_hint()
     }
 }
+
+impl ExactSizeIterator for DateTime32SliceIterator<'_> {}
 
 pub struct DateTime64SliceIterator<'a> {
     tz: Tz,
@@ -958,14 +964,17 @@ impl Iterator for DateTime64SliceIterator<'_> {
             .map(|dt| dt.with_tz_and_precision(self.tz, self.precision))
     }
 
+    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.slice.size_hint()
     }
 }
 
+impl ExactSizeIterator for DateTime64SliceIterator<'_> {}
+
 pub struct NullableSliceIterator<'a> {
-    mark_nullable: &'a Nullable<'a>,
-    slice_indices: Range<usize>,
+    mark: &'a Nullable<'a>,
+    range: Range<usize>,
 }
 
 impl<'a> TryFrom<Value<'a>> for NullableSliceIterator<'a> {
@@ -974,12 +983,9 @@ impl<'a> TryFrom<Value<'a>> for NullableSliceIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::NullableSlice {
-                mark: mark_nullable,
-                slice_indices,
-            } => Ok(Self {
-                mark_nullable,
-                slice_indices: slice_indices.into(),
+            Value::NullableSlice { mark, range } => Ok(Self {
+                mark,
+                range: range.into(),
             }),
             other => Err(Error::MismatchedType(
                 other.as_str(),
@@ -994,16 +1000,16 @@ impl<'a> Iterator for NullableSliceIterator<'a> {
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        let index = self.slice_indices.next()?;
-        if self.mark_nullable.mask.get(index).copied()? == 1 {
+        let index = self.range.next()?;
+        if self.mark.mask.get(index).copied()? == 1 {
             return Some(Value::Empty);
         }
-        self.mark_nullable.data.get(index)
+        self.mark.data.get(index)
     }
 
+    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.slice_indices.end - self.slice_indices.start;
-        (remaining, Some(remaining))
+        self.range.size_hint()
     }
 }
 
@@ -1040,10 +1046,13 @@ impl Iterator for Decimal32SliceIterator<'_> {
         self.slice.next().map(|v| v.with_precision(self.precision))
     }
 
+    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.slice.size_hint()
     }
 }
+
+impl ExactSizeIterator for Decimal32SliceIterator<'_> {}
 
 pub struct Decimal64SliceIterator<'a> {
     precision: u8,
@@ -1076,10 +1085,13 @@ impl Iterator for Decimal64SliceIterator<'_> {
         self.slice.next().map(|v| v.with_precision(self.precision))
     }
 
+    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.slice.size_hint()
     }
 }
+
+impl ExactSizeIterator for Decimal64SliceIterator<'_> {}
 
 pub struct Decimal128SliceIterator<'a> {
     precision: u8,
@@ -1112,10 +1124,13 @@ impl Iterator for Decimal128SliceIterator<'_> {
         self.slice.next().map(|v| v.with_precision(self.precision))
     }
 
+    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.slice.size_hint()
     }
 }
+
+impl ExactSizeIterator for Decimal128SliceIterator<'_> {}
 
 pub struct NestedIterator<'a> {
     col_names: &'a [&'a str],
@@ -1128,17 +1143,14 @@ impl<'a> TryFrom<Value<'a>> for NestedIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::Nested {
-                mark: mark_nested,
-                index,
-            } => {
-                let value = mark_nested
+            Value::Nested { mark, index } => {
+                let value = mark
                     .array_of_tuples
                     .get(index)
                     .ok_or(Error::IndexOutOfBounds(index, "Nested"))?;
                 let tuple_slice: TupleSliceIterator = value.try_into()?;
                 Ok(Self {
-                    col_names: &mark_nested.col_names,
+                    col_names: &mark.col_names,
                     tuple_slice,
                 })
             }
@@ -1164,7 +1176,14 @@ impl<'a> Iterator for NestedIterator<'a> {
             row,
         })
     }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.tuple_slice.size_hint()
+    }
 }
+
+impl ExactSizeIterator for NestedIterator<'_> {}
 
 pub struct NestedItemsIterator<'a> {
     mark_ter: std::iter::Zip<std::slice::Iter<'a, Mark<'a>>, std::slice::Iter<'a, &'a str>>,
@@ -1180,12 +1199,19 @@ impl<'a> Iterator for NestedItemsIterator<'a> {
         let value = mark.get(self.row)?;
         Some((col_name, value))
     }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.mark_ter.size_hint()
+    }
 }
+
+impl ExactSizeIterator for NestedItemsIterator<'_> {}
 
 pub struct NestedSliceIterator<'a> {
     col_names: &'a [&'a str],
     array_of_tuples: &'a Mark<'a>,
-    slice_indices: Range<usize>,
+    range: Range<usize>,
 }
 
 impl<'a> TryFrom<Value<'a>> for NestedSliceIterator<'a> {
@@ -1194,13 +1220,10 @@ impl<'a> TryFrom<Value<'a>> for NestedSliceIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::NestedSlice {
-                mark: mark_nested,
-                slice_indices,
-            } => Ok(Self {
-                col_names: &mark_nested.col_names,
-                array_of_tuples: &mark_nested.array_of_tuples,
-                slice_indices: slice_indices.into(),
+            Value::NestedSlice { mark, range } => Ok(Self {
+                col_names: &mark.col_names,
+                array_of_tuples: &mark.array_of_tuples,
+                range: range.into(),
             }),
             other => Err(Error::MismatchedType(other.as_str(), "NestedSliceIterator")),
         }
@@ -1211,7 +1234,7 @@ impl<'a> Iterator for NestedSliceIterator<'a> {
     type Item = Result<NestedIterator<'a>, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let slice_idx = self.slice_indices.next()?;
+        let slice_idx = self.range.next()?;
         let Some(val) = self.array_of_tuples.get(slice_idx) else {
             return Some(Err(Error::IndexOutOfBounds(slice_idx, "NestedSlice")));
         };
@@ -1227,9 +1250,9 @@ impl<'a> Iterator for NestedSliceIterator<'a> {
         }))
     }
 
+    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.slice_indices.end - self.slice_indices.start;
-        (remaining, Some(remaining))
+        self.range.size_hint()
     }
 }
 
@@ -1237,7 +1260,7 @@ impl ExactSizeIterator for NestedSliceIterator<'_> {}
 
 pub struct FixedStringSliceIterator<'a> {
     mark: &'a FixedString<'a>,
-    slice_indices: Range<usize>,
+    range: Range<usize>,
 }
 
 impl<'a> TryFrom<Value<'a>> for FixedStringSliceIterator<'a> {
@@ -1246,12 +1269,9 @@ impl<'a> TryFrom<Value<'a>> for FixedStringSliceIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::FixedStringSlice {
+            Value::FixedStringSlice { mark, range } => Ok(Self {
                 mark,
-                slice_indices: indices,
-            } => Ok(Self {
-                mark,
-                slice_indices: indices.into(),
+                range: range.into(),
             }),
             other => Err(Error::MismatchedType(
                 other.as_str(),
@@ -1265,7 +1285,7 @@ impl<'a> Iterator for FixedStringSliceIterator<'a> {
     type Item = &'a str;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let slice_idx = self.slice_indices.next()?;
+        let slice_idx = self.range.next()?;
         let start = slice_idx * self.mark.size;
         let end = start + self.mark.size;
 
@@ -1277,11 +1297,13 @@ impl<'a> Iterator for FixedStringSliceIterator<'a> {
         Some(unsafe { std::str::from_utf8_unchecked(slice) })
     }
 
+    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.slice_indices.end - self.slice_indices.start;
-        (remaining, Some(remaining))
+        self.range.size_hint()
     }
 }
+
+impl ExactSizeIterator for FixedStringSliceIterator<'_> {}
 
 pub struct Enum8SliceIterator<'a> {
     variants: &'a [(&'a str, i8)],
@@ -1294,12 +1316,9 @@ impl<'a> TryFrom<Value<'a>> for Enum8SliceIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::Enum8Slice {
-                mark,
-                slice_indices,
-            } => {
-                let slice_indices: Range<usize> = slice_indices.into();
-                let data = &mark.data[slice_indices];
+            Value::Enum8Slice { mark, range } => {
+                let range: Range<usize> = range.into();
+                let data = &mark.data[range];
                 Ok(Self {
                     variants: &mark.variants,
                     data: data.iter(),
@@ -1322,10 +1341,13 @@ impl<'a> Iterator for Enum8SliceIterator<'a> {
         None
     }
 
+    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.data.size_hint()
     }
 }
+
+impl ExactSizeIterator for Enum8SliceIterator<'_> {}
 
 pub struct Enum16SliceIterator<'a> {
     variants: &'a [(&'a str, i16)],
@@ -1338,12 +1360,9 @@ impl<'a> TryFrom<Value<'a>> for Enum16SliceIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::Enum16Slice {
-                mark,
-                slice_indices,
-            } => {
-                let slice_indices: Range<usize> = slice_indices.into();
-                let data = &mark.data[slice_indices];
+            Value::Enum16Slice { mark, range } => {
+                let range: Range<usize> = range.into();
+                let data = &mark.data[range];
                 Ok(Self {
                     variants: &mark.variants,
                     data: data.iter(),
@@ -1366,10 +1385,13 @@ impl<'a> Iterator for Enum16SliceIterator<'a> {
         None
     }
 
+    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.data.size_hint()
     }
 }
+
+impl ExactSizeIterator for Enum16SliceIterator<'_> {}
 
 pub struct JsonIterator<'a> {
     mark: &'a Json<'a>,
@@ -1415,11 +1437,17 @@ impl<'a> Iterator for JsonIterator<'a> {
             break Some((path, value));
         }
     }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.mark.headers.len() - self.path_index;
+        (remaining, Some(remaining))
+    }
 }
 
 pub struct JsonSliceIterator<'a> {
     mark: &'a Json<'a>,
-    slice_indices: Range<usize>,
+    range: Range<usize>,
 }
 
 impl<'a> TryFrom<Value<'a>> for JsonSliceIterator<'a> {
@@ -1428,12 +1456,9 @@ impl<'a> TryFrom<Value<'a>> for JsonSliceIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::JsonSlice {
-                mark: mark_json,
-                slice_indices,
-            } => Ok(Self {
-                mark: mark_json,
-                slice_indices: slice_indices.into(),
+            Value::JsonSlice { mark, range } => Ok(Self {
+                mark,
+                range: range.into(),
             }),
             other => Err(Error::MismatchedType(other.as_str(), "JsonSliceIterator")),
         }
@@ -1445,7 +1470,7 @@ impl<'a> Iterator for JsonSliceIterator<'a> {
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        let index = self.slice_indices.next()?;
+        let index = self.range.next()?;
 
         Some(JsonIterator {
             mark: self.mark,
@@ -1456,8 +1481,7 @@ impl<'a> Iterator for JsonSliceIterator<'a> {
 
     #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.slice_indices.end - self.slice_indices.start;
-        (remaining, Some(remaining))
+        self.range.size_hint()
     }
 }
 
@@ -1465,7 +1489,7 @@ impl ExactSizeIterator for JsonSliceIterator<'_> {}
 
 pub struct VariantSliceIterator<'a> {
     mark: &'a Variant<'a>,
-    slice_indices: Range<usize>,
+    range: Range<usize>,
 }
 
 impl<'a> TryFrom<Value<'a>> for VariantSliceIterator<'a> {
@@ -1474,12 +1498,9 @@ impl<'a> TryFrom<Value<'a>> for VariantSliceIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::VariantSlice {
+            Value::VariantSlice { mark, range } => Ok(Self {
                 mark,
-                slice_indices,
-            } => Ok(Self {
-                mark,
-                slice_indices: slice_indices.into(),
+                range: range.into(),
             }),
             other => Err(Error::MismatchedType(
                 other.as_str(),
@@ -1494,19 +1515,21 @@ impl<'a> Iterator for VariantSliceIterator<'a> {
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        let index = self.slice_indices.next()?;
+        let index = self.range.next()?;
         self.mark.get(index)
     }
 
     #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.slice_indices.size_hint()
+        self.range.size_hint()
     }
 }
 
+impl ExactSizeIterator for VariantSliceIterator<'_> {}
+
 pub struct DynamicSliceIterator<'a> {
     mark: &'a Dynamic<'a>,
-    slice_indices: Range<usize>,
+    range: Range<usize>,
 }
 
 impl<'a> TryFrom<Value<'a>> for DynamicSliceIterator<'a> {
@@ -1515,12 +1538,9 @@ impl<'a> TryFrom<Value<'a>> for DynamicSliceIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::DynamicSlice {
+            Value::DynamicSlice { mark, range } => Ok(Self {
                 mark,
-                slice_indices,
-            } => Ok(Self {
-                mark,
-                slice_indices: slice_indices.into(),
+                range: range.into(),
             }),
             other => Err(Error::MismatchedType(
                 other.as_str(),
@@ -1535,12 +1555,14 @@ impl<'a> Iterator for DynamicSliceIterator<'a> {
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        let index = self.slice_indices.next()?;
+        let index = self.range.next()?;
         self.mark.get(index)
     }
 
     #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.slice_indices.size_hint()
+        self.range.size_hint()
     }
 }
+
+impl ExactSizeIterator for DynamicSliceIterator<'_> {}

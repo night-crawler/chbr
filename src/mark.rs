@@ -7,12 +7,12 @@ use zerocopy::{
     little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128},
 };
 
-use crate::value::Value;
 use crate::{
     Bf16Data, ByteExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data,
     Decimal64Data, Decimal128Data, Decimal256Data, I256, Ipv4Data, Ipv6Data, U256, UuidData,
     slice::ByteView,
-    types::{JsonColumnHeader, Offsets},
+    types::{JsonColumnHeader, OffsetIndexPair as _, Offsets},
+    value::Value,
 };
 
 macro_rules! impl_get {
@@ -111,6 +111,15 @@ pub struct Nested<'a> {
     pub array_of_tuples: Box<Mark<'a>>,
 }
 
+impl Nested<'_> {
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<Value> {
+        // verify the index is present
+        let _ = self.array_of_tuples.get(index)?;
+        Some(Value::Nested { mark: self, index })
+    }
+}
+
 #[derive(Debug)]
 pub struct Json<'a> {
     pub paths: Vec<&'a str>,
@@ -121,6 +130,14 @@ pub struct Json<'a> {
 pub struct Array<'a> {
     pub offsets: Offsets<'a>,
     pub values: Box<Mark<'a>>,
+}
+
+impl Array<'_> {
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<Value> {
+        let (start, end) = self.offsets.offset_indices(index).unwrap()?;
+        Some(self.values.slice(start..end))
+    }
 }
 
 #[derive(Debug)]
@@ -188,10 +205,33 @@ pub struct Enum8<'a> {
     pub data: ByteView<'a, i8>,
 }
 
+impl Enum8<'_> {
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<Value> {
+        let variant = *self.data.get(index)?;
+        if let Ok(index) = self.variants.binary_search_by_key(&variant, |(_, id)| *id) {
+            return Some(Value::String(self.variants[index].0));
+        }
+        // actually, at this point it's broken, but we trust clickhouse!
+        None
+    }
+}
+
 #[derive(Debug)]
 pub struct Enum16<'a> {
     pub variants: Vec<(&'a str, i16)>,
     pub data: ByteView<'a, I16>,
+}
+
+impl Enum16<'_> {
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<Value> {
+        let variant = self.data.get(index)?.get();
+        if let Ok(index) = self.variants.binary_search_by_key(&variant, |(_, id)| *id) {
+            return Some(Value::String(self.variants[index].0));
+        }
+        None
+    }
 }
 
 #[derive(Debug)]

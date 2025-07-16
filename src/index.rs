@@ -3,13 +3,12 @@ use std::{marker::PhantomData, ops::Range};
 use chrono::{DateTime, TimeZone};
 use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
 
-use crate::value::Value::JsonSlice;
 use crate::{
     Bf16Data, ByteExt as _, Date16Data, Date32Data, I256, Ipv4Data, Ipv6Data, U256, UuidData,
     macros::define_slice_fns,
     mark::{Mark, Nullable},
     types::OffsetIndexPair as _,
-    value::{MapIterator, Value},
+    value::{MapIterator, Value, Value::JsonSlice},
 };
 
 impl<'a> Mark<'a> {
@@ -71,39 +70,15 @@ impl<'a> Mark<'a> {
             | Mark::MultiLineString(_) => {
                 unreachable!("Geometric types should be covered by arrays")
             }
-            Mark::Enum8(v) => {
-                let variant = *v.data.get(index)?;
-                if let Ok(index) = v.variants.binary_search_by_key(&variant, |(_, id)| *id) {
-                    return Some(Value::String(v.variants[index].0));
-                }
-                // actually, at this point it's broken, but we trust clickhouse!
-                None
-            }
-            Mark::Enum16(v) => {
-                let variant = v.data.get(index)?.get();
-                if let Ok(index) = v.variants.binary_search_by_key(&variant, |(_, id)| *id) {
-                    return Some(Value::String(v.variants[index].0));
-                }
-                None
-            }
+            Mark::Enum8(v) => v.get(index),
+            Mark::Enum16(v) => v.get(index),
             Mark::LowCardinality(lc) => lc.get(index),
-            Mark::Array(a) => {
-                let (start, end) = a.offsets.offset_indices(index).unwrap()?;
-                Some(a.values.slice(start..end))
-            }
-
-            Mark::Tuple(inner) => Some(Value::Tuple { mark: inner, index }),
+            Mark::Array(a) => a.get(index),
+            Mark::Tuple(mark) => Some(Value::Tuple { mark, index }),
             Mark::Nullable(n) => n.get(index),
-            Mark::Map(mark_map) => Some(Value::Map {
-                mark: mark_map,
-                index,
-            }),
+            Mark::Map(mark) => Some(Value::Map { mark, index }),
             Mark::Variant(v) => v.get(index),
-            Mark::Nested(n) => {
-                // verify the index is present
-                let _ = n.array_of_tuples.get(index)?;
-                Some(Value::Nested { mark: n, index })
-            }
+            Mark::Nested(n) => n.get(index),
             Mark::Dynamic(d) => d.get(index),
             Mark::Json(j) => Some(Value::Json { mark: j, index }),
         }
@@ -158,7 +133,7 @@ impl<'a> Mark<'a> {
             },
             Mark::FixedString(mark) => Value::FixedStringSlice {
                 mark,
-                slice_indices: idx.try_into().unwrap(),
+                range: idx.try_into().unwrap(),
             },
 
             Mark::DateTime(d) => Value::DateTime32Slice {
@@ -179,14 +154,14 @@ impl<'a> Mark<'a> {
             | Mark::MultiLineString(_) => unreachable!("must be covered by array marker already"),
             Mark::Enum8(mark) => Value::Enum8Slice {
                 mark,
-                slice_indices: idx.try_into().unwrap(),
+                range: idx.try_into().unwrap(),
             },
             Mark::Enum16(mark) => Value::Enum16Slice {
                 mark,
-                slice_indices: idx.try_into().unwrap(),
+                range: idx.try_into().unwrap(),
             },
             Mark::LowCardinality(mark) => Value::LowCardinalitySlice {
-                slice_indices: idx.try_into().unwrap(),
+                range: idx.try_into().unwrap(),
                 mark,
             },
             Mark::Array(mark) => Value::ArraySlice {
@@ -195,31 +170,31 @@ impl<'a> Mark<'a> {
             },
             Mark::Tuple(mark) => Value::TupleSlice {
                 mark,
-                slice_indices: idx.try_into().unwrap(),
+                range: idx.try_into().unwrap(),
             },
             Mark::Nullable(mark) => Value::NullableSlice {
                 mark,
-                slice_indices: idx.try_into().unwrap(),
+                range: idx.try_into().unwrap(),
             },
             Mark::Map(mark) => Value::MapSlice {
                 mark,
-                slice_indices: idx.try_into().unwrap(),
+                range: idx.try_into().unwrap(),
             },
             Mark::Nested(mark) => Value::NestedSlice {
                 mark,
-                slice_indices: idx.try_into().unwrap(),
+                range: idx.try_into().unwrap(),
             },
             Mark::Variant(mark) => Value::VariantSlice {
                 mark,
-                slice_indices: idx.try_into().unwrap(),
+                range: idx.try_into().unwrap(),
             },
             Mark::Dynamic(mark) => Value::DynamicSlice {
                 mark,
-                slice_indices: idx.try_into().unwrap(),
+                range: idx.try_into().unwrap(),
             },
             Mark::Json(mark) => JsonSlice {
                 mark,
-                slice_indices: idx.try_into().unwrap(),
+                range: idx.try_into().unwrap(),
             },
         }
     }
@@ -535,16 +510,16 @@ mod tests {
     use testresult::TestResult;
     use zerocopy::little_endian::{I64, U64, U128};
 
-    use crate::value::{DynamicSliceIterator, JsonSliceIterator, VariantSliceIterator};
     use crate::{
         Bf16Data,
         common::load,
         parse::block::parse_single,
         value::{
-            ArraySliceIterator, BoolSliceIterator, Enum8SliceIterator, Enum16SliceIterator,
-            FixedStringSliceIterator, JsonIterator, LowCardinalitySliceIterator, MapIterator,
-            MapSliceIterator, NestedIterator, NestedSliceIterator, NullableSliceIterator,
-            TupleSliceIterator, Value,
+            ArraySliceIterator, BoolSliceIterator, DynamicSliceIterator, Enum8SliceIterator,
+            Enum16SliceIterator, FixedStringSliceIterator, JsonIterator, JsonSliceIterator,
+            LowCardinalitySliceIterator, MapIterator, MapSliceIterator, NestedIterator,
+            NestedSliceIterator, NullableSliceIterator, TupleSliceIterator, Value,
+            VariantSliceIterator,
         },
     };
 

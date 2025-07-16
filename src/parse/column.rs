@@ -1,7 +1,5 @@
 use log::debug;
 
-use crate::parse::header;
-use crate::types::{DynamicHeader, JsonHeader, MapHeader, TypeHeader};
 use crate::{
     error::Error,
     macros::{bt, t},
@@ -13,9 +11,9 @@ use crate::{
             HAS_ADDITIONAL_KEYS_BIT, NEED_GLOBAL_DICTIONARY_BIT, NEED_UPDATE_DICTIONARY_BIT,
             TUINT8, TUINT16, TUINT32, TUINT64,
         },
-        parse_offsets, parse_u64, parse_var_str_bytes, parse_varuint,
+        header, parse_offsets, parse_u64, parse_var_str_bytes, parse_varuint,
     },
-    types::{Field, OffsetIndexPair as _, Type},
+    types::{DynamicHeader, Field, JsonHeader, MapHeader, OffsetIndexPair as _, Type, TypeHeader},
 };
 
 impl<'a> Type<'a> {
@@ -183,7 +181,8 @@ fn dynamic<'a>(ctx: &ParseContext<'a>, header: DynamicHeader<'a>) -> IResult<&'a
 
         let read_rows = row_counts[i];
         debug!(
-            "Decoding dynamic column {i}: {typ:?}, {header:?}; remainder: {}; read rows: {read_rows}",
+            "Decoding dynamic column {i}: {typ:?}, {header:?}; remainder: {}; read rows: \
+             {read_rows}",
             input.len()
         );
         let marker;

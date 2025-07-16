@@ -1,15 +1,16 @@
-use crate::Error;
-use crate::mark::Mark;
-use crate::parse::block::ParseContext;
-use crate::parse::column::string;
-use crate::parse::consts::LOW_CARDINALITY_VERSION;
-use crate::parse::typ::parse_type;
-use crate::parse::{IResult, parse_u64, parse_var_str, parse_var_str_type, parse_varuint};
-use crate::types::{
-    DynamicHeader, Field, JsonColumnHeader, JsonHeader, MapHeader, Type, TypeHeader,
-};
-use log::debug;
 use std::hint::unreachable_unchecked;
+
+use log::debug;
+
+use crate::{
+    Error,
+    mark::Mark,
+    parse::{
+        IResult, block::ParseContext, column::string, consts::LOW_CARDINALITY_VERSION, parse_u64,
+        parse_var_str, parse_var_str_type, parse_varuint, typ::parse_type,
+    },
+    types::{DynamicHeader, Field, JsonColumnHeader, JsonHeader, MapHeader, Type, TypeHeader},
+};
 
 pub fn variant<'a>(
     ctx: &ParseContext<'a>,
@@ -113,7 +114,8 @@ pub fn lc<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], TypeHeader<'a>> {
     }
 
     Err(Error::Parse(format!(
-        "LowCardinality version {version} is not supported, only {LOW_CARDINALITY_VERSION} is allowed"
+        "LowCardinality version {version} is not supported, only {LOW_CARDINALITY_VERSION} is \
+         allowed"
     )))
 }
 
