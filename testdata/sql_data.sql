@@ -1048,3 +1048,19 @@ values (0, [1, 2, 3]),
        (5, [toDateTime('2023-01-01 12:00:00'), toDateTime('2023-01-02 12:00:00')])
        (6, ['{"sample": true}'::JSON])
 ;
+
+create table named_tuple
+(
+    id  Int64,
+    tup Tuple(name String, rank Int64)
+) engine = MergeTree order by tuple();
+
+insert into named_tuple (id, tup) values
+    (0, ('apple', 0)),
+    (1, ('banana', 10)),
+    (2, ('cherry', 20)),
+    (3, ('date', 30)),
+    (4, ('elderberry', 40)),
+    (5, ('fig', 50));
+
+select * from named_tuple order by id;

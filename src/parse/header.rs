@@ -153,7 +153,7 @@ pub fn json<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], JsonHeader<'a>> {
     )?;
 
     let header = JsonHeader {
-        paths,
+        paths: paths.data,
         col_headers,
         type_headers,
     };

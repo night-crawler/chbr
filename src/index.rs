@@ -13,7 +13,7 @@ use crate::{
 };
 
 /// Iterator over the string keys of a `LowCardinality` column slice.
-/// Waiting for: https://github.com/rust-lang/rust/issues/63063
+/// Waiting for: <https://github.com/rust-lang/rust/issues/63063>
 pub struct LcStrIter<'a> {
     indices: LcIndexIter<'a>,
     keys: &'a [&'a str],
@@ -68,7 +68,7 @@ impl<'a> Mark<'a> {
     pub fn get(&'a self, index: usize) -> Option<Value<'a>> {
         match self {
             Mark::Empty => None,
-            Mark::Bool(b) => b.get(index).map(|&val| Value::Bool(val == 1)),
+            Mark::Bool(b) => b.get(index).map(Value::Bool),
             Mark::Int8(bv) => bv.get(index).copied().map(Value::Int8),
             Mark::Int16(bv) => bv.get(index).map(|v| v.get()).map(Value::Int16),
             Mark::Int32(bv) => bv.get(index).map(|v| v.get()).map(Value::Int32),
@@ -115,14 +115,6 @@ impl<'a> Mark<'a> {
                 let value = data.get(index)?;
                 Some(Value::Ipv6(value))
             }
-            Mark::Point(_) => unreachable!("Point should be covered by Tuple(f64, f64)"),
-            Mark::Ring(_)
-            | Mark::Polygon(_)
-            | Mark::MultiPolygon(_)
-            | Mark::LineString(_)
-            | Mark::MultiLineString(_) => {
-                unreachable!("Geometric types should be covered by arrays")
-            }
             Mark::Enum8(v) => v.get(index),
             Mark::Enum16(v) => v.get(index),
             Mark::LowCardinality(lc) => lc.get(index),
@@ -146,7 +138,7 @@ impl<'a> Mark<'a> {
                 }
                 Value::Empty
             }
-            Mark::Bool(bv) => Value::BoolSlice(&bv[idx]),
+            Mark::Bool(bv) => Value::BoolSlice(&bv.data[idx]),
             Mark::Int8(bv) => Value::Int8Slice(&bv[idx]),
             Mark::Int16(bv) => Value::Int16Slice(&bv[idx]),
             Mark::Int32(bv) => Value::Int32Slice(&bv[idx]),
@@ -167,7 +159,7 @@ impl<'a> Mark<'a> {
             Mark::Date32(bv) => Value::Date32Slice(&bv[idx]),
             Mark::Ipv4(bv) => Value::Ipv4Slice(&bv[idx]),
             Mark::Ipv6(bv) => Value::Ipv6Slice(&bv[idx]),
-            Mark::String(data) => Value::StringSlice(&data[idx]),
+            Mark::String(sv) => Value::StringSlice(&sv.data[idx]),
 
             Mark::Decimal32(d) => Value::Decimal32Slice {
                 precision: d.precision,
@@ -199,13 +191,6 @@ impl<'a> Mark<'a> {
                 tz: d.tz,
                 slice: &d.data[idx],
             },
-
-            Mark::Point(_)
-            | Mark::Ring(_)
-            | Mark::Polygon(_)
-            | Mark::MultiPolygon(_)
-            | Mark::LineString(_)
-            | Mark::MultiLineString(_) => unreachable!("must be covered by array marker already"),
             Mark::Enum8(mark) => Value::Enum8Slice {
                 mark,
                 range: idx.try_into().unwrap(),
@@ -260,7 +245,7 @@ impl<'a> Mark<'a> {
     #[inline]
     pub fn get_str(&'a self, index: usize) -> crate::Result<Option<&'a str>> {
         match self {
-            Mark::String(strings) => Ok(strings.get(index).copied()),
+            Mark::String(strings) => Ok(strings.get(index)),
             Mark::FixedString(fs) => {
                 let offset = fs.size * index;
                 let slice = fs.data[offset..offset + fs.size].rtrim_zeros();
@@ -286,7 +271,7 @@ impl<'a> Mark<'a> {
                     return Err(crate::Error::MismatchedType(keys.as_str(), "&str"));
                 };
 
-                Ok(keys.get(value_index).copied())
+                Ok(keys.get(value_index))
             }
             mark => Err(crate::Error::MismatchedType(mark.as_str(), "&str")),
         }
@@ -429,7 +414,7 @@ impl<'a> Mark<'a> {
         };
 
         let slice = match arr.values.as_ref() {
-            Mark::Bool(bv) => &bv[start..end],
+            Mark::Bool(bv) => &bv.data[start..end],
             Mark::Empty => &[],
             other => return Err(crate::Error::MismatchedType(other.as_str(), "Int8")),
         };
@@ -440,7 +425,7 @@ impl<'a> Mark<'a> {
     pub fn get_bool(&'a self, index: usize) -> crate::Result<Option<bool>> {
         match self {
             Mark::Bool(bv) => {
-                let value = bv.get(index).copied().map(|v| v != 0);
+                let value = bv.get(index);
                 Ok(value)
             }
             _ => Err(crate::Error::MismatchedType(self.as_str(), "bool")),

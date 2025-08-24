@@ -17,6 +17,10 @@ uuid = { version = "1.16", features = ["v4"] }
 half = { version = "2.6", features = ["zerocopy"] }
 paste = "1"
 
+[dependencies.chbr_derive]
+path = "./chbr_derive"
+
+
 [dev-dependencies]
 testresult = "0.4"
 pretty_assertions = "1.4"

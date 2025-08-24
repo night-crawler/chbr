@@ -18,6 +18,42 @@ This crate is an attempt to implement a random access iterator over CH blocks.
 It supposedly supports all CH types, supposedly correctly, including stuff like `Dynamic`,
 `JSON`, `LowCardinality`, etc.
 
+## Perf
+
+Keep in mind that it still needs the whole block in memory, and, for example, if you use the official `clickhouse-rs`,
+you will need to allocate memory for all blocks and only then parse/process it. Since the original `clickhouse-rs`
+does not expose the RowBinary reader, I had to hack it to have some sort of apples-to-apples comparison.
+
+```bash
+❯ cargo bench --bench refs
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.10s
+     Running benches/refs.rs (target/release/deps/refs-ed3c098f1a6966ff)
+serde                   time:   [25.949 ms 26.063 ms 26.183 ms]
+                        change: [−3.7579% −2.3750% −1.2509%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+
+chbr                    time:   [15.681 ms 15.793 ms 15.911 ms]
+                        change: [−3.0130% +0.0803% +2.8665%] (p = 0.96 > 0.05)
+                        No change in performance detected.
+Found 4 outliers among 100 measurements (4.00%)
+  4 (4.00%) high mild
+
+chbr_derive             time:   [13.643 ms 13.879 ms 14.149 ms]
+                        change: [+3.2850% +5.3937% +7.6390%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 9 outliers among 100 measurements (9.00%)
+  5 (5.00%) high mild
+  4 (4.00%) high severe
+
+chbr_derive_direct      time:   [11.030 ms 11.171 ms 11.320 ms]
+                        change: [−3.6447% −1.6280% +0.3017%] (p = 0.11 > 0.05)
+                        No change in performance detected.
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+```
+
 ## Quick start
 
 Create a table and populate:

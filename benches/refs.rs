@@ -1,6 +1,10 @@
 use std::{fs, hint::black_box, net::Ipv6Addr};
 
-use chbr::{BlockRow, BlocksIterator, parse::block::parse_many};
+use chbr::reader::{
+    ColArray, ColBool, ColDateTime, ColF64, ColIpv6, ColLcNullableStr, ColLcStr, ColNullable,
+    ColU32, ColU64, ColU128, ColUuid,
+};
+use chbr::{BlockRow, BlocksIterator, FromBlock, parse::block::parse_many};
 use chrono::Utc;
 use clickhouse::rowbinary::de::deserialize_from;
 use criterion::{Criterion, criterion_group, criterion_main};
@@ -165,6 +169,144 @@ fn native_read(input: &[u8]) -> TestResult<()> {
     Ok(())
 }
 
+#[derive(FromBlock)]
+pub struct BenchmarkCols<'a> {
+    id: ColUuid<'a>,
+    lc_string_cd10: ColLcStr<'a>,
+    timestamp: ColDateTime<'a>,
+    count: ColF64<'a>,
+    some_number: ColU32<'a>,
+
+    lc_nullable_string_cd1000: ColLcNullableStr<'a>,
+    lc_nullable_string_cd5000: ColLcNullableStr<'a>,
+    lc_nullable_string_cd3000: ColLcNullableStr<'a>,
+    lc_nullable_string_cd4000: ColLcNullableStr<'a>,
+    lc_nullable_string_cd50000: ColLcNullableStr<'a>,
+    lc_nullable_string_cd100: ColLcNullableStr<'a>,
+    lc_nullable_string_cd500: ColLcNullableStr<'a>,
+
+    some_ip_address: ColNullable<'a, ColIpv6<'a>>,
+
+    lc_nullable_string8: ColLcNullableStr<'a>,
+    lc_tags: ColArray<'a, ColLcStr<'a>>,
+    lc_nullable_string_cd_00000: ColLcNullableStr<'a>,
+
+    #[col(name = "nested_field.lc_string_cd10")]
+    nested_lc_string_cd10: ColArray<'a, ColLcStr<'a>>,
+
+    #[col(name = "nested_field.flag")]
+    nested_flag: ColArray<'a, ColBool<'a>>,
+
+    #[col(name = "nested_field.some_id")]
+    nested_some_id: ColArray<'a, ColU128<'a>>,
+
+    #[col(name = "nested_field.some_other_id")]
+    nested_some_other_id: ColArray<'a, ColU64<'a>>,
+}
+
+fn native_derive_read(input: &[u8]) -> TestResult<()> {
+    let blocks = parse_many(input)?;
+
+    for row in BenchmarkCols::iter_blocks(&blocks) {
+        let row = row?;
+        let sample = BenchmarkSample {
+            id: row.id,
+            lc_string_cd10: row.lc_string_cd10,
+            timestamp: row.timestamp.with_timezone(&Utc),
+            count: row.count,
+            some_number: row.some_number,
+            lc_nullable_string_cd1000: row.lc_nullable_string_cd1000,
+            lc_nullable_string_cd5000: row.lc_nullable_string_cd5000,
+            lc_nullable_string_cd3000: row.lc_nullable_string_cd3000,
+            lc_nullable_string_cd4000: row.lc_nullable_string_cd4000,
+            lc_nullable_string_cd50000: row.lc_nullable_string_cd50000,
+            lc_nullable_string_cd100: row.lc_nullable_string_cd100,
+            lc_nullable_string_cd500: row.lc_nullable_string_cd500,
+            some_ip_address: row.some_ip_address,
+            lc_nullable_string8: row.lc_nullable_string8,
+            lc_tags: row.lc_tags.try_collect_vec()?,
+            lc_nullable_string_cd_00000: row.lc_nullable_string_cd_00000,
+            nested_lc_string_cd10: row.nested_lc_string_cd10.try_collect_vec()?,
+            nested_flag: row
+                .nested_flag
+                .try_as_slice()?
+                .iter()
+                .map(|&v| v == 1)
+                .collect(),
+            nested_some_id: row
+                .nested_some_id
+                .try_as_slice()?
+                .iter()
+                .map(|v| v.get())
+                .collect(),
+            nested_some_other_id: row
+                .nested_some_other_id
+                .try_as_slice()?
+                .iter()
+                .map(|v| v.get())
+                .collect(),
+        };
+        black_box(sample);
+    }
+
+    Ok(())
+}
+
+fn native_derive_direct_read(input: &[u8]) -> TestResult<()> {
+    use chbr::reader::TryRead as _;
+
+    let blocks = parse_many(input)?;
+
+    for block in &blocks {
+        let cols = BenchmarkCols::from_block(block)?;
+        for i in 0..block.num_rows {
+            let sample = BenchmarkSample {
+                id: cols.id.try_read(i)?,
+                lc_string_cd10: cols.lc_string_cd10.try_read(i)?,
+                timestamp: cols.timestamp.try_read(i)?.with_timezone(&Utc),
+                count: cols.count.try_read(i)?,
+                some_number: cols.some_number.try_read(i)?,
+                lc_nullable_string_cd1000: cols.lc_nullable_string_cd1000.try_read(i)?,
+                lc_nullable_string_cd5000: cols.lc_nullable_string_cd5000.try_read(i)?,
+                lc_nullable_string_cd3000: cols.lc_nullable_string_cd3000.try_read(i)?,
+                lc_nullable_string_cd4000: cols.lc_nullable_string_cd4000.try_read(i)?,
+                lc_nullable_string_cd50000: cols.lc_nullable_string_cd50000.try_read(i)?,
+                lc_nullable_string_cd100: cols.lc_nullable_string_cd100.try_read(i)?,
+                lc_nullable_string_cd500: cols.lc_nullable_string_cd500.try_read(i)?,
+                some_ip_address: cols.some_ip_address.try_read(i)?,
+                lc_nullable_string8: cols.lc_nullable_string8.try_read(i)?,
+                lc_tags: cols.lc_tags.try_read(i)?.try_collect_vec()?,
+                lc_nullable_string_cd_00000: cols.lc_nullable_string_cd_00000.try_read(i)?,
+                nested_lc_string_cd10: cols.nested_lc_string_cd10.try_read(i)?.try_collect_vec()?,
+                nested_flag: cols
+                    .nested_flag
+                    .try_read(i)?
+                    .try_as_slice()?
+                    .iter()
+                    .map(|&v| v == 1)
+                    .collect(),
+                nested_some_id: cols
+                    .nested_some_id
+                    .try_read(i)?
+                    .try_as_slice()?
+                    .iter()
+                    .map(|v| v.get())
+                    .collect(),
+                nested_some_other_id: cols
+                    .nested_some_other_id
+                    .try_read(i)?
+                    .try_as_slice()?
+                    .iter()
+                    .map(|v| v.get())
+                    .collect(),
+            };
+            black_box(sample);
+        }
+    }
+
+    Ok(())
+}
+
 fn bench_readers(c: &mut Criterion) {
     let rb_data =
         fs::read("testdata/benchmark_sample.rb").expect("missing testdata/benchmark_sample.rb");
@@ -177,6 +319,14 @@ fn bench_readers(c: &mut Criterion) {
 
     c.bench_function("chbr", |b| {
         b.iter(|| native_read(black_box(&native_data)).unwrap())
+    });
+
+    c.bench_function("chbr_derive", |b| {
+        b.iter(|| native_derive_read(black_box(&native_data)).unwrap())
+    });
+
+    c.bench_function("chbr_derive_direct", |b| {
+        b.iter(|| native_derive_direct_read(black_box(&native_data)).unwrap())
     });
 }
 

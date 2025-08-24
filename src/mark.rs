@@ -1,15 +1,16 @@
+use chrono_tz::Tz;
 use core::fmt;
 use std::fmt::Debug;
-
-use chrono_tz::Tz;
+use std::ops::{Deref, Range};
 use zerocopy::{
     FromBytes, Unaligned,
     little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128},
 };
 
+use crate::value::{LowCardinalitySliceIterator, SliceUsizeIterator};
 use crate::{
     Bf16Data, ByteExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data,
-    Decimal64Data, Decimal128Data, Decimal256Data, I256, Ipv4Data, Ipv6Data, U256, UuidData,
+    Decimal64Data, Decimal128Data, Decimal256Data, Error, I256, Ipv4Data, Ipv6Data, U256, UuidData,
     slice::ByteView,
     types::{JsonColumnHeader, OffsetIndexPair as _, Offsets},
     value::Value,
@@ -51,6 +52,9 @@ pub struct Variant<'a> {
 }
 
 impl Variant<'_> {
+    /// Discriminator byte marking a NULL row.
+    pub const NULL_DISCRIMINATOR: u8 = 255;
+
     #[inline]
     pub fn get(&self, index: usize) -> Option<Value<'_>> {
         let discriminator = (*self.discriminators.get(index)?) as usize;
@@ -70,6 +74,22 @@ pub struct LowCardinality<'a> {
 }
 
 impl LowCardinality<'_> {
+    pub fn slice(&self, range: Range<usize>) -> crate::Result<LowCardinalitySliceIterator<'_>> {
+        let Some(additional_keys) = self.additional_keys.as_ref() else {
+            return Err(Error::MismatchedType(
+                "LowCardinalitySliceIterator",
+                "LowCardinalitySlice with no additional keys",
+            ));
+        };
+
+        let sliced = self.indices.slice(range);
+
+        Ok(LowCardinalitySliceIterator {
+            indices: SliceUsizeIterator::try_from(sliced)?,
+            additional_keys,
+        })
+    }
+
     #[inline]
     pub fn value_index(&self, index: usize) -> Option<usize> {
         let value_index = match self.indices.as_ref() {
@@ -97,7 +117,7 @@ impl LowCardinality<'_> {
 
         // fast path for LowCardinality with String keys
         if let Mark::String(keys) = keys.as_ref() {
-            let value = keys.get(value_index).copied()?;
+            let value = keys.get(value_index)?;
             return Some(Value::String(value));
         }
 
@@ -288,9 +308,41 @@ pub struct Tuple<'a> {
     pub values: Vec<Mark<'a>>,
 }
 
+#[derive(Debug)]
+pub struct StringView<'a> {
+    pub data: Vec<&'a str>,
+}
+
+impl<'a> Deref for StringView<'a> {
+    type Target = [&'a str];
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl StringView<'_> {
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<&str> {
+        self.data.get(index).copied()
+    }
+}
+
+#[derive(Debug)]
+pub struct BoolView<'a> {
+    pub data: &'a [u8],
+}
+
+impl BoolView<'_> {
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<bool> {
+        self.data.get(index).map(|&val| val == 1)
+    }
+}
+
 pub enum Mark<'a> {
     Empty,
-    Bool(&'a [u8]),
+    Bool(BoolView<'a>),
     Int8(ByteView<'a, i8>),
     Int16(ByteView<'a, I16>),
     Int32(ByteView<'a, I32>),
@@ -310,7 +362,7 @@ pub enum Mark<'a> {
     Decimal64(Decimal64<'a>),
     Decimal128(Decimal128<'a>),
     Decimal256(Decimal256<'a>),
-    String(Vec<&'a str>),
+    String(StringView<'a>),
     FixedString(FixedString<'a>),
     Uuid(ByteView<'a, UuidData>),
     Date(ByteView<'a, Date16Data>),
@@ -319,12 +371,6 @@ pub enum Mark<'a> {
     DateTime64(DateTime64<'a>),
     Ipv4(ByteView<'a, Ipv4Data>),
     Ipv6(ByteView<'a, Ipv6Data>),
-    Point(&'a [u8]),
-    Ring(Box<Mark<'a>>),
-    Polygon(Box<Mark<'a>>),
-    MultiPolygon(Box<Mark<'a>>),
-    LineString(Box<Mark<'a>>),
-    MultiLineString(Box<Mark<'a>>),
 
     Enum8(Enum8<'a>),
     Enum16(Enum16<'a>),
@@ -383,15 +429,7 @@ impl Mark<'_> {
             Self::Enum8(_) => Some(1),
             Self::Enum16(_) => Some(2),
 
-            // Point is represented by its X and Y coordinates, stored as a Tuple(Float64, Float64).
-            Self::Point(_) => Some(16),
-
             // For completeness, everything below is variable in size
-            Self::Ring(_) => None,
-            Self::Polygon(_) => None,
-            Self::MultiPolygon(_) => None,
-            Self::LineString(_) => None,
-            Self::MultiLineString(_) => None,
             Self::Map { .. } => None,
 
             Self::Array(_) => None,
@@ -443,12 +481,6 @@ impl Mark<'_> {
             Mark::DateTime64(_) => "DateTime64",
             Mark::Ipv4(_) => "Ipv4",
             Mark::Ipv6(_) => "Ipv6",
-            Mark::Point(_) => "Point",
-            Mark::Ring(_) => "Ring",
-            Mark::Polygon(_) => "Polygon",
-            Mark::MultiPolygon(_) => "MultiPolygon",
-            Mark::LineString(_) => "LineString",
-            Mark::MultiLineString(_) => "MultiLineString",
             Mark::Enum8(_) => "Enum8",
             Mark::Enum16(_) => "Enum16",
             Mark::LowCardinality(_) => "LowCardinality",
@@ -487,18 +519,17 @@ impl Debug for Mark<'_> {
         use Mark::{
             Array, BFloat16, Bool, Date, Date32, DateTime, DateTime64, Decimal32, Decimal64,
             Decimal128, Decimal256, Dynamic, Empty, Enum8, Enum16, FixedString, Float32, Float64,
-            Int8, Int16, Int32, Int64, Int128, Int256, Ipv4, Ipv6, Json, LineString,
-            LowCardinality, Map, MultiLineString, MultiPolygon, NamedTuple, Nested, Nullable,
-            Point, Polygon, Ring, String, Tuple, UInt8, UInt16, UInt32, UInt64, UInt128, UInt256,
-            Uuid, Variant,
+            Int8, Int16, Int32, Int64, Int128, Int256, Ipv4, Ipv6, Json, LowCardinality, Map,
+            NamedTuple, Nested, Nullable, String, Tuple, UInt8, UInt16, UInt32, UInt64, UInt128,
+            UInt256, Uuid, Variant,
         };
         match self {
             Empty => f.write_str("Empty"),
 
-            Bool(b) | Point(b) => dbg_slice(
+            Bool(b) => dbg_slice(
                 f,
                 core::any::type_name::<Self>().rsplit("::").next().unwrap(),
-                b,
+                b.data,
             ),
 
             Ipv4(v) => dbg_bv(f, "Ipv4", v),
@@ -567,12 +598,6 @@ impl Debug for Mark<'_> {
                 .field("data", &e.data.as_slice())
                 .finish(),
             Enum16(e) => f.debug_struct("Enum16").field("map", &e).finish(),
-
-            Ring(inner) => f.debug_tuple("Ring").field(inner).finish(),
-            Polygon(inner) => f.debug_tuple("Polygon").field(inner).finish(),
-            MultiPolygon(inner) => f.debug_tuple("MultiPolygon").field(inner).finish(),
-            LineString(inner) => f.debug_tuple("LineString").field(inner).finish(),
-            MultiLineString(inner) => f.debug_tuple("MultiLineString").field(inner).finish(),
 
             LowCardinality(lc) => f
                 .debug_struct("LowCardinality")
