@@ -529,8 +529,8 @@ impl Iterator for SliceUsizeIterator<'_> {
 impl ExactSizeIterator for SliceUsizeIterator<'_> {}
 
 pub struct LowCardinalitySliceIterator<'a> {
-    indices: SliceUsizeIterator<'a>,
-    additional_keys: &'a Mark<'a>,
+    pub indices: SliceUsizeIterator<'a>,
+    pub additional_keys: &'a Mark<'a>,
 }
 
 impl<'a> TryFrom<Value<'a>> for LowCardinalitySliceIterator<'a> {
@@ -539,21 +539,7 @@ impl<'a> TryFrom<Value<'a>> for LowCardinalitySliceIterator<'a> {
     #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::LowCardinalitySlice { range, mark } => {
-                let Some(additional_keys) = mark.additional_keys.as_ref() else {
-                    return Err(Error::MismatchedType(
-                        "LowCardinalitySliceIterator",
-                        "LowCardinalitySlice with no additional keys",
-                    ));
-                };
-
-                let sliced = mark.indices.slice(range.into());
-
-                Ok(Self {
-                    indices: SliceUsizeIterator::try_from(sliced)?,
-                    additional_keys,
-                })
-            }
+            Value::LowCardinalitySlice { range, mark } => mark.slice(range.into()),
             other => Err(Error::MismatchedType(
                 other.as_str(),
                 "LowCardinalitySliceIterator",

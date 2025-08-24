@@ -1,5 +1,6 @@
 use log::debug;
 
+use crate::mark::StringView;
 use crate::{
     error::Error,
     macros::{bt, t},
@@ -310,15 +311,13 @@ fn variant<'a>(
     ctx: &ParseContext<'a>,
     headers: Vec<TypeHeader<'a>>,
 ) -> IResult<&'a [u8], Mark<'a>> {
-    const NULL_DISCR: u8 = 255;
-
     let input = ctx.input;
 
     let (discriminators, mut input) = input.split_at(ctx.num_rows);
     let mut offsets = vec![0; ctx.num_rows];
     let mut row_counts = vec![0; inner.len()];
     for (discriminator, offset) in discriminators.iter().copied().zip(offsets.iter_mut()) {
-        if discriminator == NULL_DISCR {
+        if discriminator == Variant::NULL_DISCRIMINATOR {
             continue;
         }
         *offset = row_counts[discriminator as usize];
@@ -428,7 +427,7 @@ pub(super) fn string<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> 
         strings.push(unsafe { std::str::from_utf8_unchecked(s) });
     }
 
-    Ok((input, Mark::String(strings)))
+    Ok((input, Mark::String(StringView { data: strings })))
 }
 
 fn named_tuple<'a>(

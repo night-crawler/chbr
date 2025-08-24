@@ -1,6 +1,7 @@
 pub use chrono_tz::Tz;
 use zerocopy::little_endian::U64;
 
+use crate::mark::BoolView;
 use crate::{
     mark::{
         DateTime, DateTime64, Decimal32, Decimal64, Decimal128, Decimal256, Enum8, Enum16,
@@ -340,7 +341,7 @@ impl<'a> Type<'a> {
 
     pub fn into_fixed_size_marker(self, data: &'a [u8]) -> crate::Result<Mark<'a>> {
         let mark = match self {
-            Type::Bool => Mark::Bool(data),
+            Type::Bool => Mark::Bool(BoolView { data }),
             Type::Int8 => Mark::Int8(ByteView::try_from(data)?),
             Type::Int16 => Mark::Int16(ByteView::try_from(data)?),
             Type::Int32 => Mark::Int32(ByteView::try_from(data)?),

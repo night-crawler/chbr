@@ -1,3 +1,5 @@
+extern crate self as chbr;
+
 use std::{
     collections::{HashMap, HashSet},
     iter::Peekable,
@@ -23,11 +25,16 @@ pub mod index;
 mod macros;
 pub mod mark;
 pub mod parse;
+pub mod reader;
 pub mod slice;
 pub mod types;
 pub mod value;
 
+pub use chbr_derive::{FromBlock, FromVariant};
 pub use error::Error;
+// Same name as the derive macro on purpose (macro vs type namespace):
+// `use chbr::FromBlock;` imports both, serde-style.
+pub use reader::{FromBlock, FromVariant};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -49,8 +56,8 @@ impl ByteExt for [u8] {
 /// This range represents a starting offset and a length, as opposed to the
 /// Rust's range, which stores start and end positions.
 /// In particular, this range encodes row numbers/offsets within a ClickHouse block,
-/// so it should not be wildly huge. Nevertheless, if the end position exceeds `u32::MAX`,
-/// we still have a good chance of not failing to convert the Range<usize> to TinyRange.
+/// so it should not be wildly huge. Nevertheless, if the end position exceeds [`u32::MAX`],
+/// we still have a good chance of not failing to convert the [`Range<usize>`] to [`TinyRange`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TinyRange {
     pub start: u32,

@@ -49,6 +49,9 @@ pub enum Error {
 
     #[error("Invalid column order: {0}")]
     InvalidColumnOrder(String),
+
+    #[error("Column not found: {0}")]
+    ColumnNotFound(String),
 }
 
 impl<T> From<nom::Err<T>> for Error
