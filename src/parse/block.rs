@@ -28,7 +28,7 @@ impl Deref for ParseContext<'_> {
 }
 
 impl<'a> ParseContext<'a> {
-    pub fn fork(&self, input: &'a [u8]) -> ParseContext<'a> {
+    pub const fn fork(&self, input: &'a [u8]) -> ParseContext<'a> {
         ParseContext {
             initial: self.initial,
             input,
@@ -38,19 +38,19 @@ impl<'a> ParseContext<'a> {
             column_name: self.column_name,
         }
     }
-    pub fn with_column_name(self, column_name: &'a str) -> ParseContext<'a> {
+    pub const fn with_column_name(self, column_name: &'a str) -> ParseContext<'a> {
         ParseContext {
             column_name,
             ..self
         }
     }
 
-    pub fn with_num_rows(self, num_rows: usize) -> ParseContext<'a> {
+    pub const fn with_num_rows(self, num_rows: usize) -> ParseContext<'a> {
         ParseContext { num_rows, ..self }
     }
 }
 
-pub fn parse_single(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
+pub fn parse_single(input: &[u8]) -> IResult<&[u8], ParsedBlock<'_>> {
     if input.is_empty() {
         return Ok((
             input,
@@ -123,7 +123,7 @@ pub fn parse_single(input: &[u8]) -> IResult<&[u8], ParsedBlock> {
     ))
 }
 
-pub fn parse_many(mut input: &[u8]) -> Result<Vec<ParsedBlock>, crate::parse::Error> {
+pub fn parse_many(mut input: &[u8]) -> Result<Vec<ParsedBlock<'_>>, crate::parse::Error> {
     let mut blocks = Vec::new();
     while !input.is_empty() {
         let block;
@@ -179,5 +179,6 @@ mod tests {
         json_arr => "./testdata/json_arr.native",
         variant_arr => "./testdata/variant_arr.native",
         dynamic_arr => "./testdata/dynamic_arr.native",
+        named_tuple => "./testdata/named_tuple.native",
     }
 }

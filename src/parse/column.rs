@@ -3,7 +3,10 @@ use log::debug;
 use crate::{
     error::Error,
     macros::{bt, t},
-    mark::{Array, Dynamic, Json, LowCardinality, Map, Mark, Nested, Nullable, Tuple, Variant},
+    mark::{
+        Array, Dynamic, Json, LowCardinality, Map, Mark, NamedTuple, Nested, Nullable, Tuple,
+        Variant,
+    },
     parse::{
         IResult,
         block::ParseContext,
@@ -59,6 +62,10 @@ impl<'a> Type<'a> {
                 let (input, header) = header::nested(ctx, fields)?;
                 Ok((input, TypeHeader::Nested(header)))
             }
+            Type::NamedTuple(fields) => {
+                let (input, header) = header::named_tuple(ctx, fields)?;
+                Ok((input, TypeHeader::Nested(header)))
+            }
             Type::Point => Ok((ctx.input, header::point())),
             Type::Ring | Type::LineString => Ok((ctx.input, header::ring())),
             Type::Polygon | Type::MultiLineString => Ok((ctx.input, header::polygon())),
@@ -98,6 +105,7 @@ impl<'a> Type<'a> {
             Type::Dynamic => dynamic(&ctx, header.into_dynamic()),
             Type::Json => json(&ctx, header.into_json()),
             Type::Nested(fields) => nested(fields, ctx, header.into_nested()),
+            Type::NamedTuple(fields) => named_tuple(fields, &ctx, header.into_nested()),
             _ => {
                 unimplemented!("decode is not implemented for {self:?}")
             }
@@ -421,6 +429,30 @@ pub(super) fn string<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> 
     }
 
     Ok((input, Mark::String(strings)))
+}
+
+fn named_tuple<'a>(
+    fields: Vec<Field<'a>>,
+    ctx: &ParseContext<'a>,
+    headers: Vec<TypeHeader<'a>>,
+) -> IResult<&'a [u8], Mark<'a>> {
+    debug!("Decoding NamedTuple with {} fields", fields.len());
+
+    let mut inner_types = Vec::with_capacity(fields.len());
+    let mut col_names = Vec::with_capacity(fields.len());
+    for f in fields {
+        inner_types.push(f.typ);
+        col_names.push(f.name);
+    }
+
+    let (input, tuple_mark) = tuple(inner_types, ctx, headers)?;
+
+    let mark = Mark::NamedTuple(NamedTuple {
+        col_names,
+        tuple: Box::new(tuple_mark),
+    });
+
+    Ok((input, mark))
 }
 
 fn nested<'a>(

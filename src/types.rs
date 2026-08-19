@@ -236,6 +236,7 @@ pub enum Type<'a> {
     Variant(Vec<Type<'a>>),
 
     Nested(Vec<Field<'a>>),
+    NamedTuple(Vec<Field<'a>>),
 
     Dynamic,
     Json,
@@ -243,8 +244,9 @@ pub enum Type<'a> {
     SharedVariant,
 }
 
+#[expect(clippy::multiple_inherent_impl)]
 impl<'a> Type<'a> {
-    pub fn is_nullable(&self) -> bool {
+    pub const fn is_nullable(&self) -> bool {
         matches!(self, Type::Nullable(_))
     }
     pub fn strip_null(&self) -> &Type<'a> {
@@ -253,28 +255,8 @@ impl<'a> Type<'a> {
             _ => self,
         }
     }
-}
 
-#[derive(Debug)]
-pub struct JsonColumnHeader<'a> {
-    pub path_version: u64,
-    pub max_types: usize,
-    pub total_types: usize,
-    pub typ: Box<Type<'a>>,
-    pub variant_version: u64,
-    pub mark: Mark<'a>,
-    pub discriminators: &'a [u8],
-    pub offsets: Vec<usize>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Field<'a> {
-    pub name: &'a str,
-    pub typ: Type<'a>,
-}
-
-impl<'a> Type<'a> {
-    pub fn size(&self) -> Option<usize> {
+    pub const fn size(&self) -> Option<usize> {
         #[expect(clippy::match_same_arms)]
         match self {
             Self::Bool => Some(1),
@@ -330,6 +312,7 @@ impl<'a> Type<'a> {
             // we can calculate the size for the tuple of fixed size types, but still we'll need
             // to parse nested columns later, so it's not worth it
             Self::Tuple(_) => None,
+            Self::NamedTuple(_) => None,
 
             // TODO: is it always variable?
             Self::Variant(_) => None,
@@ -344,7 +327,7 @@ impl<'a> Type<'a> {
         }
     }
 
-    pub fn from_bytes(s: &[u8]) -> Result<Type, crate::Error> {
+    pub fn from_bytes(s: &[u8]) -> Result<Type<'_>, crate::Error> {
         let (remainder, typ) = parse_type(s).map_err(|e| crate::Error::Parse(e.to_string()))?;
         if !remainder.trim_ascii().is_empty() {
             return Err(crate::Error::Parse(format!(
@@ -419,4 +402,22 @@ impl<'a> Type<'a> {
 
         Ok(mark)
     }
+}
+
+#[derive(Debug)]
+pub struct JsonColumnHeader<'a> {
+    pub path_version: u64,
+    pub max_types: usize,
+    pub total_types: usize,
+    pub typ: Box<Type<'a>>,
+    pub variant_version: u64,
+    pub mark: Mark<'a>,
+    pub discriminators: &'a [u8],
+    pub offsets: Vec<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Field<'a> {
+    pub name: &'a str,
+    pub typ: Type<'a>,
 }

@@ -17,7 +17,7 @@ impl<'a, T: Unaligned + FromBytes + Copy> TryFrom<&'a [u8]> for ByteView<'a, T> 
     type Error = crate::Error;
 
     fn try_from(bytes: &'a [u8]) -> Result<Self, Self::Error> {
-        if bytes.len() % size_of::<T>() == 0 {
+        if bytes.len().is_multiple_of(size_of::<T>()) {
             Ok(Self {
                 bytes,
                 _pd: PhantomData,
@@ -30,12 +30,12 @@ impl<'a, T: Unaligned + FromBytes + Copy> TryFrom<&'a [u8]> for ByteView<'a, T> 
 
 impl<'a, T: Unaligned + FromBytes + Copy> ByteView<'a, T> {
     #[inline]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.bytes.len() / size_of::<T>()
     }
 
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
@@ -56,12 +56,12 @@ impl<'a, T: Unaligned + FromBytes + Copy> ByteView<'a, T> {
     }
 
     #[inline(always)]
-    pub fn as_bytes(&self) -> &'a [u8] {
+    pub const fn as_bytes(&self) -> &'a [u8] {
         self.bytes
     }
 
     #[inline(always)]
-    pub fn as_slice(&self) -> &'a [T] {
+    pub const fn as_slice(&self) -> &'a [T] {
         let n_elements = self.len();
         unsafe { core::slice::from_raw_parts(self.bytes.as_ptr().cast::<T>(), n_elements) }
     }

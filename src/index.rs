@@ -1,15 +1,68 @@
 use std::{marker::PhantomData, ops::Range};
 
 use chrono::{DateTime, TimeZone};
+use uuid::Uuid;
 use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
 
 use crate::{
     Bf16Data, ByteExt as _, Date16Data, Date32Data, I256, Ipv4Data, Ipv6Data, U256, UuidData,
-    macros::define_slice_fns,
+    macros::{define_int_getters, define_ip_getters, define_opt_getters, define_slice_fns},
     mark::{Mark, Nullable},
     types::OffsetIndexPair as _,
     value::{MapIterator, Value, Value::JsonSlice},
 };
+
+/// Iterator over the string keys of a `LowCardinality` column slice.
+/// Waiting for: https://github.com/rust-lang/rust/issues/63063
+pub struct LcStrIter<'a> {
+    indices: LcIndexIter<'a>,
+    keys: &'a [&'a str],
+}
+
+enum LcIndexIter<'a> {
+    U8(std::slice::Iter<'a, u8>),
+    U16(std::slice::Iter<'a, U16>),
+    U32(std::slice::Iter<'a, U32>),
+    U64(std::slice::Iter<'a, U64>),
+}
+
+impl<'a> Iterator for LcStrIter<'a> {
+    type Item = &'a str;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let index = match &mut self.indices {
+            LcIndexIter::U8(it) => usize::from(*it.next()?),
+            LcIndexIter::U16(it) => usize::from(it.next()?.get()),
+            LcIndexIter::U32(it) => it.next()?.get() as usize,
+            LcIndexIter::U64(it) => usize::try_from(it.next()?.get()).unwrap(),
+        };
+        Some(self.keys[index])
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.indices {
+            LcIndexIter::U8(it) => it.size_hint(),
+            LcIndexIter::U16(it) => it.size_hint(),
+            LcIndexIter::U32(it) => it.size_hint(),
+            LcIndexIter::U64(it) => it.size_hint(),
+        }
+    }
+}
+
+struct ArrayLcStrIter<'a> {
+    inner: Option<LcStrIter<'a>>,
+}
+
+impl<'a> Iterator for ArrayLcStrIter<'a> {
+    type Item = &'a str;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.as_mut()?.next()
+    }
+}
 
 impl<'a> Mark<'a> {
     pub fn get(&'a self, index: usize) -> Option<Value<'a>> {
@@ -79,6 +132,7 @@ impl<'a> Mark<'a> {
             Mark::Map(mark) => Some(Value::Map { mark, index }),
             Mark::Variant(v) => v.get(index),
             Mark::Nested(n) => n.get(index),
+            Mark::NamedTuple(n) => n.get(index),
             Mark::Dynamic(d) => d.get(index),
             Mark::Json(j) => Some(Value::Json { mark: j, index }),
         }
@@ -184,6 +238,10 @@ impl<'a> Mark<'a> {
                 mark,
                 range: idx.try_into().unwrap(),
             },
+            Mark::NamedTuple(mark) => Value::NamedTupleSlice {
+                mark,
+                range: idx.try_into().unwrap(),
+            },
             Mark::Variant(mark) => Value::VariantSlice {
                 mark,
                 range: idx.try_into().unwrap(),
@@ -249,16 +307,6 @@ impl<'a> Mark<'a> {
         Ok(Some(data.get_str(index)?))
     }
 
-    #[inline]
-    pub fn get_u128(&'a self, index: usize) -> crate::Result<Option<u128>> {
-        let Mark::UInt128(bv) = self else {
-            return Err(crate::Error::MismatchedType(self.as_str(), "UInt128"));
-        };
-
-        let value = bv.get(index).copied().map(U128::get);
-        Ok(value)
-    }
-
     #[expect(clippy::needless_pass_by_value)]
     #[inline]
     pub fn get_datetime<T: TimeZone>(
@@ -294,94 +342,7 @@ impl<'a> Mark<'a> {
     }
 
     #[inline]
-    pub fn get_uuid(&'a self, index: usize) -> crate::Result<Option<uuid::Uuid>> {
-        match self {
-            Mark::Uuid(bv) => {
-                let value = bv.get(index).map(|data| uuid::Uuid::from(*data));
-                Ok(value)
-            }
-            _ => Err(crate::Error::MismatchedType(self.as_str(), "Uuid")),
-        }
-    }
-
-    #[inline]
-    pub fn get_ipv6(&'a self, index: usize) -> crate::Result<Option<std::net::Ipv6Addr>> {
-        match self {
-            Mark::Ipv6(bv) => {
-                let value = bv.get(index).copied().map(Into::into);
-                Ok(value)
-            }
-            _ => Err(crate::Error::MismatchedType(self.as_str(), "Ipv6")),
-        }
-    }
-
-    #[inline]
-    pub fn get_opt_ipv6(
-        &'a self,
-        index: usize,
-    ) -> crate::Result<Option<Option<std::net::Ipv6Addr>>> {
-        let Mark::Nullable(Nullable { mask, data }) = self else {
-            let value = self.get_ipv6(index)?;
-            return Ok(Some(value));
-        };
-
-        if mask.get(index) == Some(&1) {
-            return Ok(Some(None));
-        }
-
-        let value = data.get_ipv6(index)?;
-        Ok(Some(value))
-    }
-
-    #[inline]
-    pub fn get_ipv4(&'a self, index: usize) -> crate::Result<Option<std::net::Ipv4Addr>> {
-        match self {
-            Mark::Ipv4(bv) => {
-                let value = bv.get(index).copied().map(Into::into);
-                Ok(value)
-            }
-            _ => Err(crate::Error::MismatchedType(self.as_str(), "Ipv4")),
-        }
-    }
-
-    #[inline]
-    pub fn get_bool(&'a self, index: usize) -> crate::Result<Option<bool>> {
-        match self {
-            Mark::Bool(bv) => {
-                let value = bv.get(index).copied().map(|v| v != 0);
-                Ok(value)
-            }
-            _ => Err(crate::Error::MismatchedType(self.as_str(), "bool")),
-        }
-    }
-
-    #[inline]
-    pub fn get_f64(&'a self, index: usize) -> crate::Result<Option<f64>> {
-        match self {
-            Mark::Float64(bv) => {
-                let value = bv.get(index).map(|v| v.get());
-                Ok(value)
-            }
-            _ => Err(crate::Error::MismatchedType(self.as_str(), "f64")),
-        }
-    }
-
-    #[inline]
-    pub fn get_u32(&'a self, index: usize) -> crate::Result<Option<u32>> {
-        match self {
-            Mark::UInt32(bv) => {
-                let value = bv.get(index).copied().map(U32::get);
-                Ok(value)
-            }
-            _ => Err(crate::Error::MismatchedType(self.as_str(), "u32")),
-        }
-    }
-
-    #[inline]
-    pub fn slice_lc_strs(
-        &'a self,
-        idx: Range<usize>,
-    ) -> crate::Result<impl Iterator<Item = &'a str>> {
+    pub fn slice_lc_strs(&'a self, idx: Range<usize>) -> crate::Result<LcStrIter<'a>> {
         let Mark::LowCardinality(lc) = self else {
             return Err(crate::Error::MismatchedType(
                 self.as_str(),
@@ -399,15 +360,15 @@ impl<'a> Mark<'a> {
             return Err(crate::Error::MismatchedType(keys.as_str(), "String"));
         };
 
-        let index_it: Box<dyn Iterator<Item = usize> + '_> = match lc.indices.as_ref() {
-            Mark::UInt8(bv) => Box::new(bv[idx].iter().copied().map(usize::from)),
-            Mark::UInt16(bv) => Box::new(bv[idx].iter().map(|v| usize::from(v.get()))),
-            Mark::UInt32(bv) => Box::new(bv[idx].iter().map(|v| v.get() as usize)),
-            Mark::UInt64(bv) => Box::new(bv[idx].iter().map(|v| usize::try_from(v.get()).unwrap())),
+        let indices = match lc.indices.as_ref() {
+            Mark::UInt8(bv) => LcIndexIter::U8(bv[idx].iter()),
+            Mark::UInt16(bv) => LcIndexIter::U16(bv[idx].iter()),
+            Mark::UInt32(bv) => LcIndexIter::U32(bv[idx].iter()),
+            Mark::UInt64(bv) => LcIndexIter::U64(bv[idx].iter()),
             _ => unreachable!("must never have any other type"),
         };
 
-        Ok(index_it.map(move |idx| keys.get(idx).copied().unwrap()))
+        Ok(LcStrIter { indices, keys })
     }
 
     #[inline]
@@ -428,11 +389,11 @@ impl<'a> Mark<'a> {
         };
 
         if matches!(array.values.as_ref(), Mark::Empty) {
-            return Ok(None);
+            return Ok(Some(ArrayLcStrIter { inner: None }));
         }
 
         let it = array.values.slice_lc_strs(start..end)?;
-        Ok(Some(it))
+        Ok(Some(ArrayLcStrIter { inner: Some(it) }))
     }
 
     #[inline]
@@ -475,6 +436,52 @@ impl<'a> Mark<'a> {
 
         Ok(Some(slice.iter().copied().map(|b| b != 0)))
     }
+    #[inline]
+    pub fn get_bool(&'a self, index: usize) -> crate::Result<Option<bool>> {
+        match self {
+            Mark::Bool(bv) => {
+                let value = bv.get(index).copied().map(|v| v != 0);
+                Ok(value)
+            }
+            _ => Err(crate::Error::MismatchedType(self.as_str(), "bool")),
+        }
+    }
+
+    define_ip_getters!((Ipv4, std::net::Ipv4Addr), (Ipv6, std::net::Ipv6Addr));
+
+    define_int_getters!(
+        (Int8, i8, std::convert::identity),
+        (Int16, i16, I16::get),
+        (Int32, i32, I32::get),
+        (Int64, i64, I64::get),
+        (Int128, i128, I128::get),
+        (UInt8, u8, std::convert::identity),
+        (UInt16, u16, U16::get),
+        (UInt32, u32, U32::get),
+        (UInt64, u64, U64::get),
+        (UInt128, u128, U128::get),
+        (Float32, f32, F32::get),
+        (Float64, f64, F64::get),
+        (Uuid, Uuid, Uuid::from),
+    );
+
+    define_opt_getters!(
+        (Ipv4, std::net::Ipv4Addr),
+        (Ipv6, std::net::Ipv6Addr),
+        (Uuid, Uuid),
+        (i8, i8),
+        (i16, i16),
+        (i32, i32),
+        (i64, i64),
+        (i128, i128),
+        (u8, u8),
+        (u16, u16),
+        (u32, u32),
+        (u64, u64),
+        (u128, u128),
+        (f64, f64),
+        (f32, f32),
+    );
 
     define_slice_fns!(
         (Int8, i8),
@@ -631,7 +638,7 @@ mod tests {
 
         for (i, expected) in expected_arrays.iter().enumerate() {
             let slice: &[&str] = strings_marker.get(i).unwrap().try_into()?;
-            let actual = slice.iter().copied().collect::<Vec<_>>();
+            let actual = slice.to_vec();
 
             assert_eq!(actual, *expected, "Mismatch at index {i}");
         }
@@ -1296,9 +1303,8 @@ mod tests {
 
             for polygon in polygons.flatten() {
                 for ring in polygon.flatten() {
-                    let pts: TupleSliceIterator = ring.try_into()?;
                     let mut flat_ring = Vec::new();
-                    for pt in pts {
+                    for pt in ring {
                         let (x, y): (f64, f64) = pt.try_into()?;
                         flat_ring.push((x, y));
                     }
@@ -1798,8 +1804,10 @@ mod tests {
 
         let marker = &block.markers[1];
         for i in 0..block.num_rows {
-            let it = marker.get_array_lc_strs(i)?;
-            assert!(it.is_none());
+            let mut it = marker
+                .get_array_lc_strs(i)?
+                .expect("expected to get an iterator");
+            assert_eq!(it.next(), None, "expected iterator to yield no items");
         }
 
         Ok(())

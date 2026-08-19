@@ -34,7 +34,7 @@ where
     delimited(multispace0, inner, multispace0)
 }
 
-fn parse_decimal_type(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_decimal_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     let (input, (precision, scale)) = preceded(
         tag("Decimal"),
         delimited(
@@ -65,11 +65,11 @@ fn parse_decimal_type(input: &[u8]) -> IResult<&[u8], Type> {
     Ok((input, typ))
 }
 
-fn parse_string(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_string(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     map(tag("String"), |_| Type::String).parse(input)
 }
 
-fn parse_fixed_string(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_fixed_string(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     map(
         preceded(
             tag("FixedString"),
@@ -84,7 +84,7 @@ fn parse_fixed_string(input: &[u8]) -> IResult<&[u8], Type> {
     .parse(input)
 }
 
-fn parse_int_primitives(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_int_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     alt((
         map(tag("UUID"), |_| Type::Uuid),
         map(tag("Bool"), |_| Type::Bool),
@@ -104,7 +104,7 @@ fn parse_int_primitives(input: &[u8]) -> IResult<&[u8], Type> {
     .parse(input)
 }
 
-fn parse_float_primitives(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_float_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     alt((
         map(tag("Float64"), |_| Type::Float64),
         map(tag("Float32"), |_| Type::Float32),
@@ -113,7 +113,7 @@ fn parse_float_primitives(input: &[u8]) -> IResult<&[u8], Type> {
     .parse(input)
 }
 
-fn parse_inet_primitives(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_inet_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     alt((
         map(tag("IPv6"), |_| Type::Ipv6),
         map(tag("IPv4"), |_| Type::Ipv4),
@@ -121,7 +121,7 @@ fn parse_inet_primitives(input: &[u8]) -> IResult<&[u8], Type> {
     .parse(input)
 }
 
-fn parse_datetime64(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_datetime64(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     let (input, (precision, tz)) = preceded(
         tag("DateTime64"),
         delimited(
@@ -143,7 +143,7 @@ fn parse_datetime64(input: &[u8]) -> IResult<&[u8], Type> {
     Ok((input, Type::DateTime64(precision, tz)))
 }
 
-fn parse_tuple(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_tuple(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     map(
         preceded(
             tag("Tuple"),
@@ -158,7 +158,7 @@ fn parse_tuple(input: &[u8]) -> IResult<&[u8], Type> {
     .parse(input)
 }
 
-fn parse_date_primitives(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_date_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     alt((
         parse_datetime64,
         map(tag("DateTime64"), |_| Type::DateTime64(3, UTC)),
@@ -169,7 +169,7 @@ fn parse_date_primitives(input: &[u8]) -> IResult<&[u8], Type> {
     .parse(input)
 }
 
-fn parse_geo_primitives(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_geo_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     alt((
         map(tag("LineString"), |_| Type::LineString),
         map(tag("MultiLineString"), |_| Type::MultiLineString),
@@ -181,7 +181,7 @@ fn parse_geo_primitives(input: &[u8]) -> IResult<&[u8], Type> {
     .parse(input)
 }
 
-fn parse_other_primitives(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_other_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     alt((
         map(tag("Dynamic"), |_| Type::Dynamic),
         map(tag("JSON"), |_| Type::Json),
@@ -190,7 +190,7 @@ fn parse_other_primitives(input: &[u8]) -> IResult<&[u8], Type> {
     .parse(input)
 }
 
-fn parse_primitive_type(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_primitive_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     alt((
         parse_string,
         parse_int_primitives,
@@ -203,7 +203,7 @@ fn parse_primitive_type(input: &[u8]) -> IResult<&[u8], Type> {
     .parse(input)
 }
 
-fn parse_nullable(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_nullable(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     map(
         preceded(
             tag("Nullable"),
@@ -214,7 +214,7 @@ fn parse_nullable(input: &[u8]) -> IResult<&[u8], Type> {
     .parse(input)
 }
 
-fn parse_map(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_map(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     map(
         preceded(
             tag("Map"),
@@ -229,7 +229,7 @@ fn parse_map(input: &[u8]) -> IResult<&[u8], Type> {
     .parse(input)
 }
 
-fn parse_array(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_array(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     map(
         preceded(
             tag("Array"),
@@ -240,7 +240,7 @@ fn parse_array(input: &[u8]) -> IResult<&[u8], Type> {
     .parse(input)
 }
 
-fn parse_variant(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_variant(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     map(
         preceded(
             tag("Variant"),
@@ -255,7 +255,7 @@ fn parse_variant(input: &[u8]) -> IResult<&[u8], Type> {
     .parse(input)
 }
 
-fn parse_lowcardinality(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_lowcardinality(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     map(
         preceded(
             tag("LowCardinality"),
@@ -266,9 +266,36 @@ fn parse_lowcardinality(input: &[u8]) -> IResult<&[u8], Type> {
     .parse(input)
 }
 
-fn parse_nested(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_named_tuple(input: &[u8]) -> IResult<&[u8], Type<'_>> {
+    let (input, fields) = parse_pairs("Tuple", input)?;
+    let fields = map_fields(fields);
+
+    Ok((input, Type::NamedTuple(fields)))
+}
+
+fn parse_nested(input: &[u8]) -> IResult<&[u8], Type<'_>> {
+    let (input, pairs) = parse_pairs("Nested", input)?;
+    let fields = map_fields(pairs);
+
+    Ok((input, Type::Nested(fields)))
+}
+
+fn map_fields<'a>(pairs: Vec<(&'a [u8], Type<'a>)>) -> Vec<Field<'a>> {
+    pairs
+        .into_iter()
+        .map(|(name, typ)| Field {
+            name: unsafe { std::str::from_utf8_unchecked(name) },
+            typ,
+        })
+        .collect::<Vec<_>>()
+}
+
+fn parse_pairs<'a>(
+    name: &'static str,
+    input: &'a [u8],
+) -> IResult<&'a [u8], Vec<(&'a [u8], Type<'a>)>> {
     let (input, pairs) = preceded(
-        tag("Nested"),
+        tag(name),
         delimited(
             ws(char('(')),
             separated_list1(
@@ -284,18 +311,10 @@ fn parse_nested(input: &[u8]) -> IResult<&[u8], Type> {
     )
     .parse(input)?;
 
-    let fields = pairs
-        .into_iter()
-        .map(|(name, typ)| Field {
-            name: unsafe { std::str::from_utf8_unchecked(name) },
-            typ,
-        })
-        .collect::<Vec<_>>();
-
-    Ok((input, Type::Nested(fields)))
+    Ok((input, pairs))
 }
 
-fn parse_enum8(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_enum8(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     map(
         preceded(
             tag("Enum8"),
@@ -324,7 +343,7 @@ fn parse_enum8(input: &[u8]) -> IResult<&[u8], Type> {
     .parse(input)
 }
 
-fn parse_enum16(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_enum16(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     map(
         preceded(
             tag("Enum16"),
@@ -353,7 +372,7 @@ fn parse_enum16(input: &[u8]) -> IResult<&[u8], Type> {
     .parse(input)
 }
 
-pub fn parse_type(input: &[u8]) -> IResult<&[u8], Type> {
+pub fn parse_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     alt((
         parse_lowcardinality,
         parse_nullable,
@@ -364,6 +383,7 @@ pub fn parse_type(input: &[u8]) -> IResult<&[u8], Type> {
         parse_decimal_type,
         parse_variant,
         parse_nested,
+        parse_named_tuple,
         parse_enum8,
         parse_enum16,
         parse_other_primitives,
@@ -454,6 +474,33 @@ mod tests {
                     name: "scores",
                     typ: Type::Array(Box::new(Type::UInt32))
                 }
+            ])))
+        );
+    }
+
+    #[test]
+    fn array_named_tuple() {
+        let input = b"Array(Tuple(kind String, agent_symbols Bool, file_or_func_id UInt128, addr_or_line UInt64))";
+        let (_, typ) = parse_type(input).unwrap();
+        assert_eq!(
+            typ,
+            Type::Array(Box::new(Type::NamedTuple(vec![
+                Field {
+                    name: "kind",
+                    typ: Type::String
+                },
+                Field {
+                    name: "agent_symbols",
+                    typ: Type::Bool
+                },
+                Field {
+                    name: "file_or_func_id",
+                    typ: Type::UInt128
+                },
+                Field {
+                    name: "addr_or_line",
+                    typ: Type::UInt64
+                },
             ])))
         );
     }

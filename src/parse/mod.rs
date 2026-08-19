@@ -116,14 +116,14 @@ pub(crate) fn parse_var_str(input: &[u8]) -> IResult<&[u8], &str> {
     Ok((remainder, str_value))
 }
 
-fn parse_var_str_type(input: &[u8]) -> IResult<&[u8], Type> {
+fn parse_var_str_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     let (input, str_bytes) = parse_var_str_bytes(input)?;
     std::str::from_utf8(str_bytes).map_err(|e| Error::Utf8Decode(e, str_bytes.to_vec()))?;
     let (_, typ) = parse_type(str_bytes)?;
     Ok((input, typ))
 }
 
-fn parse_offsets(input: &[u8], num_rows: usize) -> IResult<&[u8], Offsets> {
+fn parse_offsets(input: &[u8], num_rows: usize) -> IResult<&[u8], Offsets<'_>> {
     let (offsets, input) = input.split_at(num_rows * size_of::<u64>());
     let offsets = ByteView::<U64<LittleEndian>>::try_from(offsets)?;
 

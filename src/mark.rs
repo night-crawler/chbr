@@ -19,7 +19,7 @@ macro_rules! impl_get {
     ($ty:ident, $variant:ident) => {
         impl<'a> $ty<'a> {
             #[inline]
-            pub fn get(&'a self, index: usize) -> Option<Value<'a>> {
+            pub const fn get(&'a self, index: usize) -> Option<Value<'a>> {
                 if self.data.len() <= index {
                     None
                 } else {
@@ -52,7 +52,7 @@ pub struct Variant<'a> {
 
 impl Variant<'_> {
     #[inline]
-    pub fn get(&self, index: usize) -> Option<Value> {
+    pub fn get(&self, index: usize) -> Option<Value<'_>> {
         let discriminator = (*self.discriminators.get(index)?) as usize;
         let in_type_index = *self.offsets.get(index)?;
         self.types
@@ -84,7 +84,7 @@ impl LowCardinality<'_> {
     }
 
     #[inline]
-    pub fn get(&self, index: usize) -> Option<Value> {
+    pub fn get(&self, index: usize) -> Option<Value<'_>> {
         // https://github.com/ClickHouse/clickhouse-go/blob/71a2b475e899afe9626f40af513bcf25aa3098a2/lib/column/lowcardinality.go#L191
         let Some(keys) = &self.additional_keys else {
             return None;
@@ -113,10 +113,24 @@ pub struct Nested<'a> {
 
 impl Nested<'_> {
     #[inline]
-    pub fn get(&self, index: usize) -> Option<Value> {
+    pub fn get(&self, index: usize) -> Option<Value<'_>> {
         // verify the index is present
         let _ = self.array_of_tuples.get(index)?;
         Some(Value::Nested { mark: self, index })
+    }
+}
+
+#[derive(Debug)]
+pub struct NamedTuple<'a> {
+    pub col_names: Vec<&'a str>,
+    pub tuple: Box<Mark<'a>>,
+}
+
+impl NamedTuple<'_> {
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<Value<'_>> {
+        let _ = self.tuple.get(index)?;
+        Some(Value::NamedTuple { mark: self, index })
     }
 }
 
@@ -134,7 +148,7 @@ pub struct Array<'a> {
 
 impl Array<'_> {
     #[inline]
-    pub fn get(&self, index: usize) -> Option<Value> {
+    pub fn get(&self, index: usize) -> Option<Value<'_>> {
         let (start, end) = self.offsets.offset_indices(index).unwrap()?;
         Some(self.values.slice(start..end))
     }
@@ -172,7 +186,7 @@ pub struct FixedString<'a> {
 
 impl FixedString<'_> {
     #[inline]
-    pub fn get(&self, index: usize) -> Option<Value> {
+    pub fn get(&self, index: usize) -> Option<Value<'_>> {
         let offset = self.size * index;
         let slice = self.data[offset..offset + self.size].rtrim_zeros();
 
@@ -207,7 +221,7 @@ pub struct Enum8<'a> {
 
 impl Enum8<'_> {
     #[inline]
-    pub fn get(&self, index: usize) -> Option<Value> {
+    pub fn get(&self, index: usize) -> Option<Value<'_>> {
         let variant = *self.data.get(index)?;
         if let Ok(index) = self.variants.binary_search_by_key(&variant, |(_, id)| *id) {
             return Some(Value::String(self.variants[index].0));
@@ -225,7 +239,7 @@ pub struct Enum16<'a> {
 
 impl Enum16<'_> {
     #[inline]
-    pub fn get(&self, index: usize) -> Option<Value> {
+    pub fn get(&self, index: usize) -> Option<Value<'_>> {
         let variant = self.data.get(index)?.get();
         if let Ok(index) = self.variants.binary_search_by_key(&variant, |(_, id)| *id) {
             return Some(Value::String(self.variants[index].0));
@@ -243,7 +257,7 @@ pub struct Dynamic<'a> {
 
 impl Dynamic<'_> {
     #[inline]
-    pub fn get(&self, index: usize) -> Option<Value> {
+    pub fn get(&self, index: usize) -> Option<Value<'_>> {
         let discriminator = self.discriminators.get(index).copied()?;
         let in_type_index = self.offsets.get(index).copied()?;
         self.columns
@@ -260,7 +274,7 @@ pub struct Nullable<'a> {
 
 impl Nullable<'_> {
     #[inline]
-    pub fn get(&self, index: usize) -> Option<Value> {
+    pub fn get(&self, index: usize) -> Option<Value<'_>> {
         if self.mask.get(index) == Some(&1) {
             return Some(Value::Empty);
         }
@@ -322,6 +336,7 @@ pub enum Mark<'a> {
     Map(Map<'a>),
     Variant(Variant<'a>),
     Nested(Nested<'a>),
+    NamedTuple(NamedTuple<'a>),
     Dynamic(Dynamic<'a>),
 
     Json(Json<'a>),
@@ -391,7 +406,61 @@ impl Mark<'_> {
             Self::LowCardinality { .. } => None,
             Self::String(_) => None,
             Self::Nested { .. } => None,
+            Self::NamedTuple { .. } => None,
             Self::Empty => None,
+        }
+    }
+
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Mark::Empty => "Empty",
+            Mark::Bool(_) => "Bool",
+            Mark::Int8(_) => "Int8",
+            Mark::Int16(_) => "Int16",
+            Mark::Int32(_) => "Int32",
+            Mark::Int64(_) => "Int64",
+            Mark::Int128(_) => "Int128",
+            Mark::Int256(_) => "Int256",
+            Mark::UInt8(_) => "UInt8",
+            Mark::UInt16(_) => "UInt16",
+            Mark::UInt32(_) => "UInt32",
+            Mark::UInt64(_) => "UInt64",
+            Mark::UInt128(_) => "UInt128",
+            Mark::UInt256(_) => "UInt256",
+            Mark::Float32(_) => "Float32",
+            Mark::Float64(_) => "Float64",
+            Mark::BFloat16(_) => "BFloat16",
+            Mark::Decimal32(_) => "Decimal32",
+            Mark::Decimal64(_) => "Decimal64",
+            Mark::Decimal128(_) => "Decimal128",
+            Mark::Decimal256(_) => "Decimal256",
+            Mark::String(_) => "String",
+            Mark::FixedString(_) => "FixedString",
+            Mark::Uuid(_) => "Uuid",
+            Mark::Date(_) => "Date",
+            Mark::Date32(_) => "Date32",
+            Mark::DateTime(_) => "DateTime",
+            Mark::DateTime64(_) => "DateTime64",
+            Mark::Ipv4(_) => "Ipv4",
+            Mark::Ipv6(_) => "Ipv6",
+            Mark::Point(_) => "Point",
+            Mark::Ring(_) => "Ring",
+            Mark::Polygon(_) => "Polygon",
+            Mark::MultiPolygon(_) => "MultiPolygon",
+            Mark::LineString(_) => "LineString",
+            Mark::MultiLineString(_) => "MultiLineString",
+            Mark::Enum8(_) => "Enum8",
+            Mark::Enum16(_) => "Enum16",
+            Mark::LowCardinality(_) => "LowCardinality",
+            Mark::Array(_) => "Array",
+            Mark::Tuple(_) => "Tuple",
+            Mark::Nullable(_) => "Nullable",
+            Mark::Map(_) => "Map",
+            Mark::Variant(_) => "Variant",
+            Mark::Nested(_) => "Nested",
+            Mark::NamedTuple(_) => "NamedTuple",
+            Mark::Dynamic(_) => "Dynamic",
+            Mark::Json(_) => "Json",
         }
     }
 }
@@ -419,8 +488,9 @@ impl Debug for Mark<'_> {
             Array, BFloat16, Bool, Date, Date32, DateTime, DateTime64, Decimal32, Decimal64,
             Decimal128, Decimal256, Dynamic, Empty, Enum8, Enum16, FixedString, Float32, Float64,
             Int8, Int16, Int32, Int64, Int128, Int256, Ipv4, Ipv6, Json, LineString,
-            LowCardinality, Map, MultiLineString, MultiPolygon, Nested, Nullable, Point, Polygon,
-            Ring, String, Tuple, UInt8, UInt16, UInt32, UInt64, UInt128, UInt256, Uuid, Variant,
+            LowCardinality, Map, MultiLineString, MultiPolygon, NamedTuple, Nested, Nullable,
+            Point, Polygon, Ring, String, Tuple, UInt8, UInt16, UInt32, UInt64, UInt128, UInt256,
+            Uuid, Variant,
         };
         match self {
             Empty => f.write_str("Empty"),
@@ -541,6 +611,12 @@ impl Debug for Mark<'_> {
                 .field("array_of_tuples", &n.array_of_tuples)
                 .finish(),
 
+            NamedTuple(n) => f
+                .debug_struct("NamedTuple")
+                .field("col_names", &n.col_names)
+                .field("tuple", &n.tuple)
+                .finish(),
+
             Dynamic(d) => f
                 .debug_struct("Dynamic")
                 .field("discriminators", &d.discriminators)
@@ -552,60 +628,6 @@ impl Debug for Mark<'_> {
                 .field("paths", &j.paths)
                 .field("headers", &j.headers)
                 .finish(),
-        }
-    }
-}
-
-impl Mark<'_> {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Mark::Empty => "Empty",
-            Mark::Bool(_) => "Bool",
-            Mark::Int8(_) => "Int8",
-            Mark::Int16(_) => "Int16",
-            Mark::Int32(_) => "Int32",
-            Mark::Int64(_) => "Int64",
-            Mark::Int128(_) => "Int128",
-            Mark::Int256(_) => "Int256",
-            Mark::UInt8(_) => "UInt8",
-            Mark::UInt16(_) => "UInt16",
-            Mark::UInt32(_) => "UInt32",
-            Mark::UInt64(_) => "UInt64",
-            Mark::UInt128(_) => "UInt128",
-            Mark::UInt256(_) => "UInt256",
-            Mark::Float32(_) => "Float32",
-            Mark::Float64(_) => "Float64",
-            Mark::BFloat16(_) => "BFloat16",
-            Mark::Decimal32(_) => "Decimal32",
-            Mark::Decimal64(_) => "Decimal64",
-            Mark::Decimal128(_) => "Decimal128",
-            Mark::Decimal256(_) => "Decimal256",
-            Mark::String(_) => "String",
-            Mark::FixedString(_) => "FixedString",
-            Mark::Uuid(_) => "Uuid",
-            Mark::Date(_) => "Date",
-            Mark::Date32(_) => "Date32",
-            Mark::DateTime(_) => "DateTime",
-            Mark::DateTime64(_) => "DateTime64",
-            Mark::Ipv4(_) => "Ipv4",
-            Mark::Ipv6(_) => "Ipv6",
-            Mark::Point(_) => "Point",
-            Mark::Ring(_) => "Ring",
-            Mark::Polygon(_) => "Polygon",
-            Mark::MultiPolygon(_) => "MultiPolygon",
-            Mark::LineString(_) => "LineString",
-            Mark::MultiLineString(_) => "MultiLineString",
-            Mark::Enum8(_) => "Enum8",
-            Mark::Enum16(_) => "Enum16",
-            Mark::LowCardinality(_) => "LowCardinality",
-            Mark::Array(_) => "Array",
-            Mark::Tuple(_) => "Tuple",
-            Mark::Nullable(_) => "Nullable",
-            Mark::Map(_) => "Map",
-            Mark::Variant(_) => "Variant",
-            Mark::Nested(_) => "Nested",
-            Mark::Dynamic(_) => "Dynamic",
-            Mark::Json(_) => "Json",
         }
     }
 }

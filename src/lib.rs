@@ -7,6 +7,7 @@ use std::{
 
 use chrono::{NaiveDate, TimeZone};
 use chrono_tz::Tz;
+use log::debug;
 use uuid::Uuid;
 use zerocopy::little_endian::{I32, I64, I128, U16, U32, U64};
 
@@ -219,7 +220,7 @@ impl ParsedBlock<'_> {
             missing.retain(|name| !present_columns.contains(name));
 
             return Err(Error::InvalidColumnOrder(format!(
-                "Got unexpected columns: {missing:?}"
+                "Got unexpected columns: {missing:?}; present: {present_columns:?}"
             )));
         }
 
@@ -234,6 +235,7 @@ impl ParsedBlock<'_> {
     }
 }
 
+#[derive(Clone)]
 pub struct BlocksIterator<'a> {
     blocks: Peekable<std::slice::Iter<'a, ParsedBlock<'a>>>,
     block_row: usize,
@@ -249,20 +251,29 @@ impl<'a> BlocksIterator<'a> {
     }
 
     pub fn new_ordered(blocks: &'a mut [ParsedBlock<'a>], order: &[&str]) -> Result<Self> {
-        let order_map = order
-            .iter()
-            .enumerate()
-            .map(|(index, name)| (*name, index))
-            .collect::<HashMap<_, _>>();
-        for block in blocks.iter_mut() {
-            block.reorder(&order_map)?;
-        }
-
+        reorder_block_cols(blocks, order)?;
         Ok(Self {
             blocks: blocks.iter().peekable(),
             block_row: 0,
         })
     }
+}
+
+pub fn reorder_block_cols(blocks: &mut [ParsedBlock<'_>], order: &[&str]) -> Result<()> {
+    let order_map = order
+        .iter()
+        .enumerate()
+        .map(|(index, name)| (*name, index))
+        .collect::<HashMap<_, _>>();
+    for block in blocks.iter_mut() {
+        block.reorder(&order_map)?;
+    }
+
+    if let Some(first) = blocks.first() {
+        debug!("reordered: {:?}", first.col_names);
+    }
+
+    Ok(())
 }
 
 pub struct BlockRow<'a> {
@@ -273,19 +284,19 @@ pub struct BlockRow<'a> {
 }
 
 impl<'a> BlockRow<'a> {
-    pub fn cols(&self) -> &'a [Mark<'a>] {
+    pub const fn cols(&self) -> &'a [Mark<'a>] {
         self.cols
     }
 
-    pub fn col_names(&self) -> &'a [&'a str] {
+    pub const fn col_names(&self) -> &'a [&'a str] {
         self.col_names
     }
 
-    pub fn row_index(&self) -> usize {
+    pub const fn row_index(&self) -> usize {
         self.row_index
     }
 
-    pub fn col_index(&self) -> usize {
+    pub const fn col_index(&self) -> usize {
         self.col_index
     }
 }

@@ -40,6 +40,68 @@ macro_rules! define_slice_fns {
     };
 }
 
+macro_rules! define_int_getters {
+    ($( ($mark_variant:ident, $ret_type:ty, $transform:expr) ),+ $(,)?) => {
+        paste::paste! {
+            $(
+                #[inline]
+                pub fn [<get_ $ret_type:lower>](&'a self, index: usize) -> crate::Result<Option<$ret_type>> {
+                    match self {
+                        Mark::$mark_variant(bv) => {
+                            Ok(bv.get(index).copied().map($transform))
+                        }
+                        _ => Err(crate::Error::MismatchedType(self.as_str(), stringify!($ret_type))),
+                    }
+                }
+            )+
+        }
+    };
+}
+
+macro_rules! define_ip_getters {
+    ($( ($mark_variant:ident, $ret_type:ty) ),+ $(,)?) => {
+        paste::paste! {
+            $(
+                #[inline]
+                pub fn [<get_ $mark_variant:lower>](&'a self, index: usize)
+                    -> crate::Result<Option<$ret_type>>
+                {
+                    match self {
+                        Mark::$mark_variant(bv) => Ok(bv.get(index).copied().map(Into::into)),
+                        _ => Err(crate::Error::MismatchedType(self.as_str(), stringify!($mark_variant))),
+                    }
+                }
+            )+
+        }
+    };
+}
+
+macro_rules! define_opt_getters {
+    ($( ($suffix:ident, $ret_type:ty) ),+ $(,)?) => {
+        paste::paste! {
+            $(
+                #[inline]
+                pub fn [<get_opt_ $suffix:lower>](&'a self, index: usize) -> crate::Result<Option<Option<$ret_type>>> {
+                    let Mark::Nullable(Nullable { mask, data }) = self else {
+                        let value = self.[<get_ $suffix:lower>](index)?;
+                        return Ok(Some(value));
+                    };
+
+                    if mask.get(index) == Some(&1) {
+                        return Ok(Some(None));
+                    }
+
+                    let value = data.[<get_ $suffix:lower>](index)?;
+                    Ok(Some(value))
+                }
+            )+
+        }
+    };
+}
+
 pub(crate) use bt;
+pub(crate) use define_int_getters;
+pub(crate) use define_ip_getters;
+pub(crate) use define_opt_getters;
 pub(crate) use define_slice_fns;
 pub(crate) use t;

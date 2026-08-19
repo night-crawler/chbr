@@ -83,6 +83,13 @@ pub fn nested<'a>(
     many(ctx, fields.iter().map(|f| &f.typ))
 }
 
+pub fn named_tuple<'a>(
+    ctx: &ParseContext<'a>,
+    fields: &[Field<'a>],
+) -> IResult<&'a [u8], Vec<TypeHeader<'a>>> {
+    many(ctx, fields.iter().map(|f| &f.typ))
+}
+
 pub fn point<'a>() -> TypeHeader<'a> {
     TypeHeader::Tuple(vec![TypeHeader::Empty, TypeHeader::Empty])
 }
