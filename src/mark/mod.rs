@@ -176,181 +176,231 @@ impl<'a> Mark<'a> {
         }
     }
 
-    pub fn get(&'a self, index: usize) -> Option<Value<'a>> {
+    pub fn get(&'a self, index: usize) -> crate::Result<Option<Value<'a>>> {
         match self {
-            Mark::Empty => None,
-            Mark::Bool(b) => b.get(index).map(Value::Bool),
-            Mark::Int8(bv) => bv.get(index).copied().map(Value::Int8),
-            Mark::Int16(bv) => bv.get(index).map(|v| v.get()).map(Value::Int16),
-            Mark::Int32(bv) => bv.get(index).map(|v| v.get()).map(Value::Int32),
-            Mark::Int64(bv) => bv.get(index).map(|v| v.get()).map(Value::Int64),
-            Mark::Int128(bv) => bv.get(index).map(Value::Int128),
-            Mark::Int256(bv) => bv.get(index).map(Value::Int256),
-            Mark::UInt8(bv) => bv.get(index).copied().map(Value::UInt8),
-            Mark::UInt16(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt16),
-            Mark::UInt32(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt32),
-            Mark::UInt64(bv) => bv.get(index).map(|v| v.get()).map(Value::UInt64),
-            Mark::UInt128(bv) => bv.get(index).map(Value::UInt128),
-            Mark::UInt256(bv) => bv.get(index).map(Value::UInt256),
-            Mark::Float32(bv) => bv.get(index).map(|v| v.get()).map(Value::Float32),
-            Mark::Float64(bv) => bv.get(index).map(|v| v.get()).map(Value::Float64),
-            Mark::BFloat16(bv) => {
-                let value = *bv.get(index)?;
-                Some(Value::BFloat16(value.into()))
-            }
-            Mark::Decimal32(d) => d.get(index),
-            Mark::Decimal64(d) => d.get(index),
-            Mark::Decimal128(d) => d.get(index),
-            Mark::Decimal256(d) => d.get(index),
-            Mark::String(strings) => Some(Value::String(strings.get(index)?)),
-            Mark::FixedString(fs) => fs.get(index),
-            Mark::Uuid(bv) => {
-                let value = bv.get(index)?;
-                Some(Value::Uuid(value))
-            }
-            Mark::Date(bv) => {
-                let value = *bv.get(index)?;
-                Some(Value::Date(value.into()))
-            }
-            Mark::Date32(bv) => {
-                let value = *bv.get(index)?;
-                Some(Value::Date32(value.into()))
-            }
-            Mark::DateTime(d) => d.get(index),
-            Mark::DateTime64(d) => d.get(index),
-            Mark::Ipv4(data) => {
-                let value = *data.get(index)?;
-                Some(Value::Ipv4(value.into()))
-            }
-            Mark::Ipv6(data) => {
-                let value = data.get(index)?;
-                Some(Value::Ipv6(value))
-            }
-            Mark::Enum8(v) => v.get(index),
-            Mark::Enum16(v) => v.get(index),
+            Mark::Empty => Ok(None),
+            Mark::Bool(b) => Ok(b.get(index).map(Value::Bool)),
+            Mark::Int8(bv) => Ok(bv.get(index).copied().map(Value::Int8)),
+            Mark::Int16(bv) => Ok(bv.get(index).map(|v| v.get()).map(Value::Int16)),
+            Mark::Int32(bv) => Ok(bv.get(index).map(|v| v.get()).map(Value::Int32)),
+            Mark::Int64(bv) => Ok(bv.get(index).map(|v| v.get()).map(Value::Int64)),
+            Mark::Int128(bv) => Ok(bv.get(index).map(Value::Int128)),
+            Mark::Int256(bv) => Ok(bv.get(index).map(Value::Int256)),
+            Mark::UInt8(bv) => Ok(bv.get(index).copied().map(Value::UInt8)),
+            Mark::UInt16(bv) => Ok(bv.get(index).map(|v| v.get()).map(Value::UInt16)),
+            Mark::UInt32(bv) => Ok(bv.get(index).map(|v| v.get()).map(Value::UInt32)),
+            Mark::UInt64(bv) => Ok(bv.get(index).map(|v| v.get()).map(Value::UInt64)),
+            Mark::UInt128(bv) => Ok(bv.get(index).map(Value::UInt128)),
+            Mark::UInt256(bv) => Ok(bv.get(index).map(Value::UInt256)),
+            Mark::Float32(bv) => Ok(bv.get(index).map(|v| v.get()).map(Value::Float32)),
+            Mark::Float64(bv) => Ok(bv.get(index).map(|v| v.get()).map(Value::Float64)),
+            Mark::BFloat16(bv) => Ok(bv.get(index).copied().map(Into::into).map(Value::BFloat16)),
+            Mark::Decimal32(d) => Ok(d.get(index)),
+            Mark::Decimal64(d) => Ok(d.get(index)),
+            Mark::Decimal128(d) => Ok(d.get(index)),
+            Mark::Decimal256(d) => Ok(d.get(index)),
+            Mark::String(strings) => Ok(strings.get(index).map(Value::String)),
+            Mark::FixedString(fs) => Ok(fs.get(index)),
+            Mark::Uuid(bv) => Ok(bv.get(index).map(Value::Uuid)),
+            Mark::Date(bv) => Ok(bv.get(index).copied().map(Into::into).map(Value::Date)),
+            Mark::Date32(bv) => Ok(bv.get(index).copied().map(Into::into).map(Value::Date32)),
+            Mark::DateTime(d) => Ok(d.get(index)),
+            Mark::DateTime64(d) => Ok(d.get(index)),
+            Mark::Ipv4(data) => Ok(data.get(index).copied().map(Into::into).map(Value::Ipv4)),
+            Mark::Ipv6(data) => Ok(data.get(index).map(Value::Ipv6)),
+            Mark::Enum8(v) => Ok(v.get(index)),
+            Mark::Enum16(v) => Ok(v.get(index)),
             Mark::LowCardinality(lc) => lc.get(index),
             Mark::Array(a) => a.get(index),
-            Mark::Tuple(mark) => Some(Value::Tuple { mark, index }),
+            Mark::Tuple(mark) => Ok(Some(Value::Tuple { mark, index })),
             Mark::Nullable(n) => n.get(index),
-            Mark::Map(mark) => Some(Value::Map { mark, index }),
+            Mark::Map(mark) => Ok(Some(Value::Map { mark, index })),
             Mark::Variant(v) => v.get(index),
             Mark::Nested(n) => n.get(index),
             Mark::NamedTuple(n) => n.get(index),
             Mark::Dynamic(d) => d.get(index),
-            Mark::Json(j) => Some(Value::Json { mark: j, index }),
+            Mark::Json(j) => Ok(Some(Value::Json { mark: j, index })),
         }
     }
 
-    pub fn slice(&'a self, idx: Range<usize>) -> Value<'a> {
+    pub fn slice(&'a self, idx: Range<usize>) -> crate::Result<Value<'a>> {
         match self {
             Mark::Empty => {
                 if !idx.is_empty() {
                     cold_path();
-                    panic!("Index out of bounds for empty marker");
+                    return Err(Error::IndexOutOfBounds(idx.end, "Empty"));
                 }
-                Value::Empty
+                Ok(Value::Empty)
             }
-            Mark::Bool(bv) => Value::BoolSlice(&bv.data[idx]),
-            Mark::Int8(bv) => Value::Int8Slice(&bv[idx]),
-            Mark::Int16(bv) => Value::Int16Slice(&bv[idx]),
-            Mark::Int32(bv) => Value::Int32Slice(&bv[idx]),
-            Mark::Int64(bv) => Value::Int64Slice(&bv[idx]),
-            Mark::Int128(bv) => Value::Int128Slice(&bv[idx]),
-            Mark::Int256(bv) => Value::Int256Slice(&bv[idx]),
-            Mark::UInt8(bv) => Value::UInt8Slice(&bv[idx]),
-            Mark::UInt16(bv) => Value::UInt16Slice(&bv[idx]),
-            Mark::UInt32(bv) => Value::UInt32Slice(&bv[idx]),
-            Mark::UInt64(bv) => Value::UInt64Slice(&bv[idx]),
-            Mark::UInt128(bv) => Value::UInt128Slice(&bv[idx]),
-            Mark::UInt256(bv) => Value::UInt256Slice(&bv[idx]),
-            Mark::Float32(bv) => Value::Float32Slice(&bv[idx]),
-            Mark::Float64(bv) => Value::Float64Slice(&bv[idx]),
-            Mark::BFloat16(bv) => Value::BFloat16Slice(&bv[idx]),
-            Mark::Uuid(bv) => Value::UuidSlice(&bv[idx]),
-            Mark::Date(bv) => Value::Date16Slice(&bv[idx]),
-            Mark::Date32(bv) => Value::Date32Slice(&bv[idx]),
-            Mark::Ipv4(bv) => Value::Ipv4Slice(&bv[idx]),
-            Mark::Ipv6(bv) => Value::Ipv6Slice(&bv[idx]),
-            Mark::String(sv) => Value::StringSlice(&sv.data[idx]),
+            Mark::Bool(bv) => Ok(Value::BoolSlice(checked_slice(bv.data, idx, "Bool")?)),
+            Mark::Int8(bv) => Ok(Value::Int8Slice(checked_slice(bv.as_slice(), idx, "Int8")?)),
+            Mark::Int16(bv) => Ok(Value::Int16Slice(checked_slice(
+                bv.as_slice(),
+                idx,
+                "Int16",
+            )?)),
+            Mark::Int32(bv) => Ok(Value::Int32Slice(checked_slice(
+                bv.as_slice(),
+                idx,
+                "Int32",
+            )?)),
+            Mark::Int64(bv) => Ok(Value::Int64Slice(checked_slice(
+                bv.as_slice(),
+                idx,
+                "Int64",
+            )?)),
+            Mark::Int128(bv) => Ok(Value::Int128Slice(checked_slice(
+                bv.as_slice(),
+                idx,
+                "Int128",
+            )?)),
+            Mark::Int256(bv) => Ok(Value::Int256Slice(checked_slice(
+                bv.as_slice(),
+                idx,
+                "Int256",
+            )?)),
+            Mark::UInt8(bv) => Ok(Value::UInt8Slice(checked_slice(
+                bv.as_slice(),
+                idx,
+                "UInt8",
+            )?)),
+            Mark::UInt16(bv) => Ok(Value::UInt16Slice(checked_slice(
+                bv.as_slice(),
+                idx,
+                "UInt16",
+            )?)),
+            Mark::UInt32(bv) => Ok(Value::UInt32Slice(checked_slice(
+                bv.as_slice(),
+                idx,
+                "UInt32",
+            )?)),
+            Mark::UInt64(bv) => Ok(Value::UInt64Slice(checked_slice(
+                bv.as_slice(),
+                idx,
+                "UInt64",
+            )?)),
+            Mark::UInt128(bv) => Ok(Value::UInt128Slice(checked_slice(
+                bv.as_slice(),
+                idx,
+                "UInt128",
+            )?)),
+            Mark::UInt256(bv) => Ok(Value::UInt256Slice(checked_slice(
+                bv.as_slice(),
+                idx,
+                "UInt256",
+            )?)),
+            Mark::Float32(bv) => Ok(Value::Float32Slice(checked_slice(
+                bv.as_slice(),
+                idx,
+                "Float32",
+            )?)),
+            Mark::Float64(bv) => Ok(Value::Float64Slice(checked_slice(
+                bv.as_slice(),
+                idx,
+                "Float64",
+            )?)),
+            Mark::BFloat16(bv) => Ok(Value::BFloat16Slice(checked_slice(
+                bv.as_slice(),
+                idx,
+                "BFloat16",
+            )?)),
+            Mark::Uuid(bv) => Ok(Value::UuidSlice(checked_slice(bv.as_slice(), idx, "Uuid")?)),
+            Mark::Date(bv) => Ok(Value::Date16Slice(checked_slice(
+                bv.as_slice(),
+                idx,
+                "Date",
+            )?)),
+            Mark::Date32(bv) => Ok(Value::Date32Slice(checked_slice(
+                bv.as_slice(),
+                idx,
+                "Date32",
+            )?)),
+            Mark::Ipv4(bv) => Ok(Value::Ipv4Slice(checked_slice(bv.as_slice(), idx, "Ipv4")?)),
+            Mark::Ipv6(bv) => Ok(Value::Ipv6Slice(checked_slice(bv.as_slice(), idx, "Ipv6")?)),
+            Mark::String(sv) => Ok(Value::StringSlice(checked_slice(
+                sv.data.as_slice(),
+                idx,
+                "String",
+            )?)),
 
-            Mark::Decimal32(d) => Value::Decimal32Slice {
+            Mark::Decimal32(d) => Ok(Value::Decimal32Slice {
                 precision: d.precision,
-                slice: &d.data[idx],
-            },
-            Mark::Decimal64(d) => Value::Decimal64Slice {
+                slice: checked_slice(d.data.as_slice(), idx, "Decimal32")?,
+            }),
+            Mark::Decimal64(d) => Ok(Value::Decimal64Slice {
                 precision: d.precision,
-                slice: &d.data[idx],
-            },
-            Mark::Decimal128(d) => Value::Decimal128Slice {
+                slice: checked_slice(d.data.as_slice(), idx, "Decimal64")?,
+            }),
+            Mark::Decimal128(d) => Ok(Value::Decimal128Slice {
                 precision: d.precision,
-                slice: &d.data[idx],
-            },
-            Mark::Decimal256(d) => Value::Decimal256Slice {
+                slice: checked_slice(d.data.as_slice(), idx, "Decimal128")?,
+            }),
+            Mark::Decimal256(d) => Ok(Value::Decimal256Slice {
                 precision: d.precision,
-                slice: &d.data[idx],
-            },
-            Mark::FixedString(mark) => Value::FixedStringSlice {
+                slice: checked_slice(d.data.as_slice(), idx, "Decimal256")?,
+            }),
+            Mark::FixedString(mark) => Ok(Value::FixedStringSlice {
                 mark,
-                range: idx.try_into().unwrap(),
-            },
+                range: idx.try_into()?,
+            }),
 
-            Mark::DateTime(d) => Value::DateTime32Slice {
+            Mark::DateTime(d) => Ok(Value::DateTime32Slice {
                 tz: d.tz,
-                slice: &d.data[idx],
-            },
-            Mark::DateTime64(d) => Value::DateTime64Slice {
+                slice: checked_slice(d.data.as_slice(), idx, "DateTime")?,
+            }),
+            Mark::DateTime64(d) => Ok(Value::DateTime64Slice {
                 precision: d.precision,
                 tz: d.tz,
-                slice: &d.data[idx],
-            },
-            Mark::Enum8(mark) => Value::Enum8Slice {
+                slice: checked_slice(d.data.as_slice(), idx, "DateTime64")?,
+            }),
+            Mark::Enum8(mark) => Ok(Value::Enum8Slice {
                 mark,
-                range: idx.try_into().unwrap(),
-            },
-            Mark::Enum16(mark) => Value::Enum16Slice {
+                range: idx.try_into()?,
+            }),
+            Mark::Enum16(mark) => Ok(Value::Enum16Slice {
                 mark,
-                range: idx.try_into().unwrap(),
-            },
-            Mark::LowCardinality(mark) => Value::LowCardinalitySlice {
-                range: idx.try_into().unwrap(),
+                range: idx.try_into()?,
+            }),
+            Mark::LowCardinality(mark) => Ok(Value::LowCardinalitySlice {
+                range: idx.try_into()?,
                 mark,
-            },
-            Mark::Array(mark) => Value::ArraySlice {
+            }),
+            Mark::Array(mark) => Ok(Value::ArraySlice {
                 mark,
-                range: idx.try_into().unwrap(),
-            },
-            Mark::Tuple(mark) => Value::TupleSlice {
+                range: idx.try_into()?,
+            }),
+            Mark::Tuple(mark) => Ok(Value::TupleSlice {
                 mark,
-                range: idx.try_into().unwrap(),
-            },
-            Mark::Nullable(mark) => Value::NullableSlice {
+                range: idx.try_into()?,
+            }),
+            Mark::Nullable(mark) => Ok(Value::NullableSlice {
                 mark,
-                range: idx.try_into().unwrap(),
-            },
-            Mark::Map(mark) => Value::MapSlice {
+                range: idx.try_into()?,
+            }),
+            Mark::Map(mark) => Ok(Value::MapSlice {
                 mark,
-                range: idx.try_into().unwrap(),
-            },
-            Mark::Nested(mark) => Value::NestedSlice {
+                range: idx.try_into()?,
+            }),
+            Mark::Nested(mark) => Ok(Value::NestedSlice {
                 mark,
-                range: idx.try_into().unwrap(),
-            },
-            Mark::NamedTuple(mark) => Value::NamedTupleSlice {
+                range: idx.try_into()?,
+            }),
+            Mark::NamedTuple(mark) => Ok(Value::NamedTupleSlice {
                 mark,
-                range: idx.try_into().unwrap(),
-            },
-            Mark::Variant(mark) => Value::VariantSlice {
+                range: idx.try_into()?,
+            }),
+            Mark::Variant(mark) => Ok(Value::VariantSlice {
                 mark,
-                range: idx.try_into().unwrap(),
-            },
-            Mark::Dynamic(mark) => Value::DynamicSlice {
+                range: idx.try_into()?,
+            }),
+            Mark::Dynamic(mark) => Ok(Value::DynamicSlice {
                 mark,
-                range: idx.try_into().unwrap(),
-            },
-            Mark::Json(mark) => JsonSlice {
+                range: idx.try_into()?,
+            }),
+            Mark::Json(mark) => Ok(JsonSlice {
                 mark,
-                range: idx.try_into().unwrap(),
-            },
+                range: idx.try_into()?,
+            }),
         }
     }
 
@@ -359,20 +409,27 @@ impl<'a> Mark<'a> {
         match self {
             Mark::String(strings) => Ok(strings.get(index)),
             Mark::FixedString(fs) => {
-                let offset = fs.size * index;
-                let slice = fs.data[offset..offset + fs.size].rtrim_zeros();
-                let slice = unsafe { std::str::from_utf8_unchecked(slice) };
+                let Some(offset) = fs.size.checked_mul(index) else {
+                    return Ok(None);
+                };
+                let Some(end) = offset.checked_add(fs.size) else {
+                    return Ok(None);
+                };
+                let Some(slice) = fs.data.get(offset..end) else {
+                    return Ok(None);
+                };
+                let slice = unsafe { std::str::from_utf8_unchecked(slice.rtrim_zeros()) };
                 Ok(Some(slice))
             }
             Mark::LowCardinality(lc) => {
                 let Some(keys) = &lc.additional_keys else {
                     cold_path();
-                    return Err(crate::Error::CorruptedData(
+                    return Err(Error::CorruptedData(
                         "LowCardinality marker without additional keys".to_owned(),
                     ));
                 };
 
-                let Some(value_index) = lc.value_index(index) else {
+                let Some(value_index) = lc.value_index(index)? else {
                     return Ok(None);
                 };
 
@@ -382,14 +439,14 @@ impl<'a> Mark<'a> {
 
                 let Mark::String(keys) = keys.as_ref() else {
                     cold_path();
-                    return Err(crate::Error::MismatchedType(keys.as_str(), "&str"));
+                    return Err(Error::MismatchedType(keys.as_str(), "&str"));
                 };
 
                 Ok(keys.get(value_index))
             }
             mark => {
                 cold_path();
-                Err(crate::Error::MismatchedType(mark.as_str(), "&str"))
+                Err(Error::MismatchedType(mark.as_str(), "&str"))
             }
         }
     }
@@ -432,7 +489,7 @@ impl<'a> Mark<'a> {
                     .map(|dt| {
                         dt.with_tz_and_precision(d.tz, d.precision).ok_or_else(|| {
                             cold_path();
-                            crate::Error::Overflow("DateTime64 value out of range".to_owned())
+                            Error::Overflow("DateTime64 value out of range".to_owned())
                         })
                     })
                     .transpose()?
@@ -442,7 +499,7 @@ impl<'a> Mark<'a> {
             }
             _ => {
                 cold_path();
-                Err(crate::Error::MismatchedType(self.as_str(), "DateTime"))
+                Err(Error::MismatchedType(self.as_str(), "DateTime"))
             }
         }
     }
@@ -451,22 +508,19 @@ impl<'a> Mark<'a> {
     pub fn slice_lc_strs(&'a self, idx: Range<usize>) -> crate::Result<LcStrIter<'a>> {
         let Mark::LowCardinality(lc) = self else {
             cold_path();
-            return Err(crate::Error::MismatchedType(
-                self.as_str(),
-                "LowCardinality",
-            ));
+            return Err(Error::MismatchedType(self.as_str(), "LowCardinality"));
         };
 
         let Some(keys) = &lc.additional_keys else {
             cold_path();
-            return Err(crate::Error::CorruptedData(
+            return Err(Error::CorruptedData(
                 "LowCardinality marker without additional keys".to_owned(),
             ));
         };
 
         let Mark::String(keys) = keys.as_ref() else {
             cold_path();
-            return Err(crate::Error::MismatchedType(keys.as_str(), "String"));
+            return Err(Error::MismatchedType(keys.as_str(), "String"));
         };
 
         let indices = match lc.indices.as_ref() {
@@ -476,7 +530,7 @@ impl<'a> Mark<'a> {
             Mark::UInt64(bv) => LcIndexIter::U64(bv[idx].iter()),
             other => {
                 cold_path();
-                return Err(crate::Error::CorruptedData(format!(
+                return Err(Error::CorruptedData(format!(
                     "unexpected LowCardinality indices type: {}",
                     other.as_str()
                 )));
@@ -498,7 +552,7 @@ impl<'a> Mark<'a> {
 
         let Mark::Array(array) = self else {
             cold_path();
-            return Err(crate::Error::MismatchedType(self.as_str(), "Array"));
+            return Err(Error::MismatchedType(self.as_str(), "Array"));
         };
 
         let Some((start, end)) = array.offsets.offset_indices(index)? else {
@@ -517,7 +571,7 @@ impl<'a> Mark<'a> {
     pub fn get_map<K, V>(&'a self, index: usize) -> crate::Result<Option<MapIterator<'a, K, V>>> {
         let Mark::Map(map) = self else {
             cold_path();
-            return Err(crate::Error::MismatchedType(self.as_str(), "Map"));
+            return Err(Error::MismatchedType(self.as_str(), "Map"));
         };
         let Some((start, end)) = map.offsets.offset_indices(index)? else {
             return Ok(None);
@@ -540,7 +594,7 @@ impl<'a> Mark<'a> {
     ) -> crate::Result<Option<impl Iterator<Item = bool>>> {
         let Mark::Array(arr) = self else {
             cold_path();
-            return Err(crate::Error::MismatchedType(self.as_str(), "Array"));
+            return Err(Error::MismatchedType(self.as_str(), "Array"));
         };
 
         let Some((start, end)) = arr.offsets.offset_indices(index)? else {
@@ -552,7 +606,7 @@ impl<'a> Mark<'a> {
             Mark::Empty => &[],
             other => {
                 cold_path();
-                return Err(crate::Error::MismatchedType(other.as_str(), "Int8"));
+                return Err(Error::MismatchedType(other.as_str(), "Int8"));
             }
         };
 
@@ -567,7 +621,7 @@ impl<'a> Mark<'a> {
             }
             _ => {
                 cold_path();
-                Err(crate::Error::MismatchedType(self.as_str(), "bool"))
+                Err(Error::MismatchedType(self.as_str(), "bool"))
             }
         }
     }
@@ -633,6 +687,20 @@ impl<'a> Mark<'a> {
     );
 }
 
+#[inline]
+fn checked_slice<'a, T>(
+    data: &'a [T],
+    range: Range<usize>,
+    kind: &'static str,
+) -> crate::Result<&'a [T]> {
+    let end = range.end;
+    let Some(slice) = data.get(range) else {
+        cold_path();
+        return Err(Error::IndexOutOfBounds(end, kind));
+    };
+    Ok(slice)
+}
+
 macro_rules! impl_get {
     ($ty:ident, $variant:ident) => {
         impl<'a> $ty<'a> {
@@ -673,12 +741,17 @@ impl Variant<'_> {
     pub const NULL_DISCRIMINATOR: u8 = 255;
 
     #[inline]
-    pub fn get(&self, index: usize) -> Option<Value<'_>> {
-        let discriminator = (*self.discriminators.get(index)?) as usize;
-        let in_type_index = *self.offsets.get(index)?;
-        self.types
-            .get(discriminator)
-            .and_then(|mark| mark.get(in_type_index))
+    pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
+        let Some(&discriminator) = self.discriminators.get(index) else {
+            return Ok(None);
+        };
+        let Some(&in_type_index) = self.offsets.get(index) else {
+            return Ok(None);
+        };
+        let Some(mark) = self.types.get(discriminator as usize) else {
+            return Ok(None);
+        };
+        mark.get(in_type_index)
     }
 }
 
@@ -699,7 +772,7 @@ impl LowCardinality<'_> {
             ));
         };
 
-        let sliced = self.indices.slice(range);
+        let sliced = self.indices.slice(range)?;
 
         Ok(LowCardinalitySliceIterator {
             indices: SliceUsizeIterator::try_from(sliced)?,
@@ -708,34 +781,61 @@ impl LowCardinality<'_> {
     }
 
     #[inline(always)]
-    pub fn value_index(&self, index: usize) -> Option<usize> {
+    pub fn value_index(&self, index: usize) -> crate::Result<Option<usize>> {
         let value_index = match self.indices.as_ref() {
-            Mark::UInt8(indices) => indices.get(index).copied()? as usize,
-            Mark::UInt16(indices) => indices.get(index)?.get() as usize,
-            Mark::UInt32(indices) => indices.get(index)?.get() as usize,
-            Mark::UInt64(indices) => usize::try_from(indices.get(index)?.get()).unwrap(),
-            _ => unreachable!("unexpected indices type in LowCardinality "),
+            Mark::UInt8(indices) => {
+                let Some(value) = indices.get(index) else {
+                    return Ok(None);
+                };
+                usize::from(*value)
+            }
+            Mark::UInt16(indices) => {
+                let Some(value) = indices.get(index) else {
+                    return Ok(None);
+                };
+                usize::from(value.get())
+            }
+            Mark::UInt32(indices) => {
+                let Some(value) = indices.get(index) else {
+                    return Ok(None);
+                };
+                value.get() as usize
+            }
+            Mark::UInt64(indices) => {
+                let Some(value) = indices.get(index) else {
+                    return Ok(None);
+                };
+                usize::try_from(value.get())?
+            }
+            other => {
+                cold_path();
+                return Err(Error::CorruptedData(format!(
+                    "unexpected LowCardinality indices type: {}",
+                    other.as_str()
+                )));
+            }
         };
 
-        Some(value_index)
+        Ok(Some(value_index))
     }
 
     #[inline]
-    pub fn get(&self, index: usize) -> Option<Value<'_>> {
+    pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         // https://github.com/ClickHouse/clickhouse-go/blob/71a2b475e899afe9626f40af513bcf25aa3098a2/lib/column/lowcardinality.go#L191
         let Some(keys) = &self.additional_keys else {
-            return None;
+            return Ok(None);
         };
 
-        let value_index = self.value_index(index)?;
+        let Some(value_index) = self.value_index(index)? else {
+            return Ok(None);
+        };
         if value_index == 0 && self.is_nullable {
-            return Some(Value::Empty);
+            return Ok(Some(Value::Empty));
         }
 
         // fast path for LowCardinality with String keys
         if let Mark::String(keys) = keys.as_ref() {
-            let value = keys.get(value_index)?;
-            return Some(Value::String(value));
+            return Ok(keys.get(value_index).map(Value::String));
         }
 
         keys.get(value_index)
@@ -750,10 +850,12 @@ pub struct Nested<'a> {
 
 impl Nested<'_> {
     #[inline]
-    pub fn get(&self, index: usize) -> Option<Value<'_>> {
+    pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         // verify the index is present
-        let _ = self.array_of_tuples.get(index)?;
-        Some(Value::Nested { mark: self, index })
+        if self.array_of_tuples.get(index)?.is_none() {
+            return Ok(None);
+        }
+        Ok(Some(Value::Nested { mark: self, index }))
     }
 }
 
@@ -765,9 +867,11 @@ pub struct NamedTuple<'a> {
 
 impl NamedTuple<'_> {
     #[inline]
-    pub fn get(&self, index: usize) -> Option<Value<'_>> {
-        let _ = self.tuple.get(index)?;
-        Some(Value::NamedTuple { mark: self, index })
+    pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
+        if self.tuple.get(index)?.is_none() {
+            return Ok(None);
+        }
+        Ok(Some(Value::NamedTuple { mark: self, index }))
     }
 }
 
@@ -785,9 +889,11 @@ pub struct Array<'a> {
 
 impl Array<'_> {
     #[inline]
-    pub fn get(&self, index: usize) -> Option<Value<'_>> {
-        let (start, end) = self.offsets.offset_indices(index).unwrap()?;
-        Some(self.values.slice(start..end))
+    pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
+        let Some((start, end)) = self.offsets.offset_indices(index)? else {
+            return Ok(None);
+        };
+        Ok(Some(self.values.slice(start..end)?))
     }
 }
 
@@ -824,8 +930,9 @@ pub struct FixedString<'a> {
 impl FixedString<'_> {
     #[inline]
     pub fn get(&self, index: usize) -> Option<Value<'_>> {
-        let offset = self.size * index;
-        let slice = self.data[offset..offset + self.size].rtrim_zeros();
+        let offset = self.size.checked_mul(index)?;
+        let end = offset.checked_add(self.size)?;
+        let slice = self.data.get(offset..end)?.rtrim_zeros();
 
         Some(Value::String(unsafe {
             std::str::from_utf8_unchecked(slice)
@@ -894,12 +1001,17 @@ pub struct Dynamic<'a> {
 
 impl Dynamic<'_> {
     #[inline]
-    pub fn get(&self, index: usize) -> Option<Value<'_>> {
-        let discriminator = self.discriminators.get(index).copied()?;
-        let in_type_index = self.offsets.get(index).copied()?;
-        self.columns
-            .get(discriminator)
-            .and_then(|m| m.get(in_type_index))
+    pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
+        let Some(&discriminator) = self.discriminators.get(index) else {
+            return Ok(None);
+        };
+        let Some(&in_type_index) = self.offsets.get(index) else {
+            return Ok(None);
+        };
+        let Some(mark) = self.columns.get(discriminator) else {
+            return Ok(None);
+        };
+        mark.get(in_type_index)
     }
 }
 
@@ -911,9 +1023,9 @@ pub struct Nullable<'a> {
 
 impl Nullable<'_> {
     #[inline]
-    pub fn get(&self, index: usize) -> Option<Value<'_>> {
+    pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         if self.mask.get(index) == Some(&1) {
-            return Some(Value::Empty);
+            return Ok(Some(Value::Empty));
         }
 
         self.data.get(index)

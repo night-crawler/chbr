@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let id = id.get_u32(i)?.expect("valid row index");
 
-        let tags: &[&str] = tags.get(i).expect("valid row index").try_into()?;
+        let tags: &[&str] = tags.get(i)?.expect("valid row index").try_into()?;
 
         let mut attrs_vec = vec![];
         if let Some(map) = attrs.get_map::<&str, &str>(i)? {
@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        let payload = match payload.get(i).expect("valid row index") {
+        let payload = match payload.get(i)?.expect("valid row index") {
             Value::String(s) => format!("string: {s}"),
             Value::Int64(n) => format!("int: {n}"),
             Value::Int64Slice(xs) => {

@@ -481,7 +481,7 @@ impl<'a> TryRead<'a> for Value<'a> {
 
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value) = self.0.get(idx) else {
+        let Some(value) = self.0.get(idx)? else {
             cold_path();
             return Err(Error::IndexOutOfBounds(idx, self.0.as_str()));
         };

@@ -1,5 +1,7 @@
 use std::{collections::HashMap, str::FromStr as _};
 
+use super::{LowCardinality, Mark, StringView, Tuple};
+
 use crate::{
     Bf16Data,
     common::load,
@@ -38,9 +40,12 @@ fn int_array() -> TestResult {
     let index_marker = &block.markers[0];
 
     let indices = (0..block.num_rows)
-        .filter_map(|i| index_marker.get(i))
-        .map(|v| i64::try_from(v).unwrap())
-        .collect::<Vec<_>>();
+        .map(|i| index_marker.get(i))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .map(i64::try_from)
+        .collect::<Result<Vec<_>, _>>()?;
 
     let expected_ids = [
         0, 128969003, 214500519, 301458964, 475251162, 1228122092, 1873422981, 2172352370,
@@ -67,7 +72,7 @@ fn int_array() -> TestResult {
 
     let mut arrays = Vec::new();
     for index in 0..block.num_rows {
-        let v: &[zc::I64] = arr_marker.get(index).unwrap().try_into()?;
+        let v: &[zc::I64] = arr_marker.get(index)?.unwrap().try_into()?;
         arrays.push(v);
     }
 
@@ -92,7 +97,7 @@ fn plain_strings() -> TestResult {
 
     let strings_marker = &block.markers[1];
     for (i, expected) in expected_strings.iter().enumerate() {
-        let value: &str = strings_marker.get(i).unwrap().try_into()?;
+        let value: &str = strings_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -124,7 +129,7 @@ fn plain_strings_array() -> TestResult {
     let strings_marker = &block.markers[1];
 
     for (i, expected) in expected_arrays.iter().enumerate() {
-        let slice: &[&str] = strings_marker.get(i).unwrap().try_into()?;
+        let slice: &[&str] = strings_marker.get(i)?.unwrap().try_into()?;
         let actual = slice.to_vec();
 
         assert_eq!(actual, *expected, "Mismatch at index {i}");
@@ -149,7 +154,7 @@ fn lc_string() -> TestResult {
 
     let strings_marker = &block.markers[1];
     for (i, expected) in expected_strings.iter().enumerate() {
-        let value: &str = strings_marker.get(i).unwrap().try_into()?;
+        let value: &str = strings_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -191,10 +196,10 @@ fn lc_array_string() -> TestResult {
 
     let strings_marker = &block.markers[1];
     for (i, expected) in expected_arrays.iter().enumerate() {
-        let it: LowCardinalitySliceIterator = strings_marker.get(i).unwrap().try_into()?;
+        let it: LowCardinalitySliceIterator = strings_marker.get(i)?.unwrap().try_into()?;
         let mut actual = vec![];
         for value in it {
-            let value: &str = value.try_into()?;
+            let value: &str = value?.try_into()?;
             actual.push(value);
         }
         assert_eq!(actual, *expected, "Mismatch at index {i}");
@@ -236,7 +241,7 @@ fn array_in_array_in64() -> TestResult {
     let arrs_marker = &block.markers[1];
 
     for (i, expected) in expected_arrays.iter().enumerate() {
-        let v = arrs_marker.get(i).unwrap();
+        let v = arrs_marker.get(i)?.unwrap();
         let outer: ArraySliceIterator<&[zc::I64]> = v.try_into()?;
         let mut actual_outer = vec![];
         for slice in outer.flatten() {
@@ -272,7 +277,7 @@ fn nullable_string() -> TestResult {
 
     let strings_marker = &block.markers[1];
     for (i, expected) in expected_col.iter().enumerate() {
-        let value: Option<&str> = strings_marker.get(i).unwrap().try_into()?;
+        let value: Option<&str> = strings_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
 
         let value = strings_marker.get_opt_str(i)?.unwrap();
@@ -308,7 +313,7 @@ fn tuple_sample() -> TestResult {
     let tuples_marker = &block.markers[1];
 
     for (i, expected) in expected_tuples.iter().enumerate() {
-        let value: (i64, &str) = tuples_marker.get(i).unwrap().try_into()?;
+        let value: (i64, &str) = tuples_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -338,7 +343,7 @@ fn map_sample() -> TestResult {
 
     let map_marker = &block.markers[1];
     for (i, expected) in expected.iter().enumerate() {
-        let map_value = map_marker.get(i).unwrap();
+        let map_value = map_marker.get(i)?.unwrap();
         let map_iter: MapIterator<&str, &str> = map_value.try_into()?;
         let map = map_iter.flatten().collect::<HashMap<&str, &str>>();
         assert_eq!(map, *expected, "Mismatch at index {i}");
@@ -377,7 +382,7 @@ fn array_map_sample() -> TestResult {
     let map_marker = &block.markers[1];
     for (i, expected) in expected.iter().enumerate() {
         let map_slice_iterator: MapSliceIterator<&str, &str> =
-            map_marker.get(i).unwrap().try_into()?;
+            map_marker.get(i)?.unwrap().try_into()?;
         let mut actual = vec![];
 
         for map in map_slice_iterator.flatten() {
@@ -423,7 +428,7 @@ fn map_in_map() -> TestResult {
     let map_marker = &block.markers[1];
 
     for (i, expected) in expected.iter().enumerate() {
-        let map_value = map_marker.get(i).unwrap();
+        let map_value = map_marker.get(i)?.unwrap();
         let map_iter: MapIterator<&str, MapIterator<&str, &str>> = map_value.try_into()?;
 
         let mut actual = HashMap::new();
@@ -462,7 +467,7 @@ fn array_of_tuples() -> TestResult {
     let tuples_marker = &block.markers[1];
 
     for (i, expected) in expected_arrays.iter().enumerate() {
-        let slice: TupleSliceIterator = tuples_marker.get(i).unwrap().try_into()?;
+        let slice: TupleSliceIterator = tuples_marker.get(i)?.unwrap().try_into()?;
         let mut actual = vec![];
         for tup in slice {
             let (s, n): (&str, i64) = tup.try_into()?;
@@ -495,7 +500,7 @@ fn variant() -> TestResult {
     let expected_str_repr = ["1", "a", "1, 2, 3", "2", "b", "4, 5, 6", "3"];
 
     for (i, expected) in expected_str_repr.iter().enumerate() {
-        let value = variant_marker.get(i).unwrap();
+        let value = variant_marker.get(i)?.unwrap();
         if let Ok(value) = <Value<'_> as TryInto<i64>>::try_into(value.clone()) {
             assert_eq!(format!("{value}"), *expected, "Mismatch at index {i}");
             continue;
@@ -540,7 +545,7 @@ fn uuid_and_dates() -> TestResult {
         uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000004")?,
     ];
     for (i, expected) in expected_uuids.iter().enumerate() {
-        let value: uuid::Uuid = uuid_marker.get(i).unwrap().try_into()?;
+        let value: uuid::Uuid = uuid_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -552,7 +557,7 @@ fn uuid_and_dates() -> TestResult {
         chrono::NaiveDate::from_ymd_opt(2023, 3, 1).unwrap(),
     ];
     for (i, expected) in expected_dates.iter().enumerate() {
-        let value: chrono::NaiveDate = date_marker.get(i).unwrap().try_into()?;
+        let value: chrono::NaiveDate = date_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -564,7 +569,7 @@ fn uuid_and_dates() -> TestResult {
         chrono::NaiveDate::from_ymd_opt(1969, 9, 23).unwrap(),
     ];
     for (i, expected) in expected_date32.iter().enumerate() {
-        let value: chrono::NaiveDate = date32_marker.get(i).unwrap().try_into()?;
+        let value: chrono::NaiveDate = date32_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -580,7 +585,7 @@ fn uuid_and_dates() -> TestResult {
             .with_timezone(&chrono_tz::UTC),
     ];
     for (i, expected) in expected_datetimes.iter().enumerate() {
-        let value: chrono::DateTime<chrono_tz::Tz> = datetime_marker.get(i).unwrap().try_into()?;
+        let value: chrono::DateTime<chrono_tz::Tz> = datetime_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
 
         let value = datetime_marker.get_datetime(i, chrono_tz::UTC)?.unwrap();
@@ -601,7 +606,7 @@ fn uuid_and_dates() -> TestResult {
 
     for (i, expected) in expected_datetime64.iter().enumerate() {
         let value: chrono::DateTime<chrono_tz::Tz> =
-            datetime64_marker.get(i).unwrap().try_into()?;
+            datetime64_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -624,7 +629,7 @@ fn decimal_sample() -> TestResult {
     ];
     let decimal32_marker = &block.markers[1];
     for (i, expected) in expected_d32.iter().enumerate() {
-        let value: rust_decimal::Decimal = decimal32_marker.get(i).unwrap().try_into()?;
+        let value: rust_decimal::Decimal = decimal32_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -636,7 +641,7 @@ fn decimal_sample() -> TestResult {
 
     let decimal64_marker = &block.markers[2];
     for (i, expected) in expected_d64.iter().enumerate() {
-        let value: rust_decimal::Decimal = decimal64_marker.get(i).unwrap().try_into()?;
+        let value: rust_decimal::Decimal = decimal64_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -647,7 +652,7 @@ fn decimal_sample() -> TestResult {
     ];
     let decimal128_marker = &block.markers[3];
     for (i, expected) in expected_d128.iter().enumerate() {
-        let value: rust_decimal::Decimal = decimal128_marker.get(i).unwrap().try_into()?;
+        let value: rust_decimal::Decimal = decimal128_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -673,7 +678,7 @@ fn ip_sample() -> TestResult {
     ];
 
     for (i, expected) in expected_ipv4.iter().enumerate() {
-        let value: std::net::Ipv4Addr = ipv4_marker.get(i).unwrap().try_into()?;
+        let value: std::net::Ipv4Addr = ipv4_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -684,7 +689,7 @@ fn ip_sample() -> TestResult {
         std::net::Ipv6Addr::from_str("2001:db8:85a3:0:0:8a2e:370:7334")?,
     ];
     for (i, expected) in expected_ipv6.iter().enumerate() {
-        let value: std::net::Ipv6Addr = ipv6_marker.get(i).unwrap().try_into()?;
+        let value: std::net::Ipv6Addr = ipv6_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -699,7 +704,7 @@ fn geo_sample() -> TestResult {
     let expected_points = [(10.0, 10.0), (5.0, 5.0), (0.0, 0.0), (100.0, 100.0)];
     let points_marker = &block.markers[1];
     for (i, expected) in expected_points.iter().enumerate() {
-        let value: (f64, f64) = points_marker.get(i).unwrap().try_into()?;
+        let value: (f64, f64) = points_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Point mismatch at index {i}");
     }
 
@@ -716,7 +721,7 @@ fn geo_sample() -> TestResult {
     ];
     let rings_marker = &block.markers[2];
     for (i, expected) in expected_rings.iter().enumerate() {
-        let value: TupleSliceIterator = rings_marker.get(i).unwrap().try_into()?;
+        let value: TupleSliceIterator = rings_marker.get(i)?.unwrap().try_into()?;
         let mut actual = Vec::with_capacity(expected.len());
         for point in value {
             let (x, y): (f64, f64) = point.try_into()?;
@@ -739,7 +744,7 @@ fn geo_sample() -> TestResult {
     let polygons_marker = &block.markers[3];
     for (i, expected) in expected_polygons.iter().enumerate() {
         let value: ArraySliceIterator<TupleSliceIterator> =
-            polygons_marker.get(i).unwrap().try_into()?;
+            polygons_marker.get(i)?.unwrap().try_into()?;
         let mut actual = Vec::with_capacity(expected.len());
         for points in value.flatten() {
             let mut ring = Vec::with_capacity(expected[0].len());
@@ -784,7 +789,7 @@ fn geo_sample() -> TestResult {
     let multipolygons_marker = &block.markers[4];
     for (i, expected) in expected_multipolygons.iter().enumerate() {
         let polygons: ArraySliceIterator<ArraySliceIterator<TupleSliceIterator>> =
-            multipolygons_marker.get(i).unwrap().try_into()?;
+            multipolygons_marker.get(i)?.unwrap().try_into()?;
         let mut actual = Vec::new();
 
         for polygon in polygons.flatten() {
@@ -808,7 +813,7 @@ fn geo_sample() -> TestResult {
     ];
     let linestrings_marker = &block.markers[5];
     for (i, expected) in expected_linestrings.iter().enumerate() {
-        let value: TupleSliceIterator = linestrings_marker.get(i).unwrap().try_into()?;
+        let value: TupleSliceIterator = linestrings_marker.get(i)?.unwrap().try_into()?;
         let mut actual = Vec::with_capacity(expected.len());
         for point in value {
             let (x, y): (f64, f64) = point.try_into()?;
@@ -839,7 +844,7 @@ fn geo_sample() -> TestResult {
     let multilinestrings_marker = &block.markers[6];
     for (i, expected) in expected_multilinestrings.iter().enumerate() {
         let lines: ArraySliceIterator<TupleSliceIterator> =
-            multilinestrings_marker.get(i).unwrap().try_into()?;
+            multilinestrings_marker.get(i)?.unwrap().try_into()?;
         let mut actual = Vec::with_capacity(expected.len());
 
         for pts in lines.flatten() {
@@ -874,7 +879,7 @@ fn float_sample() -> TestResult {
     let expected_f32 = [3.14f32, 2.71, 1.41, 0.57721];
 
     for (i, expected) in expected_f32.iter().enumerate() {
-        let value: f32 = f32_marker.get(i).unwrap().try_into()?;
+        let value: f32 = f32_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -886,7 +891,7 @@ fn float_sample() -> TestResult {
         0.5772156649015329,
     ];
     for (i, expected) in expected_f64.iter().enumerate() {
-        let value: f64 = f64_marker.get(i).unwrap().try_into()?;
+        let value: f64 = f64_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -898,7 +903,7 @@ fn float_sample() -> TestResult {
         bf16::from_f32(0.57421875),
     ];
     for (i, expected) in expected_bf16.iter().enumerate() {
-        let value: bf16 = bf16_marker.get(i).unwrap().try_into()?;
+        let value: bf16 = bf16_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -927,7 +932,7 @@ fn bool_array_sample() -> TestResult {
     ];
     let bool_array_marker = &block.markers[1];
     for (i, expected) in expected.iter().enumerate() {
-        let value: BoolSliceIterator = bool_array_marker.get(i).unwrap().try_into()?;
+        let value: BoolSliceIterator = bool_array_marker.get(i)?.unwrap().try_into()?;
         let mut actual = vec![];
         for b in value {
             actual.push(b);
@@ -962,10 +967,10 @@ fn nullable_string_array() -> TestResult {
     let nullable_string_array_marker = &block.markers[1];
     for (i, expected) in expected.iter().enumerate() {
         let value: NullableSliceIterator =
-            nullable_string_array_marker.get(i).unwrap().try_into()?;
+            nullable_string_array_marker.get(i)?.unwrap().try_into()?;
         let mut actual = vec![];
         for item in value {
-            let item: Option<&str> = item.try_into()?;
+            let item: Option<&str> = item?.try_into()?;
             actual.push(item);
         }
         assert_eq!(actual, *expected, "Mismatch at index {i}");
@@ -984,7 +989,7 @@ fn metric_activity() -> TestResult {
             if !name.contains("attrs") {
                 continue;
             }
-            let value = col.get(index).unwrap();
+            let value = col.get(index)?.unwrap();
             let value: MapIterator<&str, &str> = value.try_into()?;
 
             let mut map = HashMap::new();
@@ -1014,7 +1019,7 @@ fn array_of_nested() -> TestResult {
     let nested_mark = &block.markers[1];
 
     for (row_idx, expected_outer) in expected.iter().enumerate() {
-        let outer_slice: NestedSliceIterator = nested_mark.get(row_idx).unwrap().try_into()?;
+        let outer_slice: NestedSliceIterator = nested_mark.get(row_idx)?.unwrap().try_into()?;
 
         let mut actual_outer = Vec::<Vec<(i64, &str)>>::new();
 
@@ -1026,7 +1031,8 @@ fn array_of_nested() -> TestResult {
             for nested_row in nested_iter {
                 let (mut id, mut name) = (None, None);
 
-                for (field_name, field_value) in nested_row {
+                for field in nested_row {
+                    let (field_name, field_value) = field?;
                     match field_name {
                         "child_id" => id = Some(field_value.try_into()?),
                         "child_name" => name = Some(field_value.try_into()?),
@@ -1069,14 +1075,15 @@ fn simple_nested() -> TestResult {
     let nested_marker = &block.markers[1];
 
     for (row_idx, expected_nested) in expected.iter().enumerate() {
-        let nested_iter: NestedIterator = nested_marker.get(row_idx).unwrap().try_into()?;
+        let nested_iter: NestedIterator = nested_marker.get(row_idx)?.unwrap().try_into()?;
 
         let mut actual_nested = Vec::<(i64, &str)>::new();
         for nested_row in nested_iter {
             let mut id: Option<i64> = None;
             let mut name: Option<&str> = None;
 
-            for (field_name, field_value) in nested_row {
+            for field in nested_row {
+                let (field_name, field_value) = field?;
                 match field_name {
                     "child_id" => id = Some(field_value.try_into()?),
                     "child_name" => name = Some(field_value.try_into()?),
@@ -1120,7 +1127,7 @@ fn fixed_string_sample() -> TestResult {
 
     let fixed_string_marker = &block.markers[1];
     for (i, expected) in expected.iter().enumerate() {
-        let value: &str = fixed_string_marker.get(i).unwrap().try_into()?;
+        let value: &str = fixed_string_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -1151,7 +1158,7 @@ fn fixed_string_array() -> TestResult {
     let fixed_string_array_marker = &block.markers[1];
     for (i, expected) in expected.iter().enumerate() {
         let value: FixedStringSliceIterator =
-            fixed_string_array_marker.get(i).unwrap().try_into()?;
+            fixed_string_array_marker.get(i)?.unwrap().try_into()?;
         let mut actual = vec![];
         for item in value {
             actual.push(item);
@@ -1178,14 +1185,14 @@ fn enums_sample() -> TestResult {
 
     let e8_marker = &block.markers[1];
     for (i, expected) in expected_e8.iter().enumerate() {
-        let value: &str = e8_marker.get(i).unwrap().try_into()?;
+        let value: &str = e8_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
     let expected_e16 = ["Foo", "Bar", "Foo", "Bar", "Foo", "Bar"];
     let e16_marker = &block.markers[2];
     for (i, expected) in expected_e16.iter().enumerate() {
-        let value: &str = e16_marker.get(i).unwrap().try_into()?;
+        let value: &str = e16_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -1215,7 +1222,7 @@ fn enums_array_sample() -> TestResult {
 
     let e8_marker = &block.markers[1];
     for (i, expected) in expected_e8.iter().enumerate() {
-        let value: Enum8SliceIterator = e8_marker.get(i).unwrap().try_into()?;
+        let value: Enum8SliceIterator = e8_marker.get(i)?.unwrap().try_into()?;
         let mut actual = vec![];
         for item in value {
             actual.push(item);
@@ -1234,7 +1241,7 @@ fn enums_array_sample() -> TestResult {
 
     let e16_marker = &block.markers[2];
     for (i, expected) in expected_e16.iter().enumerate() {
-        let value: Enum16SliceIterator = e16_marker.get(i).unwrap().try_into()?;
+        let value: Enum16SliceIterator = e16_marker.get(i)?.unwrap().try_into()?;
         let mut actual = vec![];
         for item in value {
             actual.push(item);
@@ -1272,7 +1279,7 @@ fn bfloat16_array_sample() -> TestResult {
 
     let bfloat16_array_marker = &block.markers[1];
     for (i, expected) in expected.iter().enumerate() {
-        let value: &[Bf16Data] = bfloat16_array_marker.get(i).unwrap().try_into()?;
+        let value: &[Bf16Data] = bfloat16_array_marker.get(i)?.unwrap().try_into()?;
         let mut actual: Vec<bf16> = vec![];
         for item in value.iter().copied() {
             actual.push(item.into());
@@ -1311,7 +1318,7 @@ fn sample_128() -> TestResult {
     let u128_marker = &block.markers[1];
     let expected_u128 = [12345678901234567890123456789012u128];
     for (i, expected) in expected_u128.iter().enumerate() {
-        let value: u128 = u128_marker.get(i).unwrap().try_into()?;
+        let value: u128 = u128_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
@@ -1322,7 +1329,7 @@ fn sample_128() -> TestResult {
     ]];
 
     for (i, expected) in expected_u128_array.iter().enumerate() {
-        let value: &[zc::U128] = u128_array_marker.get(i).unwrap().try_into()?;
+        let value: &[zc::U128] = u128_array_marker.get(i)?.unwrap().try_into()?;
         let mut actual = vec![];
         for item in value {
             actual.push(item.get());
@@ -1358,7 +1365,7 @@ fn nullable_lc_str() -> TestResult {
 
     let nlc_str_marker = &block.markers[1];
     for (i, expected) in expected.iter().enumerate() {
-        let value: Option<&str> = nlc_str_marker.get(i).unwrap().try_into()?;
+        let value: Option<&str> = nlc_str_marker.get(i)?.unwrap().try_into()?;
         assert_eq!(value, *expected, "Mismatch at index {i}");
 
         let value = nlc_str_marker.get_opt_str(i)?.unwrap();
@@ -1403,46 +1410,46 @@ fn dynamic() -> TestResult {
 
     let dynamic_marker = &block.markers[1];
 
-    let row0: &str = dynamic_marker.get(0).unwrap().try_into()?;
+    let row0: &str = dynamic_marker.get(0)?.unwrap().try_into()?;
     assert_eq!(row0, expected[0], "Mismatch at index 0");
 
-    let row1: i64 = dynamic_marker.get(1).unwrap().try_into()?;
+    let row1: i64 = dynamic_marker.get(1)?.unwrap().try_into()?;
     assert_eq!(row1, 12345, "Mismatch at index 1");
 
-    let row2: &[zc::I64] = dynamic_marker.get(2).unwrap().try_into()?;
+    let row2: &[zc::I64] = dynamic_marker.get(2)?.unwrap().try_into()?;
     assert_eq!(row2, &[1, 2, 3], "Mismatch at index 2");
 
-    let row3: MapIterator<&str, &str> = dynamic_marker.get(3).unwrap().try_into()?;
+    let row3: MapIterator<&str, &str> = dynamic_marker.get(3)?.unwrap().try_into()?;
     let mut map = HashMap::new();
     for (key, value) in row3.flatten() {
         map.insert(key, value);
     }
     assert_eq!(map.get("key"), Some(&"value"), "Mismatch at index 3");
 
-    let row4: chrono::NaiveDate = dynamic_marker.get(4).unwrap().try_into()?;
+    let row4: chrono::NaiveDate = dynamic_marker.get(4)?.unwrap().try_into()?;
     assert_eq!(
         row4,
         chrono::NaiveDate::from_ymd_opt(2023, 1, 1).unwrap(),
         "Mismatch at index 4"
     );
 
-    let row5: i64 = dynamic_marker.get(5).unwrap().try_into()?;
+    let row5: i64 = dynamic_marker.get(5)?.unwrap().try_into()?;
     assert_eq!(row5, 0, "Mismatch at index 5");
 
-    let row6: chrono::DateTime<chrono_tz::Tz> = dynamic_marker.get(6).unwrap().try_into()?;
+    let row6: chrono::DateTime<chrono_tz::Tz> = dynamic_marker.get(6)?.unwrap().try_into()?;
     assert_eq!(row6.to_string(), "2023-01-01 12:00:00 UTC");
 
-    let row7: uuid::Uuid = dynamic_marker.get(7).unwrap().try_into()?;
+    let row7: uuid::Uuid = dynamic_marker.get(7)?.unwrap().try_into()?;
     assert_eq!(
         row7,
         uuid::Uuid::parse_str("d60b7c85-0739-4786-a8d9-f1bbc72104df")?,
         "Mismatch at index 7"
     );
 
-    let row8: f64 = dynamic_marker.get(8).unwrap().try_into()?;
+    let row8: f64 = dynamic_marker.get(8)?.unwrap().try_into()?;
     assert_eq!(row8, 3.14, "Mismatch at index 8");
 
-    let row9: rust_decimal::Decimal = dynamic_marker.get(9).unwrap().try_into()?;
+    let row9: rust_decimal::Decimal = dynamic_marker.get(9)?.unwrap().try_into()?;
     assert_eq!(
         row9,
         rust_decimal::Decimal::try_from(1.23f32)?,
@@ -1494,9 +1501,10 @@ fn json() -> TestResult {
         let mut expected_paths = Vec::from(expected_paths);
         expected_paths.sort_unstable();
 
-        let it: JsonIterator = json_marker.get(i).unwrap().try_into()?;
+        let it: JsonIterator = json_marker.get(i)?.unwrap().try_into()?;
         let mut actual_paths: Vec<&str> = Vec::new();
-        for (path, _value) in it {
+        for item in it {
+            let (path, _value) = item?;
             actual_paths.push(path);
         }
         actual_paths.sort_unstable();
@@ -1519,7 +1527,7 @@ fn lc_empty_string_bug() -> TestResult {
     // ["first_seen", "last_seen", "name", "resource_attrs", "scope_attrs", "attrs", "type", "temporality", "is_monotonic"]
     let marker = &block.markers[3];
     for i in 0..block.num_rows {
-        let map_it: MapIterator<&str, &str> = marker.get(i).unwrap().try_into()?;
+        let map_it: MapIterator<&str, &str> = marker.get(i)?.unwrap().try_into()?;
         for kv in map_it {
             assert!(kv.is_ok(), "empty strings should not be Value::Empty");
         }
@@ -1551,11 +1559,12 @@ fn json_arr() -> TestResult {
     ];
 
     for (row_idx, exp_paths) in expected.iter().enumerate() {
-        let slice: JsonSliceIterator = json_arr_marker.get(row_idx).unwrap().try_into()?;
+        let slice: JsonSliceIterator = json_arr_marker.get(row_idx)?.unwrap().try_into()?;
 
         let mut actual_paths: Vec<&str> = Vec::new();
         for mut json_it in slice {
-            for (path, _value) in &mut json_it {
+            for item in &mut json_it {
+                let (path, _value) = item?;
                 actual_paths.push(path);
             }
         }
@@ -1588,8 +1597,9 @@ fn variant_arr() -> TestResult {
     assert_eq!(block.num_rows, 4, "Expected 4 rows in variant_arr");
 
     for i in 0..block.num_rows {
-        let it: VariantSliceIterator = variant_marker.get(i).unwrap().try_into()?;
+        let it: VariantSliceIterator = variant_marker.get(i)?.unwrap().try_into()?;
         for val in it {
+            let val = val?;
             let str_value: Result<&str, _> = val.clone().try_into();
             let int_value: Result<i64, _> = val.clone().try_into();
             let arr_value: Result<&[zc::U64], _> = val.clone().try_into();
@@ -1627,35 +1637,44 @@ fn dynamic_arr() -> TestResult {
     assert_eq!(block.num_rows, 7, "Expected 7 rows in dynamic_arr");
 
     {
-        let arr: DynamicSliceIterator = marker.get(0).unwrap().try_into()?;
-        let actual: Vec<i64> = arr.map(TryFrom::try_from).collect::<Result<_, _>>()?;
+        let arr: DynamicSliceIterator = marker.get(0)?.unwrap().try_into()?;
+        let actual: Vec<i64> = arr
+            .map(|value| value.and_then(TryFrom::try_from))
+            .collect::<Result<_, _>>()?;
         assert_eq!(actual, [1, 2, 3], "Row 0 mismatch");
     }
 
     {
-        let arr: DynamicSliceIterator = marker.get(1).unwrap().try_into()?;
-        let actual: Vec<&str> = arr.map(TryFrom::try_from).collect::<Result<_, _>>()?;
+        let arr: DynamicSliceIterator = marker.get(1)?.unwrap().try_into()?;
+        let actual: Vec<&str> = arr
+            .map(|value| value.and_then(TryFrom::try_from))
+            .collect::<Result<_, _>>()?;
         assert_eq!(actual, ["a", "b", "c"], "Row 1 mismatch");
     }
 
     {
-        let arr: DynamicSliceIterator = marker.get(2).unwrap().try_into()?;
-        let actual: Vec<bool> = arr.map(TryFrom::try_from).collect::<Result<_, _>>()?;
+        let arr: DynamicSliceIterator = marker.get(2)?.unwrap().try_into()?;
+        let actual: Vec<bool> = arr
+            .map(|value| value.and_then(TryFrom::try_from))
+            .collect::<Result<_, _>>()?;
         assert_eq!(actual, [true, false, true], "Row 2 mismatch");
     }
 
     {
-        let arr: DynamicSliceIterator = marker.get(3).unwrap().try_into()?;
-        let actual: Vec<f64> = arr.map(TryFrom::try_from).collect::<Result<_, _>>()?;
+        let arr: DynamicSliceIterator = marker.get(3)?.unwrap().try_into()?;
+        let actual: Vec<f64> = arr
+            .map(|value| value.and_then(TryFrom::try_from))
+            .collect::<Result<_, _>>()?;
         // 4.56: meh
         let expected = [1.23, 4.5600000000000005, 7.89];
         assert_eq!(actual, expected, "Row 3 mismatch");
     }
 
     {
-        let arr: DynamicSliceIterator = marker.get(4).unwrap().try_into()?;
-        let actual: Vec<chrono::NaiveDate> =
-            arr.map(TryFrom::try_from).collect::<Result<_, _>>()?;
+        let arr: DynamicSliceIterator = marker.get(4)?.unwrap().try_into()?;
+        let actual: Vec<chrono::NaiveDate> = arr
+            .map(|value| value.and_then(TryFrom::try_from))
+            .collect::<Result<_, _>>()?;
         let expected = [
             chrono::NaiveDate::from_ymd_opt(2023, 1, 1).unwrap(),
             chrono::NaiveDate::from_ymd_opt(2023, 1, 2).unwrap(),
@@ -1664,9 +1683,10 @@ fn dynamic_arr() -> TestResult {
     }
 
     {
-        let arr: DynamicSliceIterator = marker.get(5).unwrap().try_into()?;
-        let actual: Vec<chrono::DateTime<chrono_tz::Tz>> =
-            arr.map(TryFrom::try_from).collect::<Result<_, _>>()?;
+        let arr: DynamicSliceIterator = marker.get(5)?.unwrap().try_into()?;
+        let actual: Vec<chrono::DateTime<chrono_tz::Tz>> = arr
+            .map(|value| value.and_then(TryFrom::try_from))
+            .collect::<Result<_, _>>()?;
         let expected = [
             chrono::DateTime::parse_from_rfc3339("2023-01-01T12:00:00+00:00")?
                 .with_timezone(&chrono_tz::UTC),
@@ -1677,13 +1697,45 @@ fn dynamic_arr() -> TestResult {
     }
 
     {
-        let mut it: DynamicSliceIterator = marker.get(6).unwrap().try_into()?;
-        let json_it: JsonIterator = it.next().unwrap().try_into()?;
+        let mut it: DynamicSliceIterator = marker.get(6)?.unwrap().try_into()?;
+        let json_it: JsonIterator = it.next().unwrap()?.try_into()?;
 
-        let mut paths: Vec<&str> = json_it.map(|(p, _)| p).collect();
+        let mut paths: Vec<&str> = json_it
+            .map(|item| item.map(|(path, _)| path))
+            .collect::<Result<_, _>>()?;
         paths.sort_unstable();
         assert_eq!(paths, ["sample"], "Row 6 mismatch");
     }
+
+    Ok(())
+}
+
+#[test]
+fn mark_accessors_return_errors() -> TestResult {
+    let bytes = [1_u8, 2];
+    let mark = Mark::UInt8(crate::slice::ByteView::try_from(bytes.as_slice())?);
+    assert!(matches!(
+        mark.slice(1..3),
+        Err(crate::Error::IndexOutOfBounds(3, "UInt8"))
+    ));
+
+    let low_cardinality = Mark::LowCardinality(LowCardinality {
+        is_nullable: false,
+        indices: Box::new(Mark::Empty),
+        global_dictionary: None,
+        additional_keys: Some(Box::new(Mark::String(StringView { data: vec!["key"] }))),
+    });
+    assert!(matches!(
+        low_cardinality.get(0),
+        Err(crate::Error::CorruptedData(_))
+    ));
+
+    let tuple = Mark::Tuple(Tuple { values: Vec::new() });
+    let oversized_start = u32::MAX as usize + 1;
+    assert!(matches!(
+        tuple.slice(oversized_start..oversized_start),
+        Err(crate::Error::ValueOutOfRange("usize", "u32", _))
+    ));
 
     Ok(())
 }
