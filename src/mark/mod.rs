@@ -489,19 +489,7 @@ impl<'a> Mark<'a> {
             return Err(Error::MismatchedType(keys.as_str(), "String"));
         };
 
-        let indices = match lc.indices.as_ref() {
-            Mark::UInt8(bv) => LcIndexIter::U8(bv[idx].iter()),
-            Mark::UInt16(bv) => LcIndexIter::U16(bv[idx].iter()),
-            Mark::UInt32(bv) => LcIndexIter::U32(bv[idx].iter()),
-            Mark::UInt64(bv) => LcIndexIter::U64(bv[idx].iter()),
-            other => {
-                cold_path();
-                return Err(Error::CorruptedData(format!(
-                    "unexpected LowCardinality indices type: {}",
-                    other.as_str()
-                )));
-            }
-        };
+        let indices = lc.indices.iter(idx)?;
 
         Ok(LcStrIter { indices, keys })
     }
@@ -510,7 +498,7 @@ impl<'a> Mark<'a> {
     pub fn get_array_lc_strs(
         &'a self,
         index: usize,
-    ) -> crate::Result<Option<impl Iterator<Item = &'a str>>> {
+    ) -> crate::Result<Option<impl Iterator<Item = crate::Result<&'a str>>>> {
         if matches!(self, Mark::Empty) {
             cold_path();
             return Ok(None);
@@ -721,8 +709,8 @@ impl Variant<'_> {
     }
 }
 
-#[derive(Clone, Copy)]
-pub(crate) enum LcIndices<'a> {
+#[derive(Clone, Copy, Debug)]
+pub enum LcIndices<'a> {
     Empty,
     U8(&'a [u8]),
     U16(&'a [zc::U16]),
@@ -730,8 +718,10 @@ pub(crate) enum LcIndices<'a> {
     U64(&'a [zc::U64]),
 }
 
-impl<'a> LcIndices<'a> {
-    pub(crate) fn resolve(mark: &Mark<'a>) -> crate::Result<Self> {
+impl<'a> TryFrom<Mark<'a>> for LcIndices<'a> {
+    type Error = Error;
+
+    fn try_from(mark: Mark<'a>) -> Result<Self, Self::Error> {
         match mark {
             Mark::Empty => Ok(Self::Empty),
             Mark::UInt8(indices) => Ok(Self::U8(indices.as_slice())),
@@ -747,44 +737,105 @@ impl<'a> LcIndices<'a> {
             }
         }
     }
+}
 
+impl<'a> LcIndices<'a> {
     #[inline(always)]
-    pub(crate) fn get(self, index: usize) -> crate::Result<Option<usize>> {
-        let value = match self {
-            Self::Empty => return Ok(None),
-            Self::U8(indices) => {
-                let Some(value) = indices.get(index) else {
-                    return Ok(None);
-                };
-                usize::from(*value)
+    pub fn get(self, index: usize) -> crate::Result<Option<usize>> {
+        match self {
+            Self::Empty => Ok(None),
+            Self::U8(indices) => Ok(indices.get(index).copied().map(usize::from)),
+            Self::U16(indices) => Ok(indices.get(index).map(|value| usize::from(value.get()))),
+            Self::U32(indices) => Ok(indices.get(index).map(|value| value.get() as usize)),
+            Self::U64(indices) => Ok(indices
+                .get(index)
+                .map(|value| usize::try_from(value.get()))
+                .transpose()?),
+        }
+    }
+
+    #[inline]
+    pub fn slice(self, range: Range<usize>) -> crate::Result<Value<'a>> {
+        match self {
+            Self::Empty => {
+                if !range.is_empty() {
+                    cold_path();
+                    return Err(Error::IndexOutOfBounds(range.end, "Empty"));
+                }
+                Ok(Value::Empty)
             }
-            Self::U16(indices) => {
-                let Some(value) = indices.get(index) else {
-                    return Ok(None);
-                };
-                usize::from(value.get())
+            Self::U8(indices) => Ok(Value::UInt8Slice(checked_slice(indices, range, "UInt8")?)),
+            Self::U16(indices) => Ok(Value::UInt16Slice(checked_slice(indices, range, "UInt16")?)),
+            Self::U32(indices) => Ok(Value::UInt32Slice(checked_slice(indices, range, "UInt32")?)),
+            Self::U64(indices) => Ok(Value::UInt64Slice(checked_slice(indices, range, "UInt64")?)),
+        }
+    }
+
+    #[inline]
+    fn iter(self, range: Range<usize>) -> crate::Result<LcIndexIter<'a>> {
+        match self {
+            Self::Empty => {
+                if !range.is_empty() {
+                    return Err(Error::IndexOutOfBounds(range.end, "Empty"));
+                }
+                Ok(LcIndexIter::U8([].iter()))
             }
-            Self::U32(indices) => {
-                let Some(value) = indices.get(index) else {
-                    return Ok(None);
-                };
-                value.get() as usize
-            }
-            Self::U64(indices) => {
-                let Some(value) = indices.get(index) else {
-                    return Ok(None);
-                };
-                usize::try_from(value.get())?
-            }
-        };
-        Ok(Some(value))
+            Self::U8(indices) => Ok(LcIndexIter::U8(
+                checked_slice(indices, range, "UInt8")?.iter(),
+            )),
+            Self::U16(indices) => Ok(LcIndexIter::U16(
+                checked_slice(indices, range, "UInt16")?.iter(),
+            )),
+            Self::U32(indices) => Ok(LcIndexIter::U32(
+                checked_slice(indices, range, "UInt32")?.iter(),
+            )),
+            Self::U64(indices) => Ok(LcIndexIter::U64(
+                checked_slice(indices, range, "UInt64")?.iter(),
+            )),
+        }
     }
 }
+
+enum LcIndexIter<'a> {
+    U8(std::slice::Iter<'a, u8>),
+    U16(std::slice::Iter<'a, zc::U16>),
+    U32(std::slice::Iter<'a, zc::U32>),
+    U64(std::slice::Iter<'a, zc::U64>),
+}
+
+impl Iterator for LcIndexIter<'_> {
+    type Item = crate::Result<usize>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        let value = match self {
+            Self::U8(iter) => usize::from(*iter.next()?),
+            Self::U16(iter) => usize::from(iter.next()?.get()),
+            Self::U32(iter) => iter.next()?.get() as usize,
+            Self::U64(iter) => {
+                return Some(usize::try_from(iter.next()?.get()).map_err(Error::from));
+            }
+        };
+        Some(Ok(value))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            Self::U8(iter) => iter.size_hint(),
+            Self::U16(iter) => iter.size_hint(),
+            Self::U32(iter) => iter.size_hint(),
+            Self::U64(iter) => iter.size_hint(),
+        }
+    }
+}
+
+impl ExactSizeIterator for LcIndexIter<'_> {}
 
 #[derive(Debug)]
 pub struct LowCardinality<'a> {
     pub is_nullable: bool,
-    pub indices: Box<Mark<'a>>,
+    pub indices: LcIndices<'a>,
     pub global_dictionary: Option<Box<Mark<'a>>>,
     pub additional_keys: Option<Box<Mark<'a>>>,
 }
@@ -808,7 +859,7 @@ impl LowCardinality<'_> {
 
     #[inline(always)]
     pub fn value_index(&self, index: usize) -> crate::Result<Option<usize>> {
-        LcIndices::resolve(self.indices.as_ref())?.get(index)
+        self.indices.get(index)
     }
 
     #[inline]
@@ -1093,35 +1144,31 @@ pub struct LcStrIter<'a> {
     keys: &'a [&'a str],
 }
 
-enum LcIndexIter<'a> {
-    U8(std::slice::Iter<'a, u8>),
-    U16(std::slice::Iter<'a, zc::U16>),
-    U32(std::slice::Iter<'a, zc::U32>),
-    U64(std::slice::Iter<'a, zc::U64>),
-}
-
 impl<'a> Iterator for LcStrIter<'a> {
-    type Item = &'a str;
+    type Item = crate::Result<&'a str>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        let index = match &mut self.indices {
-            LcIndexIter::U8(it) => usize::from(*it.next()?),
-            LcIndexIter::U16(it) => usize::from(it.next()?.get()),
-            LcIndexIter::U32(it) => it.next()?.get() as usize,
-            LcIndexIter::U64(it) => usize::try_from(it.next()?.get()).unwrap(),
+        let index = match self.indices.next()? {
+            Ok(index) => index,
+            Err(error) => {
+                cold_path();
+                return Some(Err(error));
+            }
         };
-        Some(self.keys[index])
+        let Some(value) = self.keys.get(index).copied() else {
+            cold_path();
+            return Some(Err(Error::IndexOutOfBounds(
+                index,
+                "LowCardinality dictionary",
+            )));
+        };
+        Some(Ok(value))
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        match &self.indices {
-            LcIndexIter::U8(it) => it.size_hint(),
-            LcIndexIter::U16(it) => it.size_hint(),
-            LcIndexIter::U32(it) => it.size_hint(),
-            LcIndexIter::U64(it) => it.size_hint(),
-        }
+        self.indices.size_hint()
     }
 }
 
@@ -1132,7 +1179,7 @@ struct ArrayLcStrIter<'a> {
 }
 
 impl<'a> Iterator for ArrayLcStrIter<'a> {
-    type Item = &'a str;
+    type Item = crate::Result<&'a str>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {

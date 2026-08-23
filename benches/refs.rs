@@ -82,11 +82,14 @@ impl<'a> TryFrom<BlockRow<'a>> for BenchmarkSample<'a> {
             unreachable!()
         };
 
-        let tags = lc_tags.get_array_lc_strs(i)?.unwrap().collect::<Vec<_>>();
+        let tags = lc_tags
+            .get_array_lc_strs(i)?
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()?;
         let nested_strs = nested_field_lc_string_cd10
             .get_array_lc_strs(i)?
             .unwrap()
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
         let mut nested_some_id = Vec::with_capacity(nested_strs.len());
         let slice: &[zerocopy::little_endian::U128] =

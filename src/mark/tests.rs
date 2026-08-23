@@ -1,6 +1,6 @@
 use std::{collections::HashMap, str::FromStr as _};
 
-use super::{LowCardinality, Mark, StringView, Tuple};
+use super::{LcIndices, LowCardinality, Mark, StringView, Tuple};
 
 use crate::{
     Bf16Data,
@@ -207,7 +207,7 @@ fn lc_array_string() -> TestResult {
         let actual = strings_marker
             .get_array_lc_strs(i)?
             .unwrap()
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
         assert_eq!(
             actual, *expected,
             "Mismatch at index {i} (get_array_lc_strs)"
@@ -1300,7 +1300,7 @@ fn array_lc_string_empty() -> TestResult {
         let mut it = marker
             .get_array_lc_strs(i)?
             .expect("expected to get an iterator");
-        assert_eq!(it.next(), None, "expected iterator to yield no items");
+        assert!(it.next().is_none(), "expected iterator to yield no items");
     }
 
     Ok(())
@@ -1719,15 +1719,25 @@ fn mark_accessors_return_errors() -> TestResult {
         Err(crate::Error::IndexOutOfBounds(3, "UInt8"))
     ));
 
-    let low_cardinality = Mark::LowCardinality(LowCardinality {
-        is_nullable: false,
-        indices: Box::new(Mark::String(StringView { data: Vec::new() })),
-        global_dictionary: None,
-        additional_keys: Some(Box::new(Mark::String(StringView { data: vec!["key"] }))),
-    });
     assert!(matches!(
-        low_cardinality.get(0),
+        LcIndices::try_from(Mark::String(StringView { data: Vec::new() })),
         Err(crate::Error::CorruptedData(_))
+    ));
+
+    let indices = [0_u8];
+    let invalid_dictionary = Mark::LowCardinality(LowCardinality {
+        is_nullable: false,
+        indices: LcIndices::U8(&indices),
+        global_dictionary: None,
+        additional_keys: Some(Box::new(Mark::String(StringView { data: Vec::new() }))),
+    });
+    let mut values = invalid_dictionary.slice_lc_strs(0..1)?;
+    assert!(matches!(
+        values.next(),
+        Some(Err(crate::Error::IndexOutOfBounds(
+            0,
+            "LowCardinality dictionary"
+        )))
     ));
 
     let tuple = Mark::Tuple(Tuple { values: Vec::new() });
