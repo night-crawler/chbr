@@ -66,12 +66,14 @@ where
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::LowCardinality(lc) if !lc.is_nullable => {
-                let indices = LcIndices::resolve(lc.indices.as_ref())?;
                 let dict = match lc.additional_keys.as_deref() {
                     Some(keys) => Some(Inner::try_from(keys)?),
                     None => None,
                 };
-                Ok(Lc { indices, dict })
+                Ok(Lc {
+                    indices: lc.indices,
+                    dict,
+                })
             }
             Mark::LowCardinality(_) => {
                 cold_path();
@@ -125,7 +127,7 @@ where
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::LowCardinality(lc) if lc.is_nullable => {
-                let indices = LcIndices::resolve(lc.indices.as_ref())?;
+                let indices = lc.indices;
                 let dict = match lc.additional_keys.as_deref() {
                     Some(keys) => Some(Inner::try_from(keys)?),
                     None => None,

@@ -7,8 +7,8 @@ use crate::{
     error::Error,
     macros::{bt, t},
     mark::{
-        Array, Dynamic, Json, LowCardinality, Map, Mark, NamedTuple, Nested, Nullable, Tuple,
-        Variant,
+        Array, Dynamic, Json, LcIndices, LowCardinality, Map, Mark, NamedTuple, Nested, Nullable,
+        Tuple, Variant,
     },
     parse::{
         IResult,
@@ -243,7 +243,7 @@ fn lc<'a>(inner: &Type<'a>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a
             ctx.input,
             Mark::LowCardinality(LowCardinality {
                 is_nullable: inner.is_nullable(),
-                indices: Box::new(Mark::Empty),
+                indices: LcIndices::Empty,
                 global_dictionary: None,
                 additional_keys: Some(Box::new(Mark::Empty)),
             }),
@@ -314,7 +314,7 @@ fn lc<'a>(inner: &Type<'a>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a
     let (input, indices_marker) = index_type.decode(ctx.fork(input), TypeHeader::Empty)?;
     let marker = Mark::LowCardinality(LowCardinality {
         is_nullable: inner.is_nullable(),
-        indices: Box::new(indices_marker),
+        indices: indices_marker.try_into()?,
         global_dictionary,
         additional_keys,
     });
