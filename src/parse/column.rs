@@ -1,5 +1,7 @@
 use log::debug;
 
+use std::hint::cold_path;
+
 use crate::mark::StringView;
 use crate::{
     error::Error,
@@ -108,6 +110,7 @@ impl<'a> Type<'a> {
             Type::Nested(fields) => nested(fields, ctx, header.into_nested()),
             Type::NamedTuple(fields) => named_tuple(fields, &ctx, header.into_nested()),
             _ => {
+                cold_path();
                 unimplemented!("decode is not implemented for {self:?}")
             }
         }
@@ -257,6 +260,7 @@ fn lc<'a>(inner: &Type<'a>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a
         TUINT32 => Type::UInt32,
         TUINT64 => Type::UInt64,
         x => {
+            cold_path();
             return Err(Error::Parse(format!("LowCardinality: bad index type: {x}")));
         }
     };
@@ -289,6 +293,7 @@ fn lc<'a>(inner: &Type<'a>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a
     let rows_here: usize;
     (input, rows_here) = parse_u64(input)?;
     if rows_here != ctx.num_rows {
+        cold_path();
         return Err(Error::Parse(format!(
             "LowCardinality: expected {} rows, got {rows_here}",
             ctx.num_rows
@@ -320,15 +325,15 @@ fn variant<'a>(
         if discriminator == Variant::NULL_DISCRIMINATOR {
             continue;
         }
-        *offset = row_counts[discriminator as usize];
-        if let Some(count) = row_counts.get_mut(discriminator as usize) {
-            *count += 1;
-        } else {
+        let Some(count) = row_counts.get_mut(discriminator as usize) else {
+            cold_path();
             return Err(Error::Parse(format!(
                 "Variant: discriminator {discriminator} out of bounds for inner types length {}",
                 inner.len()
             )));
-        }
+        };
+        *offset = *count;
+        *count += 1;
     }
 
     let mut markers = Vec::with_capacity(inner.len());

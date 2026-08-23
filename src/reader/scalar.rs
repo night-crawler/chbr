@@ -1,3 +1,4 @@
+use std::hint::cold_path;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::ops::Range;
 
@@ -33,7 +34,10 @@ macro_rules! col_view {
                 fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
                     match value {
                         Mark::$variant(v) => Ok(Self(v)),
-                        other => Err(Error::MismatchedType(other.as_str(), stringify!($variant))),
+                        other => {
+                            cold_path();
+                            Err(Error::MismatchedType(other.as_str(), stringify!($variant)))
+                        }
                     }
                 }
             }
@@ -44,6 +48,7 @@ macro_rules! col_view {
                 #[inline(always)]
                 fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
                     let Some($v) = self.0.as_slice().get(idx) else {
+                        cold_path();
                         return Err(Error::IndexOutOfBounds(idx, stringify!($variant)));
                     };
                     Ok($conv)
@@ -60,6 +65,7 @@ macro_rules! col_view {
                 ) -> crate::Result<&'a [Self::Elem]> {
                     let end = range.end;
                     let Some(slice) = self.0.as_slice().get(range) else {
+                        cold_path();
                         return Err(Error::IndexOutOfBounds(end, stringify!($variant)));
                     };
                     Ok(slice)
@@ -107,9 +113,13 @@ impl<'a> TryRead<'a> for ColUsize<'a> {
                 Some(v) => Some(usize::try_from(v.get())?),
                 None => None,
             },
-            _ => unreachable!("unsupported index type for usize"),
+            _ => {
+                cold_path();
+                unreachable!("unsupported index type for usize")
+            }
         };
         let Some(value) = value else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(idx, "UInt8/16/32/64"));
         };
         Ok(value)
@@ -119,12 +129,16 @@ impl<'a> TryRead<'a> for ColUsize<'a> {
 impl<'a> TryFrom<&'a Mark<'a>> for ColUsize<'a> {
     type Error = Error;
 
+    #[inline]
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::UInt8(_) | Mark::UInt16(_) | Mark::UInt32(_) | Mark::UInt64(_) => {
                 Ok(ColUsize(value))
             }
-            other => Err(Error::MismatchedType(other.as_str(), "UInt8/16/32/64")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "UInt8/16/32/64"))
+            }
         }
     }
 }
@@ -139,7 +153,10 @@ impl<'a> TryFrom<&'a Mark<'a>> for ColBool<'a> {
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::Bool(v) => Ok(Self(v)),
-            other => Err(Error::MismatchedType(other.as_str(), "Bool")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "Bool"))
+            }
         }
     }
 }
@@ -150,6 +167,7 @@ impl<'a> TryRead<'a> for ColBool<'a> {
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(value) = self.0.get(idx) else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(idx, "Bool"));
         };
         Ok(value)
@@ -164,6 +182,7 @@ impl<'a> ReadSlice<'a> for ColBool<'a> {
     fn try_read_slice(&self, range: Range<usize>) -> crate::Result<&'a [Self::Elem]> {
         let end = range.end;
         let Some(slice) = self.0.data.get(range) else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(end, "Bool"));
         };
         Ok(slice)
@@ -176,10 +195,14 @@ pub struct ColStr<'a>(pub &'a StringView<'a>);
 impl<'a> TryFrom<&'a Mark<'a>> for ColStr<'a> {
     type Error = Error;
 
+    #[inline]
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::String(s) => Ok(ColStr(s)),
-            other => Err(Error::MismatchedType(other.as_str(), "String")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "String"))
+            }
         }
     }
 }
@@ -190,6 +213,7 @@ impl<'a> TryRead<'a> for ColStr<'a> {
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(value) = self.0.get(idx) else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(idx, "String"));
         };
         Ok(value)
@@ -203,6 +227,7 @@ impl<'a> ReadSlice<'a> for ColStr<'a> {
     fn try_read_slice(&self, range: Range<usize>) -> crate::Result<&'a [Self::Elem]> {
         let end = range.end;
         let Some(slice) = self.0.data.get(range) else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(end, "String"));
         };
         Ok(slice)
@@ -219,7 +244,10 @@ impl<'a> TryFrom<&'a Mark<'a>> for ColFixedStr<'a> {
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::FixedString(fs) => Ok(Self(fs)),
-            other => Err(Error::MismatchedType(other.as_str(), "FixedString")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "FixedString"))
+            }
         }
     }
 }
@@ -232,6 +260,7 @@ impl<'a> TryRead<'a> for ColFixedStr<'a> {
         let data: &'a [u8] = self.0.data;
         let offset = self.0.size * idx;
         let Some(bytes) = data.get(offset..offset + self.0.size) else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(idx, "FixedString"));
         };
         let bytes = bytes.rtrim_zeros();
@@ -249,7 +278,10 @@ impl<'a> TryFrom<&'a Mark<'a>> for ColEnum8<'a> {
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::Enum8(e) => Ok(Self(e)),
-            other => Err(Error::MismatchedType(other.as_str(), "Enum8")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "Enum8"))
+            }
         }
     }
 }
@@ -260,13 +292,17 @@ impl<'a> TryRead<'a> for ColEnum8<'a> {
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(&variant) = self.0.data.get(idx) else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(idx, "Enum8"));
         };
         let pos = self
             .0
             .variants
             .binary_search_by_key(&variant, |(_, id)| *id)
-            .map_err(|_| Error::CorruptedData(format!("invalid Enum8 discriminant: {variant}")))?;
+            .map_err(|_| {
+                cold_path();
+                Error::CorruptedData(format!("invalid Enum8 discriminant: {variant}"))
+            })?;
         Ok(self.0.variants[pos].0)
     }
 }
@@ -281,7 +317,10 @@ impl<'a> TryFrom<&'a Mark<'a>> for ColEnum16<'a> {
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::Enum16(e) => Ok(Self(e)),
-            other => Err(Error::MismatchedType(other.as_str(), "Enum16")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "Enum16"))
+            }
         }
     }
 }
@@ -292,6 +331,7 @@ impl<'a> TryRead<'a> for ColEnum16<'a> {
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(variant) = self.0.data.get(idx) else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(idx, "Enum16"));
         };
         let variant = variant.get();
@@ -299,7 +339,10 @@ impl<'a> TryRead<'a> for ColEnum16<'a> {
             .0
             .variants
             .binary_search_by_key(&variant, |(_, id)| *id)
-            .map_err(|_| Error::CorruptedData(format!("invalid Enum16 discriminant: {variant}")))?;
+            .map_err(|_| {
+                cold_path();
+                Error::CorruptedData(format!("invalid Enum16 discriminant: {variant}"))
+            })?;
         Ok(self.0.variants[pos].0)
     }
 }
@@ -314,7 +357,10 @@ impl<'a> TryFrom<&'a Mark<'a>> for ColDateTime<'a> {
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::DateTime(dt) => Ok(Self(dt)),
-            other => Err(Error::MismatchedType(other.as_str(), "DateTime")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "DateTime"))
+            }
         }
     }
 }
@@ -325,6 +371,7 @@ impl<'a> TryRead<'a> for ColDateTime<'a> {
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(value) = self.0.data.get(idx) else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(idx, "DateTime"));
         };
         Ok(value.with_tz(self.0.tz))
@@ -341,7 +388,10 @@ impl<'a> TryFrom<&'a Mark<'a>> for ColDateTime64<'a> {
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::DateTime64(dt) => Ok(Self(dt)),
-            other => Err(Error::MismatchedType(other.as_str(), "DateTime64")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "DateTime64"))
+            }
         }
     }
 }
@@ -352,15 +402,19 @@ impl<'a> TryRead<'a> for ColDateTime64<'a> {
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(value) = self.0.data.get(idx) else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(idx, "DateTime64"));
         };
         match value.with_tz_and_precision(self.0.tz, self.0.precision) {
             Some(dt) => Ok(dt),
-            None => Err(Error::ValueOutOfRange(
-                "DateTime64",
-                "DateTime<Tz>",
-                value.0.get().to_string(),
-            )),
+            None => {
+                cold_path();
+                Err(Error::ValueOutOfRange(
+                    "DateTime64",
+                    "DateTime<Tz>",
+                    value.0.get().to_string(),
+                ))
+            }
         }
     }
 }
@@ -378,7 +432,10 @@ macro_rules! col_decimal {
                 fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
                     match value {
                         Mark::$variant(d) => Ok(Self(d)),
-                        other => Err(Error::MismatchedType(other.as_str(), stringify!($variant))),
+                        other => {
+                            cold_path();
+                            Err(Error::MismatchedType(other.as_str(), stringify!($variant)))
+                        }
                     }
                 }
             }
@@ -389,6 +446,7 @@ macro_rules! col_decimal {
                 #[inline(always)]
                 fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
                     let Some($v) = self.0.data.get(idx) else {
+                        cold_path();
                         return Err(Error::IndexOutOfBounds(idx, stringify!($variant)));
                     };
                     let $precision = self.0.precision;
@@ -429,6 +487,7 @@ impl<'a> TryRead<'a> for ColValue<'a> {
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(value) = self.0.get(idx) else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(idx, self.0.as_str()));
         };
         Ok(value)

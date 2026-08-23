@@ -1,3 +1,5 @@
+use std::hint::cold_path;
+
 use zerocopy::{LittleEndian, U64};
 
 use crate::{
@@ -15,6 +17,7 @@ pub mod typ;
 
 pub type IResult<I, O, E = Error> = Result<(I, O), E>;
 
+#[inline]
 fn parse_varuint<T>(input: &[u8]) -> IResult<&[u8], T>
 where
     T: TryFrom<u64>,
@@ -22,6 +25,7 @@ where
     let (value, rest) = get_unsigned_leb128(input)?;
 
     let Ok(value) = T::try_from(value) else {
+        cold_path();
         return Err(Error::Overflow(value.to_string()));
     };
 
@@ -36,6 +40,7 @@ fn get_unsigned_leb128(input: &[u8]) -> Result<(u64, &[u8]), Error> {
     macro_rules! read {
         ($idx:expr, $shift:expr, $acc:ident, $len:ident) => {{
             if $len <= $idx {
+                cold_path();
                 return Err(Error::Length($idx));
             }
             let byte = input[$idx];
@@ -48,6 +53,7 @@ fn get_unsigned_leb128(input: &[u8]) -> Result<(u64, &[u8]), Error> {
 
     let len = input.len();
     if len == 0 {
+        cold_path();
         return Err(Error::Length(0));
     }
 
@@ -64,11 +70,13 @@ fn get_unsigned_leb128(input: &[u8]) -> Result<(u64, &[u8]), Error> {
     read!(8, 56, acc, len);
 
     if len <= 9 {
+        cold_path();
         return Err(Error::Length(9));
     }
 
     let b9 = input[9];
     if b9 & CONT != 0 || b9 > 1 {
+        cold_path();
         return Err(Error::Overflow("varuint too large for u64".into()));
     }
 
@@ -76,26 +84,31 @@ fn get_unsigned_leb128(input: &[u8]) -> Result<(u64, &[u8]), Error> {
     Ok((acc, &input[10..]))
 }
 
+#[inline]
 fn parse_u64<T>(input: &[u8]) -> IResult<&[u8], T>
 where
     T: TryFrom<u64>,
 {
     if input.len() < 8 {
+        cold_path();
         return Err(Error::Length(8));
     }
     let (bytes, rest) = input.split_at(8);
     let value = u64::from_le_bytes(bytes.try_into().unwrap());
 
     let Ok(value) = T::try_from(value) else {
+        cold_path();
         return Err(Error::Overflow(value.to_string()));
     };
 
     Ok((rest, value))
 }
 
+#[inline]
 fn parse_var_str_bytes(input: &[u8]) -> IResult<&[u8], &[u8]> {
     let (input, len) = parse_varuint(input)?;
     if input.len() < len {
+        cold_path();
         return Err(Error::Length(len));
     }
 
@@ -106,19 +119,25 @@ fn parse_var_str_bytes(input: &[u8]) -> IResult<&[u8], &[u8]> {
 pub(crate) fn parse_var_str(input: &[u8]) -> IResult<&[u8], &str> {
     let (input, len) = parse_varuint(input)?;
     if input.len() < len {
+        cold_path();
         return Err(Error::UnexpectedEndOfInput);
     }
 
     let (str_bytes, remainder) = input.split_at(len);
 
-    let str_value =
-        std::str::from_utf8(str_bytes).map_err(|e| Error::Utf8Decode(e, str_bytes.to_vec()))?;
+    let str_value = std::str::from_utf8(str_bytes).map_err(|e| {
+        cold_path();
+        Error::Utf8Decode(e, str_bytes.to_vec())
+    })?;
     Ok((remainder, str_value))
 }
 
 fn parse_var_str_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     let (input, str_bytes) = parse_var_str_bytes(input)?;
-    std::str::from_utf8(str_bytes).map_err(|e| Error::Utf8Decode(e, str_bytes.to_vec()))?;
+    std::str::from_utf8(str_bytes).map_err(|e| {
+        cold_path();
+        Error::Utf8Decode(e, str_bytes.to_vec())
+    })?;
     let (_, typ) = parse_type(str_bytes)?;
     Ok((input, typ))
 }

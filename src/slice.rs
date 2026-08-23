@@ -1,3 +1,4 @@
+use core::hint::cold_path;
 use core::{
     fmt,
     marker::PhantomData,
@@ -23,6 +24,7 @@ impl<'a, T: Unaligned + FromBytes + Copy> TryFrom<&'a [u8]> for ByteView<'a, T> 
                 _pd: PhantomData,
             })
         } else {
+            cold_path();
             Err(Self::Error::Length(bytes.len()))
         }
     }
@@ -44,6 +46,7 @@ impl<'a, T: Unaligned + FromBytes + Copy> ByteView<'a, T> {
         self.as_slice().get(index)
     }
 
+    #[inline]
     pub const fn last(&self) -> Option<&T> {
         self.as_slice().last()
     }

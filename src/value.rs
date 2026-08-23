@@ -1,4 +1,4 @@
-use core::{convert::TryFrom, marker::PhantomData};
+use core::{convert::TryFrom, hint::cold_path, marker::PhantomData};
 use std::{
     hint::unreachable_unchecked,
     net::{Ipv4Addr, Ipv6Addr},
@@ -274,7 +274,10 @@ macro_rules! impl_try_from_value_slice {
                 match value {
                     Value::$variant(v) => Ok(v),
                     Value::Empty => Ok(&[]),
-                    other => Err(Error::MismatchedType(other.as_str(), stringify!($ty))),
+                    other => {
+                        cold_path();
+                        Err(Error::MismatchedType(other.as_str(), stringify!($ty)))
+                    }
                 }
             }
         }
@@ -290,7 +293,10 @@ macro_rules! impl_try_from_value {
             fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
                 match value {
                     Value::$variant(v) => Ok(v),
-                    other => Err(Error::MismatchedType(other.as_str(), stringify!($ty))),
+                    other => {
+                        cold_path();
+                        Err(Error::MismatchedType(other.as_str(), stringify!($ty)))
+                    }
                 }
             }
         }
@@ -340,7 +346,10 @@ impl<'a> TryFrom<Value<'a>> for Ipv6Addr {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Ipv6(v) => Ok(Ipv6Addr::from(*v)),
-            other => Err(Error::MismatchedType(other.as_str(), "Ipv6Addr")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "Ipv6Addr"))
+            }
         }
     }
 }
@@ -355,7 +364,10 @@ impl<'a> TryFrom<Value<'a>> for Uuid {
                 let [hi, lo] = uuid_data.0;
                 Ok(Uuid::from_u64_pair(hi.get(), lo.get()))
             }
-            other => Err(Error::MismatchedType(other.as_str(), "Uuid")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "Uuid"))
+            }
         }
     }
 }
@@ -378,12 +390,16 @@ impl TryFrom<Value<'_>> for chrono::DateTime<Tz> {
                     .unwrap()
                     .with_tz_and_precision(d.tz, d.precision);
                 let Some(value) = value else {
+                    cold_path();
                     return Err(Error::Overflow("DateTime64 value out of range".to_owned()));
                 };
 
                 Ok(value)
             }
-            other => Err(Error::MismatchedType(other.as_str(), "DateTime")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "DateTime"))
+            }
         }
     }
 }
@@ -395,7 +411,10 @@ impl TryFrom<Value<'_>> for chrono::NaiveDate {
     fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
         match value {
             Value::Date32(dt) | Value::Date(dt) => Ok(dt),
-            other => Err(Error::MismatchedType(other.as_str(), "Date/Date64")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "Date/Date64"))
+            }
         }
     }
 }
@@ -411,38 +430,51 @@ macro_rules! impl_try_from_integer_value {
 
                     match value {
                         Value::Int8(v) => <$target>::try_from(v).map_err(|_| {
+                            cold_path();
                             Error::ValueOutOfRange("i8", stringify!($target), v.to_string())
                         }),
                         Value::Int16(v) => <$target>::try_from(v).map_err(|_| {
+                            cold_path();
                             Error::ValueOutOfRange("i16", stringify!($target), v.to_string())
                         }),
                         Value::Int32(v) => <$target>::try_from(v).map_err(|_| {
+                            cold_path();
                             Error::ValueOutOfRange("i32", stringify!($target), v.to_string())
                         }),
                         Value::Int64(v) => <$target>::try_from(v).map_err(|_| {
+                            cold_path();
                             Error::ValueOutOfRange("i64", stringify!($target), v.to_string())
                         }),
                         Value::Int128(v) => <$target>::try_from(v.get()).map_err(|_| {
+                            cold_path();
                             Error::ValueOutOfRange("i128", stringify!($target), v.to_string())
                         }),
 
                         Value::UInt8(v) => <$target>::try_from(v).map_err(|_| {
+                            cold_path();
                             Error::ValueOutOfRange("u8", stringify!($target), v.to_string())
                         }),
                         Value::UInt16(v) => <$target>::try_from(v).map_err(|_| {
+                            cold_path();
                             Error::ValueOutOfRange("u16", stringify!($target), v.to_string())
                         }),
                         Value::UInt32(v) => <$target>::try_from(v).map_err(|_| {
+                            cold_path();
                             Error::ValueOutOfRange("u32", stringify!($target), v.to_string())
                         }),
                         Value::UInt64(v) => <$target>::try_from(v).map_err(|_| {
+                            cold_path();
                             Error::ValueOutOfRange("u64", stringify!($target), v.to_string())
                         }),
                         Value::UInt128(v) => <$target>::try_from(v.get()).map_err(|_| {
+                            cold_path();
                             Error::ValueOutOfRange("u128", stringify!($target), v.to_string())
                         }),
 
-                        other => Err(Error::MismatchedType(other.as_str(), stringify!($target))),
+                        other => {
+                            cold_path();
+                            Err(Error::MismatchedType(other.as_str(), stringify!($target)))
+                        },
                     }
                 }
             }
@@ -487,7 +519,10 @@ impl<'a> TryFrom<Value<'a>> for SliceUsizeIterator<'a> {
                 index: 0,
                 len: x.len(),
             }),
-            _ => Err(Error::MismatchedType(value.as_str(), "SliceUsizeIterator")),
+            _ => {
+                cold_path();
+                Err(Error::MismatchedType(value.as_str(), "SliceUsizeIterator"))
+            }
         }
     }
 }
@@ -540,10 +575,13 @@ impl<'a> TryFrom<Value<'a>> for LowCardinalitySliceIterator<'a> {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::LowCardinalitySlice { range, mark } => mark.slice(range.into()),
-            other => Err(Error::MismatchedType(
-                other.as_str(),
-                "LowCardinalitySliceIterator",
-            )),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(
+                    other.as_str(),
+                    "LowCardinalitySliceIterator",
+                ))
+            }
         }
     }
 }
@@ -587,7 +625,10 @@ impl<'a, T> TryFrom<Value<'a>> for ArraySliceIterator<'a, T> {
                 range: 0..0,
                 _phantom: PhantomData,
             }),
-            other => Err(Error::MismatchedType(other.as_str(), "ArraySliceIterator")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "ArraySliceIterator"))
+            }
         }
     }
 }
@@ -648,11 +689,13 @@ macro_rules! impl_try_from_tuple {
                     Value::Tuple { index, mark } => (index, mark),
                     Value::NamedTuple { index, mark } => {
                         let Mark::Tuple(tuple) = mark.tuple.as_ref() else {
+                            cold_path();
                             return Err(Error::MismatchedType("non-Tuple", concat!("Tuple", stringify!($len))));
                         };
                         (index, tuple)
                     }
                     other => {
+                        cold_path();
                         return Err(Error::MismatchedType(
                             other.as_str(),
                             concat!("Tuple", stringify!($len)),
@@ -662,6 +705,7 @@ macro_rules! impl_try_from_tuple {
 
                 let values = &tuple_mark.values;
                 if values.len() != $len {
+                    cold_path();
                     return Err(Error::MismatchedType(
                         concat!("Tuple with ", stringify!($len), " elements"),
                         concat!("Tuple", stringify!($len)),
@@ -728,7 +772,10 @@ where
                     _marker: PhantomData,
                 })
             }
-            other => Err(Error::MismatchedType(other.as_str(), "MapIterator")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "MapIterator"))
+            }
         }
     }
 }
@@ -787,7 +834,10 @@ where
                 range: range.into(),
                 _marker: PhantomData,
             }),
-            other => Err(Error::MismatchedType(other.as_str(), "MapSliceIterator")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "MapSliceIterator"))
+            }
         }
     }
 }
@@ -840,7 +890,10 @@ impl<'a> TryFrom<Value<'a>> for TupleSliceIterator<'a> {
                 mark,
                 range: range.into(),
             }),
-            other => Err(Error::MismatchedType(other.as_str(), "TupleSliceIterator")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "TupleSliceIterator"))
+            }
         }
     }
 }
@@ -874,10 +927,16 @@ impl<'a> TryFrom<Value<'a>> for Decimal {
             Value::Decimal32(index, mark) => Ok(mark.data[index].with_precision(mark.precision)),
             Value::Decimal64(index, mark) => Ok(mark.data[index].with_precision(mark.precision)),
             Value::Decimal128(index, mark) => mark.data[index].with_precision(mark.precision),
-            Value::Decimal256(_, _) => Err(Error::NotImplemented(
-                "Decimal256 is not yet supported".to_owned(),
-            )),
-            other => Err(Error::MismatchedType(other.as_str(), "Decimal")),
+            Value::Decimal256(_, _) => {
+                cold_path();
+                Err(Error::NotImplemented(
+                    "Decimal256 is not yet supported".to_owned(),
+                ))
+            }
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "Decimal"))
+            }
         }
     }
 }
@@ -893,7 +952,10 @@ impl<'a> TryFrom<Value<'a>> for BoolSliceIterator<'a> {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::BoolSlice(data) => Ok(BoolSliceIterator { data: data.iter() }),
-            other => Err(Error::MismatchedType(other.as_str(), "BoolSliceIterator")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "BoolSliceIterator"))
+            }
         }
     }
 }
@@ -929,10 +991,13 @@ impl<'a> TryFrom<Value<'a>> for DateTime32SliceIterator<'a> {
                 tz,
                 slice: slice.iter(),
             }),
-            other => Err(Error::MismatchedType(
-                other.as_str(),
-                "DateTime32SliceIterator",
-            )),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(
+                    other.as_str(),
+                    "DateTime32SliceIterator",
+                ))
+            }
         }
     }
 }
@@ -974,10 +1039,13 @@ impl<'a> TryFrom<Value<'a>> for DateTime64SliceIterator<'a> {
                 precision,
                 slice: slice.iter(),
             }),
-            other => Err(Error::MismatchedType(
-                other.as_str(),
-                "DateTime64SliceIterator",
-            )),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(
+                    other.as_str(),
+                    "DateTime64SliceIterator",
+                ))
+            }
         }
     }
 }
@@ -1019,10 +1087,13 @@ impl<'a> TryFrom<Value<'a>> for NullableSliceIterator<'a> {
                 mark: None,
                 range: 0..0,
             }),
-            other => Err(Error::MismatchedType(
-                other.as_str(),
-                "NullableSliceIterator",
-            )),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(
+                    other.as_str(),
+                    "NullableSliceIterator",
+                ))
+            }
         }
     }
 }
@@ -1064,10 +1135,13 @@ impl<'a> TryFrom<Value<'a>> for Decimal32SliceIterator<'a> {
                 precision,
                 slice: slice.iter(),
             }),
-            other => Err(Error::MismatchedType(
-                other.as_str(),
-                "Decimal32SliceIterator",
-            )),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(
+                    other.as_str(),
+                    "Decimal32SliceIterator",
+                ))
+            }
         }
     }
 }
@@ -1103,10 +1177,13 @@ impl<'a> TryFrom<Value<'a>> for Decimal64SliceIterator<'a> {
                 precision,
                 slice: slice.iter(),
             }),
-            other => Err(Error::MismatchedType(
-                other.as_str(),
-                "Decimal64SliceIterator",
-            )),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(
+                    other.as_str(),
+                    "Decimal64SliceIterator",
+                ))
+            }
         }
     }
 }
@@ -1142,10 +1219,13 @@ impl<'a> TryFrom<Value<'a>> for Decimal128SliceIterator<'a> {
                 precision,
                 slice: slice.iter(),
             }),
-            other => Err(Error::MismatchedType(
-                other.as_str(),
-                "Decimal128SliceIterator",
-            )),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(
+                    other.as_str(),
+                    "Decimal128SliceIterator",
+                ))
+            }
         }
     }
 }
@@ -1188,7 +1268,10 @@ impl<'a> TryFrom<Value<'a>> for NestedIterator<'a> {
                     tuple_slice,
                 })
             }
-            other => Err(Error::MismatchedType(other.as_str(), "NestedIterator")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "NestedIterator"))
+            }
         }
     }
 }
@@ -1256,6 +1339,7 @@ impl<'a> TryFrom<Value<'a>> for NamedTupleIterator<'a> {
         match value {
             Value::NamedTuple { mark, index } => {
                 let Mark::Tuple(tuple) = mark.tuple.as_ref() else {
+                    cold_path();
                     return Err(Error::MismatchedType("non-Tuple", "NamedTupleIterator"));
                 };
                 Ok(Self {
@@ -1264,7 +1348,10 @@ impl<'a> TryFrom<Value<'a>> for NamedTupleIterator<'a> {
                     row: index,
                 })
             }
-            other => Err(Error::MismatchedType(other.as_str(), "NamedTupleIterator")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "NamedTupleIterator"))
+            }
         }
     }
 }
@@ -1307,10 +1394,13 @@ impl<'a> TryFrom<Value<'a>> for NamedTupleSliceIterator<'a> {
                 mark,
                 range: range.into(),
             }),
-            other => Err(Error::MismatchedType(
-                other.as_str(),
-                "NamedTupleSliceIterator",
-            )),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(
+                    other.as_str(),
+                    "NamedTupleSliceIterator",
+                ))
+            }
         }
     }
 }
@@ -1321,6 +1411,7 @@ impl<'a> Iterator for NamedTupleSliceIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.range.next()?;
         let Mark::Tuple(tuple) = self.mark.tuple.as_ref() else {
+            cold_path();
             return Some(Err(Error::MismatchedType(
                 "non-Tuple",
                 "NamedTupleSliceIterator",
@@ -1358,7 +1449,10 @@ impl<'a> TryFrom<Value<'a>> for NestedSliceIterator<'a> {
                 array_of_tuples: &mark.array_of_tuples,
                 range: range.into(),
             }),
-            other => Err(Error::MismatchedType(other.as_str(), "NestedSliceIterator")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "NestedSliceIterator"))
+            }
         }
     }
 }
@@ -1369,12 +1463,16 @@ impl<'a> Iterator for NestedSliceIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let slice_idx = self.range.next()?;
         let Some(val) = self.array_of_tuples.get(slice_idx) else {
+            cold_path();
             return Some(Err(Error::IndexOutOfBounds(slice_idx, "NestedSlice")));
         };
 
         let tuple_slice: TupleSliceIterator = match val.try_into() {
             Ok(v) => v,
-            Err(e) => return Some(Err(e)),
+            Err(e) => {
+                cold_path();
+                return Some(Err(e));
+            }
         };
 
         Some(Ok(NestedIterator {
@@ -1406,10 +1504,13 @@ impl<'a> TryFrom<Value<'a>> for FixedStringSliceIterator<'a> {
                 mark,
                 range: range.into(),
             }),
-            other => Err(Error::MismatchedType(
-                other.as_str(),
-                "FixedStringSliceIterator",
-            )),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(
+                    other.as_str(),
+                    "FixedStringSliceIterator",
+                ))
+            }
         }
     }
 }
@@ -1457,7 +1558,10 @@ impl<'a> TryFrom<Value<'a>> for Enum8SliceIterator<'a> {
                     data: data.iter(),
                 })
             }
-            other => Err(Error::MismatchedType(other.as_str(), "Enum8Iterator")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "Enum8Iterator"))
+            }
         }
     }
 }
@@ -1501,7 +1605,10 @@ impl<'a> TryFrom<Value<'a>> for Enum16SliceIterator<'a> {
                     data: data.iter(),
                 })
             }
-            other => Err(Error::MismatchedType(other.as_str(), "Enum16Iterator")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "Enum16Iterator"))
+            }
         }
     }
 }
@@ -1543,7 +1650,10 @@ impl<'a> TryFrom<Value<'a>> for JsonIterator<'a> {
                 index,
                 path_index: 0,
             }),
-            other => Err(Error::MismatchedType(other.as_str(), "JsonIterator")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "JsonIterator"))
+            }
         }
     }
 }
@@ -1593,7 +1703,10 @@ impl<'a> TryFrom<Value<'a>> for JsonSliceIterator<'a> {
                 mark,
                 range: range.into(),
             }),
-            other => Err(Error::MismatchedType(other.as_str(), "JsonSliceIterator")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "JsonSliceIterator"))
+            }
         }
     }
 }
@@ -1635,10 +1748,13 @@ impl<'a> TryFrom<Value<'a>> for VariantSliceIterator<'a> {
                 mark,
                 range: range.into(),
             }),
-            other => Err(Error::MismatchedType(
-                other.as_str(),
-                "VariantSliceIterator",
-            )),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(
+                    other.as_str(),
+                    "VariantSliceIterator",
+                ))
+            }
         }
     }
 }
@@ -1675,10 +1791,13 @@ impl<'a> TryFrom<Value<'a>> for DynamicSliceIterator<'a> {
                 mark,
                 range: range.into(),
             }),
-            other => Err(Error::MismatchedType(
-                other.as_str(),
-                "DynamicSliceIterator",
-            )),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(
+                    other.as_str(),
+                    "DynamicSliceIterator",
+                ))
+            }
         }
     }
 }

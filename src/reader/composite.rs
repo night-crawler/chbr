@@ -1,3 +1,4 @@
+use std::hint::cold_path;
 use std::ops::Range;
 
 use super::{ColStr, FromVariant, ReadSlice, Readable, TryRead};
@@ -25,7 +26,10 @@ where
                 mask: n.mask,
                 inner: Inner::try_from(n.data.as_ref())?,
             }),
-            other => Err(Error::MismatchedType(other.as_str(), "Nullable")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "Nullable"))
+            }
         }
     }
 }
@@ -36,6 +40,7 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for ColNullable<'a, Inner> {
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(mask) = self.mask.get(idx) else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(idx, "Nullable"));
         };
         if *mask == 1 {
@@ -63,6 +68,7 @@ impl<'a> LcIndices<'a> {
             Mark::UInt32(bv) => LcIndices::U32(bv.as_slice()),
             Mark::UInt64(bv) => LcIndices::U64(bv.as_slice()),
             other => {
+                cold_path();
                 return Err(Error::CorruptedData(format!(
                     "unexpected LowCardinality indices type: {}",
                     other.as_str()
@@ -108,11 +114,17 @@ where
                 };
                 Ok(ColLc { indices, dict })
             }
-            Mark::LowCardinality(_) => Err(Error::MismatchedType(
-                "LowCardinality(Nullable)",
-                "LowCardinality",
-            )),
-            other => Err(Error::MismatchedType(other.as_str(), "LowCardinality")),
+            Mark::LowCardinality(_) => {
+                cold_path();
+                Err(Error::MismatchedType(
+                    "LowCardinality(Nullable)",
+                    "LowCardinality",
+                ))
+            }
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "LowCardinality"))
+            }
         }
     }
 }
@@ -123,9 +135,11 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for ColLc<'a, Inner> {
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(value_index) = self.indices.get(idx) else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(idx, "LowCardinality"));
         };
         let Some(dict) = self.dict.as_ref() else {
+            cold_path();
             return Err(Error::CorruptedData(
                 "LowCardinality dictionary is missing".to_owned(),
             ));
@@ -159,11 +173,17 @@ where
                 };
                 Ok(ColLcNullable { indices, dict })
             }
-            Mark::LowCardinality(_) => Err(Error::MismatchedType(
-                "LowCardinality",
-                "LowCardinality(Nullable)",
-            )),
-            other => Err(Error::MismatchedType(other.as_str(), "LowCardinality")),
+            Mark::LowCardinality(_) => {
+                cold_path();
+                Err(Error::MismatchedType(
+                    "LowCardinality",
+                    "LowCardinality(Nullable)",
+                ))
+            }
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "LowCardinality"))
+            }
         }
     }
 }
@@ -174,12 +194,14 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for ColLcNullable<'a, Inner> {
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(value_index) = self.indices.get(idx) else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(idx, "LowCardinality"));
         };
         if value_index == 0 {
             return Ok(None);
         }
         let Some(dict) = self.dict.as_ref() else {
+            cold_path();
             return Err(Error::CorruptedData(
                 "LowCardinality dictionary is missing".to_owned(),
             ));
@@ -209,7 +231,10 @@ where
             }),
             // `Nested(...)` is stored as an array of tuples.
             Mark::Nested(n) => Self::try_from(n.array_of_tuples.as_ref()),
-            other => Err(Error::MismatchedType(other.as_str(), "Array")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "Array"))
+            }
         }
     }
 }
@@ -220,6 +245,7 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for ColArray<'a, Inner> {
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some((s, e)) = self.offsets.offset_indices(idx)? else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(idx, "Array"));
         };
         Ok(ArrayIter {
@@ -237,6 +263,7 @@ pub struct ArrayIter<'a, Inner: TryRead<'a>> {
 }
 
 impl<'a, Inner: TryRead<'a>> ArrayIter<'a, Inner> {
+    #[inline]
     pub fn try_collect_vec(self) -> crate::Result<Vec<Inner::Item>> {
         let mut out = Vec::with_capacity(self.range.len());
         for item in self {
@@ -301,7 +328,10 @@ where
                 keys: K::try_from(m.keys.as_ref())?,
                 values: V::try_from(m.values.as_ref())?,
             }),
-            other => Err(Error::MismatchedType(other.as_str(), "Map")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "Map"))
+            }
         }
     }
 }
@@ -311,6 +341,7 @@ impl<'a, K: TryRead<'a> + 'a, V: TryRead<'a> + 'a> TryRead<'a> for ColMap<'a, K,
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some((s, e)) = self.offsets.offset_indices(idx)? else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(idx, "Map"));
         };
         Ok(MapIter {
@@ -386,7 +417,10 @@ impl<'a, T: FromVariant<'a>> TryFrom<&'a Mark<'a>> for ColVariant<'a, T> {
                 mark: v,
                 readers: T::from_marks(&v.types)?,
             }),
-            other => Err(Error::MismatchedType(other.as_str(), "Variant")),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "Variant"))
+            }
         }
     }
 }
@@ -397,9 +431,11 @@ impl<'a, T: FromVariant<'a> + 'a> TryRead<'a> for ColVariant<'a, T> {
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(&discriminator) = self.mark.discriminators.get(idx) else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(idx, "Variant"));
         };
         if discriminator == VariantMark::NULL_DISCRIMINATOR {
+            cold_path();
             return Err(Error::MismatchedType(
                 "Null",
                 "non-null Variant row (use ColVariantNullable)",
@@ -445,6 +481,7 @@ impl<'a, T: FromVariant<'a> + 'a> TryRead<'a> for ColVariantNullable<'a, T> {
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let mark = self.inner.mark;
         let Some(&discriminator) = mark.discriminators.get(idx) else {
+            cold_path();
             return Err(Error::IndexOutOfBounds(idx, "Variant"));
         };
         if discriminator == VariantMark::NULL_DISCRIMINATOR {
@@ -478,12 +515,19 @@ macro_rules! impl_col_tuple {
                     Mark::Tuple(t) => t,
                     Mark::NamedTuple(nt) => match nt.tuple.as_ref() {
                         Mark::Tuple(t) => t,
-                        other => return Err(Error::MismatchedType(other.as_str(), "Tuple")),
+                        other => {
+                            cold_path();
+                            return Err(Error::MismatchedType(other.as_str(), "Tuple"));
+                        }
                     },
-                    other => return Err(Error::MismatchedType(other.as_str(), "Tuple")),
+                    other => {
+                        cold_path();
+                        return Err(Error::MismatchedType(other.as_str(), "Tuple"));
+                    }
                 };
 
                 if tuple.values.len() != $n {
+                    cold_path();
                     return Err(Error::MismatchedType("Tuple", "Tuple with matching arity"));
                 }
 
