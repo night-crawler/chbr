@@ -101,55 +101,55 @@ pub enum TypeHeader<'a> {
 
 impl<'a> TypeHeader<'a> {
     #[inline]
-    pub fn into_array(self) -> TypeHeader<'a> {
+    pub(crate) fn into_array(self) -> TypeHeader<'a> {
         match self {
             TypeHeader::Array(inner) => *inner,
-            e => unreachable!("Unexpected type header: {e:?}"),
+            e => unreachable!("bug: unexpected type header: {e:?}"),
         }
     }
 
     #[inline]
-    pub fn into_tuple(self) -> Vec<TypeHeader<'a>> {
+    pub(crate) fn into_tuple(self) -> Vec<TypeHeader<'a>> {
         match self {
             TypeHeader::Tuple(t) => t,
-            e => unreachable!("Unexpected type header: {e:?}"),
+            e => unreachable!("bug: unexpected type header: {e:?}"),
         }
     }
 
     #[inline]
-    pub fn into_map(self) -> MapHeader<'a> {
+    pub(crate) fn into_map(self) -> MapHeader<'a> {
         match self {
             TypeHeader::Map(map) => *map,
-            e => unreachable!("Unexpected type header: {e:?}"),
+            e => unreachable!("bug: unexpected type header: {e:?}"),
         }
     }
 
     #[inline]
-    pub fn into_variant(self) -> Vec<TypeHeader<'a>> {
+    pub(crate) fn into_variant(self) -> Vec<TypeHeader<'a>> {
         match self {
             TypeHeader::Variant(variants) => variants,
-            e => unreachable!("Unexpected type header: {e:?}"),
+            e => unreachable!("bug: unexpected type header: {e:?}"),
         }
     }
 
     #[inline]
-    pub fn into_json(self) -> JsonHeader<'a> {
+    pub(crate) fn into_json(self) -> JsonHeader<'a> {
         match self {
             TypeHeader::Json(json) => *json,
-            e => unreachable!("Unexpected type header: {e:?}"),
+            e => unreachable!("bug: unexpected type header: {e:?}"),
         }
     }
 
     #[inline]
-    pub fn into_dynamic(self) -> DynamicHeader<'a> {
+    pub(crate) fn into_dynamic(self) -> DynamicHeader<'a> {
         match self {
             TypeHeader::Dynamic(d) => *d,
-            e => unreachable!("Unexpected type header: {e:?}"),
+            e => unreachable!("bug: unexpected type header: {e:?}"),
         }
     }
 
     #[inline]
-    pub fn into_nested(self) -> Vec<TypeHeader<'a>> {
+    pub(crate) fn into_nested(self) -> Vec<TypeHeader<'a>> {
         match self {
             TypeHeader::Nested(n) => n,
             e => unreachable!("Unexpected type header: {e:?}"),
@@ -157,11 +157,11 @@ impl<'a> TypeHeader<'a> {
     }
 
     #[inline]
-    pub fn into_nullable(self) -> TypeHeader<'a> {
+    pub(crate) fn into_nullable(self) -> TypeHeader<'a> {
         match self {
             TypeHeader::Nullable(inner) => *inner,
             TypeHeader::Empty => TypeHeader::Empty,
-            e => unreachable!("Unexpected type header: {e:?}"),
+            e => unreachable!("bug: unexpected type header: {e:?}"),
         }
     }
 }
