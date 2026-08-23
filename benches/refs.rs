@@ -1,4 +1,4 @@
-use std::{fs, hint::black_box, net::Ipv6Addr};
+use std::{fs, hint::black_box, net::Ipv6Addr, time::Duration};
 
 use chbr::reader::{
     ColArray, ColBool, ColDateTime, ColF64, ColIpv6, ColLcNullableStr, ColLcStr, ColNullable,
@@ -204,6 +204,10 @@ pub struct BenchmarkCols<'a> {
     nested_some_other_id: ColArray<'a, ColU64<'a>>,
 }
 
+// Both derived benchmarks parse the same Native input and construct the same
+// `BenchmarkSample`. `BenchmarkCols::iter_blocks` calls the generated
+// `BenchmarkCols::try_read`, which returns a `BenchmarkColsItem` containing
+// every field before the five owned `Vec` conversions allocate.
 fn native_derive_read(input: &[u8]) -> TestResult<()> {
     let blocks = parse_many(input)?;
 
@@ -252,6 +256,11 @@ fn native_derive_read(input: &[u8]) -> TestResult<()> {
     Ok(())
 }
 
+// This variant bypasses `BlocksRows` and the generated `BenchmarkCols::try_read`,
+// but still uses each field reader's `TryRead::try_read`. Rust evaluates the
+// `BenchmarkSample` field initializers in order, so array collection and its
+// allocations occur between reads of later `BenchmarkCols` fields. It measures
+// this interleaved read-and-convert ordering rather than an allocation-free decoder.
 fn native_derive_direct_read(input: &[u8]) -> TestResult<()> {
     use chbr::reader::TryRead as _;
 
@@ -330,5 +339,12 @@ fn bench_readers(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_readers);
+criterion_group! {
+    name = benches;
+    config = Criterion::default()
+        .warm_up_time(Duration::from_secs(10))
+        .measurement_time(Duration::from_secs(20))
+        .sample_size(200);
+    targets = bench_readers
+}
 criterion_main!(benches);
