@@ -58,7 +58,7 @@ pub trait ReadSlice<'a>: TryRead<'a> {
     fn try_read_slice(&self, range: Range<usize>) -> crate::Result<&'a [Self::Elem]>;
 }
 
-/// Constructs instances for [`ColVariant`] and [`ColVariantNullable`].
+/// Constructs instances for [`Variant`] and [`VariantNullable`].
 ///
 /// ClickHouse stores variants in canonical type order.
 /// Declared enum variants must use the same order.
@@ -74,7 +74,7 @@ pub trait FromVariant<'a>: Sized {
 
     /// Constructs the enum variant selected by `discriminator`.
     ///
-    /// [`ColVariant::try_read`] passes `v.discriminators[row]` as `discriminator` and
+    /// [`Variant::try_read`] passes `v.discriminators[row]` as `discriminator` and
     /// `v.offsets[row]` as `idx`.
     ///
     /// The implementation passes `idx` to the selected reader. It wraps the
@@ -84,7 +84,7 @@ pub trait FromVariant<'a>: Sized {
 
 /// Defines the default reader for a field in a `#[derive(FromVariant)]` enum. Generally, allows
 /// setting the inverse relation between a rust type and a corresponding reader, for examples see
-/// [`ColStr`].
+/// [`Str`].
 ///
 /// For [`crate::Mark::Variant`], enum variant `i` corresponds to the i-th type.
 /// Without `#[col(reader = ...)]`, the derive uses the default `<FieldType as Readable>::Reader`

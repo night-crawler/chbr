@@ -1,12 +1,3 @@
-use chrono_tz::Tz;
-use core::fmt;
-use std::fmt::Debug;
-use std::ops::{Deref, Range};
-use zerocopy::{
-    FromBytes, Unaligned,
-    little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128},
-};
-
 use crate::value::{LowCardinalitySliceIterator, SliceUsizeIterator};
 use crate::{
     Bf16Data, ByteExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data,
@@ -14,7 +5,12 @@ use crate::{
     slice::ByteView,
     types::{JsonColumnHeader, OffsetIndexPair as _, Offsets},
     value::Value,
+    zc,
 };
+use chrono_tz::Tz;
+use core::fmt;
+use std::fmt::Debug;
+use std::ops::{Deref, Range};
 
 macro_rules! impl_get {
     ($ty:ident, $variant:ident) => {
@@ -254,7 +250,7 @@ impl Enum8<'_> {
 #[derive(Debug)]
 pub struct Enum16<'a> {
     pub variants: Vec<(&'a str, i16)>,
-    pub data: ByteView<'a, I16>,
+    pub data: ByteView<'a, zc::I16>,
 }
 
 impl Enum16<'_> {
@@ -344,19 +340,19 @@ pub enum Mark<'a> {
     Empty,
     Bool(BoolView<'a>),
     Int8(ByteView<'a, i8>),
-    Int16(ByteView<'a, I16>),
-    Int32(ByteView<'a, I32>),
-    Int64(ByteView<'a, I64>),
-    Int128(ByteView<'a, I128>),
+    Int16(ByteView<'a, zc::I16>),
+    Int32(ByteView<'a, zc::I32>),
+    Int64(ByteView<'a, zc::I64>),
+    Int128(ByteView<'a, zc::I128>),
     Int256(ByteView<'a, I256>),
     UInt8(ByteView<'a, u8>),
-    UInt16(ByteView<'a, U16>),
-    UInt32(ByteView<'a, U32>),
-    UInt64(ByteView<'a, U64>),
-    UInt128(ByteView<'a, U128>),
+    UInt16(ByteView<'a, zc::U16>),
+    UInt32(ByteView<'a, zc::U32>),
+    UInt64(ByteView<'a, zc::U64>),
+    UInt128(ByteView<'a, zc::U128>),
     UInt256(ByteView<'a, U256>),
-    Float32(ByteView<'a, F32>),
-    Float64(ByteView<'a, F64>),
+    Float32(ByteView<'a, zc::F32>),
+    Float64(ByteView<'a, zc::F64>),
     BFloat16(ByteView<'a, Bf16Data>),
     Decimal32(Decimal32<'a>),
     Decimal64(Decimal64<'a>),
@@ -505,7 +501,7 @@ impl Debug for Mark<'_> {
                 .field("ptr", &bytes.as_ptr())
                 .finish()
         }
-        fn dbg_bv<T: Unaligned + FromBytes + Copy + Debug>(
+        fn dbg_bv<T: zc::Unaligned + zc::FromBytes + Copy + Debug>(
             f: &mut fmt::Formatter<'_>,
             name: &str,
             bv: &ByteView<'_, T>,

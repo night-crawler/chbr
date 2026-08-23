@@ -1,19 +1,18 @@
-use std::hint::cold_path;
-use std::ops::Range;
-
-use super::{ColStr, FromVariant, ReadSlice, Readable, TryRead};
+use super::{FromVariant, ReadSlice, Readable, Str, TryRead};
 use crate::error::Error;
 use crate::mark::{Mark, Variant as VariantMark};
 use crate::types::{OffsetIndexPair as _, Offsets};
-use zerocopy::little_endian::{U16, U32, U64};
+use chbr::zc;
+use std::hint::cold_path;
+use std::ops::Range;
 
 #[derive(Clone, Copy)]
-pub struct ColNullable<'a, Inner> {
+pub struct Nullable<'a, Inner> {
     pub mask: &'a [u8],
     pub inner: Inner,
 }
 
-impl<'a, Inner> TryFrom<&'a Mark<'a>> for ColNullable<'a, Inner>
+impl<'a, Inner> TryFrom<&'a Mark<'a>> for Nullable<'a, Inner>
 where
     Inner: TryRead<'a> + TryFrom<&'a Mark<'a>>,
     Error: From<<Inner as TryFrom<&'a Mark<'a>>>::Error>,
@@ -22,7 +21,7 @@ where
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
-            Mark::Nullable(n) => Ok(ColNullable {
+            Mark::Nullable(n) => Ok(Nullable {
                 mask: n.mask,
                 inner: Inner::try_from(n.data.as_ref())?,
             }),
@@ -34,7 +33,7 @@ where
     }
 }
 
-impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for ColNullable<'a, Inner> {
+impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for Nullable<'a, Inner> {
     type Item = Option<Inner::Item>;
 
     #[inline(always)]
@@ -54,9 +53,9 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for ColNullable<'a, Inner> {
 enum LcIndices<'a> {
     Empty,
     U8(&'a [u8]),
-    U16(&'a [U16]),
-    U32(&'a [U32]),
-    U64(&'a [U64]),
+    U16(&'a [zc::U16]),
+    U32(&'a [zc::U32]),
+    U64(&'a [zc::U64]),
 }
 
 impl<'a> LcIndices<'a> {
@@ -90,14 +89,14 @@ impl<'a> LcIndices<'a> {
 }
 
 #[derive(Clone, Copy)]
-pub struct ColLc<'a, Inner> {
+pub struct Lc<'a, Inner> {
     indices: LcIndices<'a>,
     dict: Option<Inner>,
 }
 
-pub type ColLcStr<'a> = ColLc<'a, ColStr<'a>>;
+pub type LcStr<'a> = Lc<'a, Str<'a>>;
 
-impl<'a, Inner> TryFrom<&'a Mark<'a>> for ColLc<'a, Inner>
+impl<'a, Inner> TryFrom<&'a Mark<'a>> for Lc<'a, Inner>
 where
     Inner: TryRead<'a> + TryFrom<&'a Mark<'a>>,
     Error: From<<Inner as TryFrom<&'a Mark<'a>>>::Error>,
@@ -112,7 +111,7 @@ where
                     Some(keys) => Some(Inner::try_from(keys)?),
                     None => None,
                 };
-                Ok(ColLc { indices, dict })
+                Ok(Lc { indices, dict })
             }
             Mark::LowCardinality(_) => {
                 cold_path();
@@ -129,7 +128,7 @@ where
     }
 }
 
-impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for ColLc<'a, Inner> {
+impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for Lc<'a, Inner> {
     type Item = Inner::Item;
 
     #[inline(always)]
@@ -149,14 +148,14 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for ColLc<'a, Inner> {
 }
 
 #[derive(Clone, Copy)]
-pub struct ColLcNullable<'a, Inner> {
+pub struct LcNullable<'a, Inner> {
     indices: LcIndices<'a>,
     dict: Option<Inner>,
 }
 
-pub type ColLcNullableStr<'a> = ColLcNullable<'a, ColStr<'a>>;
+pub type LcNullableStr<'a> = LcNullable<'a, Str<'a>>;
 
-impl<'a, Inner> TryFrom<&'a Mark<'a>> for ColLcNullable<'a, Inner>
+impl<'a, Inner> TryFrom<&'a Mark<'a>> for LcNullable<'a, Inner>
 where
     Inner: TryRead<'a> + TryFrom<&'a Mark<'a>>,
     Error: From<<Inner as TryFrom<&'a Mark<'a>>>::Error>,
@@ -171,7 +170,7 @@ where
                     Some(keys) => Some(Inner::try_from(keys)?),
                     None => None,
                 };
-                Ok(ColLcNullable { indices, dict })
+                Ok(LcNullable { indices, dict })
             }
             Mark::LowCardinality(_) => {
                 cold_path();
@@ -188,7 +187,7 @@ where
     }
 }
 
-impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for ColLcNullable<'a, Inner> {
+impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for LcNullable<'a, Inner> {
     type Item = Option<Inner::Item>;
 
     #[inline(always)]
@@ -211,12 +210,12 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for ColLcNullable<'a, Inner> {
 }
 
 #[derive(Clone, Copy)]
-pub struct ColArray<'a, Inner: TryRead<'a>> {
+pub struct Array<'a, Inner: TryRead<'a>> {
     pub offsets: &'a Offsets<'a>,
     pub values: Inner,
 }
 
-impl<'a, Inner> TryFrom<&'a Mark<'a>> for ColArray<'a, Inner>
+impl<'a, Inner> TryFrom<&'a Mark<'a>> for Array<'a, Inner>
 where
     Inner: TryRead<'a> + TryFrom<&'a Mark<'a>>,
     Error: From<<Inner as TryFrom<&'a Mark<'a>>>::Error>,
@@ -225,7 +224,7 @@ where
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
-            Mark::Array(arr) => Ok(ColArray {
+            Mark::Array(arr) => Ok(Array {
                 offsets: &arr.offsets,
                 values: Inner::try_from(arr.values.as_ref())?,
             }),
@@ -239,7 +238,7 @@ where
     }
 }
 
-impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for ColArray<'a, Inner> {
+impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for Array<'a, Inner> {
     type Item = ArrayIter<'a, Inner>;
 
     #[inline(always)]
@@ -295,7 +294,7 @@ where
     Inner: TryRead<'a> + TryFrom<&'a Mark<'a>> + 'a,
     Error: From<<Inner as TryFrom<&'a Mark<'a>>>::Error>,
 {
-    type Reader = ColArray<'a, Inner>;
+    type Reader = Array<'a, Inner>;
 }
 
 impl<'a, Inner: ReadSlice<'a>> ArrayIter<'a, Inner> {
@@ -307,13 +306,13 @@ impl<'a, Inner: ReadSlice<'a>> ArrayIter<'a, Inner> {
 }
 
 #[derive(Clone, Copy)]
-pub struct ColMap<'a, K: TryRead<'a>, V: TryRead<'a>> {
+pub struct Map<'a, K: TryRead<'a>, V: TryRead<'a>> {
     pub offsets: &'a Offsets<'a>,
     pub keys: K,
     pub values: V,
 }
 
-impl<'a, K, V> TryFrom<&'a Mark<'a>> for ColMap<'a, K, V>
+impl<'a, K, V> TryFrom<&'a Mark<'a>> for Map<'a, K, V>
 where
     K: TryRead<'a> + TryFrom<&'a Mark<'a>>,
     V: TryRead<'a> + TryFrom<&'a Mark<'a>>,
@@ -323,7 +322,7 @@ where
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
-            Mark::Map(m) => Ok(ColMap {
+            Mark::Map(m) => Ok(Map {
                 offsets: &m.offsets,
                 keys: K::try_from(m.keys.as_ref())?,
                 values: V::try_from(m.values.as_ref())?,
@@ -336,7 +335,7 @@ where
     }
 }
 
-impl<'a, K: TryRead<'a> + 'a, V: TryRead<'a> + 'a> TryRead<'a> for ColMap<'a, K, V> {
+impl<'a, K: TryRead<'a> + 'a, V: TryRead<'a> + 'a> TryRead<'a> for Map<'a, K, V> {
     type Item = MapIter<'a, K, V>;
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
@@ -387,28 +386,28 @@ where
     V: TryRead<'a> + TryFrom<&'a Mark<'a>> + 'a,
     Error: From<<K as TryFrom<&'a Mark<'a>>>::Error> + From<<V as TryFrom<&'a Mark<'a>>>::Error>,
 {
-    type Reader = ColMap<'a, K, V>;
+    type Reader = Map<'a, K, V>;
 }
 
 /// Reads a `Variant(...)` column into a `T` enum implementing [`FromVariant`].
 /// Normally, it should be derived via `#[derive(FromVariant)]`.
 ///
-/// This will error on NULLs, use [`ColVariantNullable`] for nullable columns.
-pub struct ColVariant<'a, T: FromVariant<'a>> {
+/// This will error on NULLs, use [`VariantNullable`] for nullable columns.
+pub struct Variant<'a, T: FromVariant<'a>> {
     mark: &'a VariantMark<'a>,
     readers: T::Readers,
 }
 
-impl<'a, T: FromVariant<'a>> Clone for ColVariant<'a, T> {
+impl<'a, T: FromVariant<'a>> Clone for Variant<'a, T> {
     #[inline]
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'a, T: FromVariant<'a>> Copy for ColVariant<'a, T> {}
+impl<'a, T: FromVariant<'a>> Copy for Variant<'a, T> {}
 
-impl<'a, T: FromVariant<'a>> TryFrom<&'a Mark<'a>> for ColVariant<'a, T> {
+impl<'a, T: FromVariant<'a>> TryFrom<&'a Mark<'a>> for Variant<'a, T> {
     type Error = Error;
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
@@ -425,7 +424,7 @@ impl<'a, T: FromVariant<'a>> TryFrom<&'a Mark<'a>> for ColVariant<'a, T> {
     }
 }
 
-impl<'a, T: FromVariant<'a> + 'a> TryRead<'a> for ColVariant<'a, T> {
+impl<'a, T: FromVariant<'a> + 'a> TryRead<'a> for Variant<'a, T> {
     type Item = T;
 
     #[inline(always)]
@@ -450,31 +449,31 @@ impl<'a, T: FromVariant<'a> + 'a> TryRead<'a> for ColVariant<'a, T> {
     }
 }
 
-/// Same as [`ColVariant`] that yields `None` for NULL rows.
-pub struct ColVariantNullable<'a, T: FromVariant<'a>> {
-    inner: ColVariant<'a, T>,
+/// Same as [`Variant`] that yields `None` for NULL rows.
+pub struct VariantNullable<'a, T: FromVariant<'a>> {
+    inner: Variant<'a, T>,
 }
 
-impl<'a, T: FromVariant<'a>> Clone for ColVariantNullable<'a, T> {
+impl<'a, T: FromVariant<'a>> Clone for VariantNullable<'a, T> {
     #[inline]
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'a, T: FromVariant<'a>> Copy for ColVariantNullable<'a, T> {}
+impl<'a, T: FromVariant<'a>> Copy for VariantNullable<'a, T> {}
 
-impl<'a, T: FromVariant<'a>> TryFrom<&'a Mark<'a>> for ColVariantNullable<'a, T> {
+impl<'a, T: FromVariant<'a>> TryFrom<&'a Mark<'a>> for VariantNullable<'a, T> {
     type Error = Error;
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         Ok(Self {
-            inner: ColVariant::try_from(value)?,
+            inner: Variant::try_from(value)?,
         })
     }
 }
 
-impl<'a, T: FromVariant<'a> + 'a> TryRead<'a> for ColVariantNullable<'a, T> {
+impl<'a, T: FromVariant<'a> + 'a> TryRead<'a> for VariantNullable<'a, T> {
     type Item = Option<T>;
 
     #[inline(always)]
@@ -497,11 +496,11 @@ impl<'a, T: FromVariant<'a> + 'a> TryRead<'a> for ColVariantNullable<'a, T> {
 }
 
 #[derive(Clone, Copy)]
-pub struct ColTuple<T>(pub T);
+pub struct Tuple<T>(pub T);
 
 macro_rules! impl_col_tuple {
     ($n:literal, $($idx:tt => $t:ident),+) => {
-        impl<'a, $($t,)+> TryFrom<&'a Mark<'a>> for ColTuple<($($t,)+)>
+        impl<'a, $($t,)+> TryFrom<&'a Mark<'a>> for Tuple<($($t,)+)>
         where
             $(
                 $t: TryRead<'a> + TryFrom<&'a Mark<'a>>,
@@ -535,7 +534,7 @@ macro_rules! impl_col_tuple {
             }
         }
 
-        impl<'a, $($t: TryRead<'a> + 'a,)+> TryRead<'a> for ColTuple<($($t,)+)> {
+        impl<'a, $($t: TryRead<'a> + 'a,)+> TryRead<'a> for Tuple<($($t,)+)> {
             type Item = ($($t::Item,)+);
 
             #[inline(always)]

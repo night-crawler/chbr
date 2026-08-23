@@ -1,10 +1,6 @@
 use std::hint::cold_path;
 use std::{marker::PhantomData, ops::Range};
 
-use chrono::{DateTime, TimeZone};
-use uuid::Uuid;
-use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
-
 use crate::{
     Bf16Data, ByteExt as _, Date16Data, Date32Data, I256, Ipv4Data, Ipv6Data, U256, UuidData,
     macros::{define_int_getters, define_ip_getters, define_opt_getters, define_slice_fns},
@@ -12,6 +8,9 @@ use crate::{
     types::OffsetIndexPair as _,
     value::{MapIterator, Value, Value::JsonSlice},
 };
+use chbr::zc;
+use chrono::{DateTime, TimeZone};
+use uuid::Uuid;
 
 /// Iterator over the string keys of a `LowCardinality` column slice.
 /// Waiting for: <https://github.com/rust-lang/rust/issues/63063>
@@ -22,9 +21,9 @@ pub struct LcStrIter<'a> {
 
 enum LcIndexIter<'a> {
     U8(std::slice::Iter<'a, u8>),
-    U16(std::slice::Iter<'a, U16>),
-    U32(std::slice::Iter<'a, U32>),
-    U64(std::slice::Iter<'a, U64>),
+    U16(std::slice::Iter<'a, zc::U16>),
+    U32(std::slice::Iter<'a, zc::U32>),
+    U64(std::slice::Iter<'a, zc::U64>),
 }
 
 impl<'a> Iterator for LcStrIter<'a> {
@@ -478,17 +477,17 @@ impl<'a> Mark<'a> {
 
     define_int_getters!(
         (Int8, i8, std::convert::identity),
-        (Int16, i16, I16::get),
-        (Int32, i32, I32::get),
-        (Int64, i64, I64::get),
-        (Int128, i128, I128::get),
+        (Int16, i16, zc::I16::get),
+        (Int32, i32, zc::I32::get),
+        (Int64, i64, zc::I64::get),
+        (Int128, i128, zc::I128::get),
         (UInt8, u8, std::convert::identity),
-        (UInt16, u16, U16::get),
-        (UInt32, u32, U32::get),
-        (UInt64, u64, U64::get),
-        (UInt128, u128, U128::get),
-        (Float32, f32, F32::get),
-        (Float64, f64, F64::get),
+        (UInt16, u16, zc::U16::get),
+        (UInt32, u32, zc::U32::get),
+        (UInt64, u64, zc::U64::get),
+        (UInt128, u128, zc::U128::get),
+        (Float32, f32, zc::F32::get),
+        (Float64, f64, zc::F64::get),
         (Uuid, Uuid, Uuid::from),
     );
 
@@ -512,19 +511,19 @@ impl<'a> Mark<'a> {
 
     define_slice_fns!(
         (Int8, i8),
-        (Int16, I16),
-        (Int32, I32),
-        (Int64, I64),
-        (Int128, I128),
+        (Int16, zc::I16),
+        (Int32, zc::I32),
+        (Int64, zc::I64),
+        (Int128, zc::I128),
         (Int256, I256),
         (UInt8, u8),
-        (UInt16, U16),
-        (UInt32, U32),
-        (UInt64, U64),
-        (UInt128, U128),
+        (UInt16, zc::U16),
+        (UInt32, zc::U32),
+        (UInt64, zc::U64),
+        (UInt128, zc::U128),
         (UInt256, U256),
-        (Float32, F32),
-        (Float64, F64),
+        (Float32, zc::F32),
+        (Float64, zc::F64),
         (BFloat16, Bf16Data),
         (String, &'a str),
         (Uuid, UuidData),
@@ -539,11 +538,6 @@ impl<'a> Mark<'a> {
 mod tests {
     use std::{collections::HashMap, str::FromStr as _};
 
-    use half::bf16;
-    use pretty_assertions::assert_eq;
-    use testresult::TestResult;
-    use zerocopy::little_endian::{I64, U64, U128};
-
     use crate::{
         Bf16Data,
         common::load,
@@ -556,6 +550,10 @@ mod tests {
             VariantSliceIterator,
         },
     };
+    use chbr::zc;
+    use half::bf16;
+    use pretty_assertions::assert_eq;
+    use testresult::TestResult;
 
     #[test]
     fn int_array() -> TestResult {
@@ -607,7 +605,7 @@ mod tests {
 
         let mut arrays = Vec::new();
         for index in 0..block.num_rows {
-            let v: &[I64] = arr_marker.get(index).unwrap().try_into()?;
+            let v: &[zc::I64] = arr_marker.get(index).unwrap().try_into()?;
             arrays.push(v);
         }
 
@@ -777,7 +775,7 @@ mod tests {
 
         for (i, expected) in expected_arrays.iter().enumerate() {
             let v = arrs_marker.get(i).unwrap();
-            let outer: ArraySliceIterator<&[I64]> = v.try_into()?;
+            let outer: ArraySliceIterator<&[zc::I64]> = v.try_into()?;
             let mut actual_outer = vec![];
             for slice in outer.flatten() {
                 let inner = slice.iter().map(|&v| v.get()).collect::<Vec<_>>();
@@ -1046,7 +1044,7 @@ mod tests {
                 continue;
             }
 
-            if let Ok(value) = <Value<'_> as TryInto<&[I64]>>::try_into(value.clone()) {
+            if let Ok(value) = <Value<'_> as TryInto<&[zc::I64]>>::try_into(value.clone()) {
                 let parts = value
                     .iter()
                     .map(|v| format!("{}", v.get()))
@@ -1863,7 +1861,7 @@ mod tests {
         ]];
 
         for (i, expected) in expected_u128_array.iter().enumerate() {
-            let value: &[U128] = u128_array_marker.get(i).unwrap().try_into()?;
+            let value: &[zc::U128] = u128_array_marker.get(i).unwrap().try_into()?;
             let mut actual = vec![];
             for item in value {
                 actual.push(item.get());
@@ -1950,7 +1948,7 @@ mod tests {
         let row1: i64 = dynamic_marker.get(1).unwrap().try_into()?;
         assert_eq!(row1, 12345, "Mismatch at index 1");
 
-        let row2: &[I64] = dynamic_marker.get(2).unwrap().try_into()?;
+        let row2: &[zc::I64] = dynamic_marker.get(2).unwrap().try_into()?;
         assert_eq!(row2, &[1, 2, 3], "Mismatch at index 2");
 
         let row3: MapIterator<&str, &str> = dynamic_marker.get(3).unwrap().try_into()?;
@@ -2133,7 +2131,7 @@ mod tests {
             for val in it {
                 let str_value: Result<&str, _> = val.clone().try_into();
                 let int_value: Result<i64, _> = val.clone().try_into();
-                let arr_value: Result<&[U64], _> = val.clone().try_into();
+                let arr_value: Result<&[zc::U64], _> = val.clone().try_into();
                 let json_value: Result<JsonIterator, _> = val.try_into();
 
                 // We should have exactly one successful conversion for each row.

@@ -1,15 +1,13 @@
 use std::{fs, hint::black_box, net::Ipv6Addr, time::Duration};
 
 use chbr::reader::{
-    ColArray, ColBool, ColDateTime, ColF64, ColIpv6, ColLcNullableStr, ColLcStr, ColNullable,
-    ColU32, ColU64, ColU128, ColUuid,
+    Array, Bool, DateTime, F64, Ipv6, LcNullableStr, LcStr, Nullable, U32, U64, U128, Uuid,
 };
 use chbr::{BlockRow, BlocksIterator, FromBlock, parse::block::parse_many};
 use chrono::Utc;
 use clickhouse::rowbinary::de::deserialize_from;
 use criterion::{Criterion, criterion_group, criterion_main};
 use testresult::TestResult;
-use zerocopy::little_endian::{U64, U128};
 
 #[derive(clickhouse::Row, serde::Deserialize, Debug)]
 pub struct BenchmarkSample<'a> {
@@ -91,11 +89,13 @@ impl<'a> TryFrom<BlockRow<'a>> for BenchmarkSample<'a> {
             .collect::<Vec<_>>();
 
         let mut nested_some_id = Vec::with_capacity(nested_strs.len());
-        let slice: &[U128] = nested_field_some_id.get_arr_uint128_slice(i)?.unwrap();
+        let slice: &[zerocopy::little_endian::U128] =
+            nested_field_some_id.get_arr_uint128_slice(i)?.unwrap();
         nested_some_id.extend(slice.iter().map(|v| v.get()));
 
         let mut nested_some_other_id = Vec::with_capacity(nested_strs.len());
-        let slice: &[U64] = nested_field_some_other_id.get_arr_uint64_slice(i)?.unwrap();
+        let slice: &[zerocopy::little_endian::U64] =
+            nested_field_some_other_id.get_arr_uint64_slice(i)?.unwrap();
         nested_some_other_id.extend(slice.iter().map(|v| v.get()));
 
         let row = Self {
@@ -171,37 +171,37 @@ fn native_read(input: &[u8]) -> TestResult<()> {
 
 #[derive(FromBlock)]
 pub struct BenchmarkCols<'a> {
-    id: ColUuid<'a>,
-    lc_string_cd10: ColLcStr<'a>,
-    timestamp: ColDateTime<'a>,
-    count: ColF64<'a>,
-    some_number: ColU32<'a>,
+    id: Uuid<'a>,
+    lc_string_cd10: LcStr<'a>,
+    timestamp: DateTime<'a>,
+    count: F64<'a>,
+    some_number: U32<'a>,
 
-    lc_nullable_string_cd1000: ColLcNullableStr<'a>,
-    lc_nullable_string_cd5000: ColLcNullableStr<'a>,
-    lc_nullable_string_cd3000: ColLcNullableStr<'a>,
-    lc_nullable_string_cd4000: ColLcNullableStr<'a>,
-    lc_nullable_string_cd50000: ColLcNullableStr<'a>,
-    lc_nullable_string_cd100: ColLcNullableStr<'a>,
-    lc_nullable_string_cd500: ColLcNullableStr<'a>,
+    lc_nullable_string_cd1000: LcNullableStr<'a>,
+    lc_nullable_string_cd5000: LcNullableStr<'a>,
+    lc_nullable_string_cd3000: LcNullableStr<'a>,
+    lc_nullable_string_cd4000: LcNullableStr<'a>,
+    lc_nullable_string_cd50000: LcNullableStr<'a>,
+    lc_nullable_string_cd100: LcNullableStr<'a>,
+    lc_nullable_string_cd500: LcNullableStr<'a>,
 
-    some_ip_address: ColNullable<'a, ColIpv6<'a>>,
+    some_ip_address: Nullable<'a, Ipv6<'a>>,
 
-    lc_nullable_string8: ColLcNullableStr<'a>,
-    lc_tags: ColArray<'a, ColLcStr<'a>>,
-    lc_nullable_string_cd_00000: ColLcNullableStr<'a>,
+    lc_nullable_string8: LcNullableStr<'a>,
+    lc_tags: Array<'a, LcStr<'a>>,
+    lc_nullable_string_cd_00000: LcNullableStr<'a>,
 
     #[col(name = "nested_field.lc_string_cd10")]
-    nested_lc_string_cd10: ColArray<'a, ColLcStr<'a>>,
+    nested_lc_string_cd10: Array<'a, LcStr<'a>>,
 
     #[col(name = "nested_field.flag")]
-    nested_flag: ColArray<'a, ColBool<'a>>,
+    nested_flag: Array<'a, Bool<'a>>,
 
     #[col(name = "nested_field.some_id")]
-    nested_some_id: ColArray<'a, ColU128<'a>>,
+    nested_some_id: Array<'a, U128<'a>>,
 
     #[col(name = "nested_field.some_other_id")]
-    nested_some_other_id: ColArray<'a, ColU64<'a>>,
+    nested_some_other_id: Array<'a, U64<'a>>,
 }
 
 // Both derived benchmarks parse the same Native input and construct the same
