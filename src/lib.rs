@@ -16,7 +16,6 @@ use uuid::Uuid;
 
 pub mod conv;
 pub mod error;
-pub mod index;
 mod macros;
 pub mod mark;
 pub mod parse;
