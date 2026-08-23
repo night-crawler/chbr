@@ -340,7 +340,19 @@ impl<'a> Iterator for BlockRow<'a> {
             },
         ))
     }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self
+            .col_names
+            .len()
+            .min(self.cols.len())
+            .saturating_sub(self.col_index);
+        (remaining, Some(remaining))
+    }
 }
+
+impl ExactSizeIterator for BlockRow<'_> {}
 
 impl<'a> Iterator for BlocksIterator<'a> {
     type Item = BlockRow<'a>;
@@ -365,7 +377,22 @@ impl<'a> Iterator for BlocksIterator<'a> {
             break Some(block_row);
         }
     }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let mut blocks = self.blocks.clone();
+        let mut remaining = match blocks.next() {
+            Some(block) => block.num_rows.saturating_sub(self.block_row),
+            None => 0,
+        };
+        for block in blocks {
+            remaining += block.num_rows;
+        }
+        (remaining, Some(remaining))
+    }
 }
+
+impl ExactSizeIterator for BlocksIterator<'_> {}
 
 pub struct ColumnAccessor<'a> {
     pub col_name: &'a str,

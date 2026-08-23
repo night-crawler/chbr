@@ -1684,7 +1684,7 @@ impl<'a> Iterator for JsonIterator<'a> {
     #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = self.mark.headers.len() - self.path_index;
-        (remaining, Some(remaining))
+        (0, Some(remaining))
     }
 }
 

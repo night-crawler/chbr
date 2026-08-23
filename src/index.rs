@@ -52,6 +52,8 @@ impl<'a> Iterator for LcStrIter<'a> {
     }
 }
 
+impl ExactSizeIterator for LcStrIter<'_> {}
+
 struct ArrayLcStrIter<'a> {
     inner: Option<LcStrIter<'a>>,
 }
@@ -63,7 +65,17 @@ impl<'a> Iterator for ArrayLcStrIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.as_mut()?.next()
     }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.inner {
+            Some(it) => it.size_hint(),
+            None => (0, Some(0)),
+        }
+    }
 }
+
+impl ExactSizeIterator for ArrayLcStrIter<'_> {}
 
 impl<'a> Mark<'a> {
     pub fn get(&'a self, index: usize) -> Option<Value<'a>> {

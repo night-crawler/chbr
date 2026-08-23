@@ -161,4 +161,14 @@ impl<'a, R: FromBlock<'a>> Iterator for BlocksRows<'a, R> {
             }
         }
     }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let current = match &self.rows_iter {
+            Some(it) => it.size_hint().0,
+            None => 0,
+        };
+        let remaining: usize = self.blocks.clone().map(|b| b.num_rows).sum();
+        (current, Some(current + remaining))
+    }
 }
