@@ -1,5 +1,7 @@
 extern crate self as chbr;
 
+use std::hint::cold_path;
+
 use std::{
     collections::{HashMap, HashSet},
     iter::Peekable,
@@ -79,10 +81,13 @@ impl TryFrom<Range<usize>> for TinyRange {
 
     #[inline(always)]
     fn try_from(value: Range<usize>) -> std::result::Result<Self, Self::Error> {
-        let start = u32::try_from(value.start)
-            .map_err(|_| Error::ValueOutOfRange("usize", "u32", value.start.to_string()))?;
+        let start = u32::try_from(value.start).map_err(|_| {
+            cold_path();
+            Error::ValueOutOfRange("usize", "u32", value.start.to_string())
+        })?;
 
         let length = u32::try_from(value.end - value.start).map_err(|_| {
+            cold_path();
             Error::ValueOutOfRange("usize", "u32", (value.end - value.start).to_string())
         })?;
 
@@ -188,7 +193,10 @@ impl Decimal128Data {
     pub fn with_precision(&self, precision: u8) -> Result<rust_decimal::Decimal> {
         let value = self.0.get();
         let value = rust_decimal::Decimal::try_from_i128_with_scale(value, u32::from(precision))
-            .map_err(|_| Error::Overflow(value.to_string()))?;
+            .map_err(|_| {
+                cold_path();
+                Error::Overflow(value.to_string())
+            })?;
         Ok(value)
     }
 }
@@ -219,6 +227,7 @@ impl ParsedBlock<'_> {
         }
 
         if num_used < order.len() {
+            cold_path();
             let present_columns = triples
                 .iter()
                 .map(|(name, _, _)| *name)
@@ -291,18 +300,22 @@ pub struct BlockRow<'a> {
 }
 
 impl<'a> BlockRow<'a> {
+    #[inline]
     pub const fn cols(&self) -> &'a [Mark<'a>] {
         self.cols
     }
 
+    #[inline]
     pub const fn col_names(&self) -> &'a [&'a str] {
         self.col_names
     }
 
+    #[inline]
     pub const fn row_index(&self) -> usize {
         self.row_index
     }
 
+    #[inline]
     pub const fn col_index(&self) -> usize {
         self.col_index
     }

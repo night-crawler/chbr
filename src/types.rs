@@ -1,3 +1,5 @@
+use std::hint::cold_path;
+
 pub use chrono_tz::Tz;
 use zerocopy::little_endian::U64;
 
@@ -46,14 +48,19 @@ impl OffsetIndexPair for Offsets<'_> {
         let Some(value) = self.get(index).map(|v| v.get()) else {
             return Ok(None);
         };
-        let value = T::try_from(value).map_err(|_| crate::Error::Overflow(value.to_string()))?;
+        let value = T::try_from(value).map_err(|_| {
+            cold_path();
+            crate::Error::Overflow(value.to_string())
+        })?;
         Ok(Some(value))
     }
 
     fn last_or_default(&self) -> crate::Result<usize> {
         if let Some(last) = self.last().map(|last| last.get()) {
-            let last =
-                usize::try_from(last).map_err(|_| crate::Error::Overflow(last.to_string()))?;
+            let last = usize::try_from(last).map_err(|_| {
+                cold_path();
+                crate::Error::Overflow(last.to_string())
+            })?;
             Ok(last)
         } else {
             Ok(usize::default())

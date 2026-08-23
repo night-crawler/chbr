@@ -19,6 +19,7 @@ macro_rules! define_slice_fns {
                 ) -> crate::Result<Option<&'a [$ret_type]>> {
 
                     let Mark::Array(arr) = self else {
+                        cold_path();
                         return Err(crate::Error::MismatchedType(self.as_str(), "Array"));
                     };
 
@@ -29,10 +30,13 @@ macro_rules! define_slice_fns {
                     match arr.values.as_ref() {
                         Mark::$mark_type(bv) => Ok(Some(&bv[start..end])),
                         Mark::Empty => Ok(Some(&[])),
-                        other => Err(crate::Error::MismatchedType(
-                            other.as_str(),
-                            stringify!($mark_type),
-                        )),
+                        other => {
+                            cold_path();
+                            Err(crate::Error::MismatchedType(
+                                other.as_str(),
+                                stringify!($mark_type),
+                            ))
+                        }
                     }
                 }
             )+
@@ -50,7 +54,10 @@ macro_rules! define_int_getters {
                         Mark::$mark_variant(bv) => {
                             Ok(bv.get(index).copied().map($transform))
                         }
-                        _ => Err(crate::Error::MismatchedType(self.as_str(), stringify!($ret_type))),
+                        _ => {
+                            cold_path();
+                            Err(crate::Error::MismatchedType(self.as_str(), stringify!($ret_type)))
+                        }
                     }
                 }
             )+
@@ -68,7 +75,10 @@ macro_rules! define_ip_getters {
                 {
                     match self {
                         Mark::$mark_variant(bv) => Ok(bv.get(index).copied().map(Into::into)),
-                        _ => Err(crate::Error::MismatchedType(self.as_str(), stringify!($mark_variant))),
+                        _ => {
+                            cold_path();
+                            Err(crate::Error::MismatchedType(self.as_str(), stringify!($mark_variant)))
+                        }
                     }
                 }
             )+

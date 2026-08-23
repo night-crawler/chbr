@@ -1,3 +1,4 @@
+use std::hint::cold_path;
 use std::str::{FromStr, from_utf8};
 
 use chrono_tz::{Tz, Tz::UTC};
@@ -55,6 +56,7 @@ fn parse_decimal_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
         19..39 => Type::Decimal128(scale),
         39..77 => Type::Decimal256(scale),
         _ => {
+            cold_path();
             return Err(nom::Err::Error(nom::error::Error::new(
                 input,
                 ErrorKind::Fail,

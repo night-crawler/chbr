@@ -90,7 +90,7 @@ impl LowCardinality<'_> {
         })
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn value_index(&self, index: usize) -> Option<usize> {
         let value_index = match self.indices.as_ref() {
             Mark::UInt8(indices) => indices.get(index).copied()? as usize,
@@ -322,7 +322,7 @@ impl<'a> Deref for StringView<'a> {
 }
 
 impl StringView<'_> {
-    #[inline]
+    #[inline(always)]
     pub fn get(&self, index: usize) -> Option<&str> {
         self.data.get(index).copied()
     }
@@ -334,7 +334,7 @@ pub struct BoolView<'a> {
 }
 
 impl BoolView<'_> {
-    #[inline]
+    #[inline(always)]
     pub fn get(&self, index: usize) -> Option<bool> {
         self.data.get(index).map(|&val| val == 1)
     }

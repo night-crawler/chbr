@@ -1,3 +1,4 @@
+use std::hint::cold_path;
 use std::ops::Range;
 
 mod composite;
@@ -30,11 +31,13 @@ pub trait FromBlock<'a>: TryRead<'a> {
     /// if it can.
     fn from_block(block: &'a crate::ParsedBlock<'a>) -> crate::Result<Self>;
 
+    #[inline]
     fn rows(block: &'a crate::ParsedBlock<'a>) -> crate::Result<RowsIter<'a, Self>> {
         Ok(RowsIter::new(Self::from_block(block)?, block.num_rows))
     }
 
     /// Iterates all rows of all `blocks` as one flat stream.
+    #[inline]
     fn iter_blocks(blocks: &'a [crate::ParsedBlock<'a>]) -> BlocksRows<'a, Self> {
         BlocksRows {
             blocks: blocks.iter(),
@@ -151,7 +154,10 @@ impl<'a, R: FromBlock<'a>> Iterator for BlocksRows<'a, R> {
             let block = self.blocks.next()?;
             match R::rows(block) {
                 Ok(rows) => self.rows_iter = Some(rows),
-                Err(err) => return Some(Err(err)),
+                Err(err) => {
+                    cold_path();
+                    return Some(Err(err));
+                }
             }
         }
     }

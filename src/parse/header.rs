@@ -1,4 +1,4 @@
-use std::hint::unreachable_unchecked;
+use std::hint::{cold_path, unreachable_unchecked};
 
 use log::debug;
 
@@ -18,6 +18,7 @@ pub fn variant<'a>(
 ) -> IResult<&'a [u8], Vec<TypeHeader<'a>>> {
     let (input, mode) = parse_u64::<u64>(ctx.input)?;
     if mode != 0 {
+        cold_path();
         return Err(Error::Parse(format!(
             "Variant mode {mode} is not supported, only 0 is allowed"
         )));
@@ -120,10 +121,13 @@ pub fn lc<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], TypeHeader<'a>> {
         return Ok((input, TypeHeader::Empty));
     }
 
-    Err(Error::Parse(format!(
-        "LowCardinality version {version} is not supported, only {LOW_CARDINALITY_VERSION} is \
-         allowed"
-    )))
+    Err({
+        cold_path();
+        Error::Parse(format!(
+            "LowCardinality version {version} is not supported, only {LOW_CARDINALITY_VERSION} is \
+             allowed"
+        ))
+    })
 }
 
 pub fn json<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], JsonHeader<'a>> {

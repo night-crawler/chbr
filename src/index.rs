@@ -1,3 +1,4 @@
+use std::hint::cold_path;
 use std::{marker::PhantomData, ops::Range};
 
 use chrono::{DateTime, TimeZone};
@@ -29,7 +30,7 @@ enum LcIndexIter<'a> {
 impl<'a> Iterator for LcStrIter<'a> {
     type Item = &'a str;
 
-    #[inline]
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let index = match &mut self.indices {
             LcIndexIter::U8(it) => usize::from(*it.next()?),
@@ -58,7 +59,7 @@ struct ArrayLcStrIter<'a> {
 impl<'a> Iterator for ArrayLcStrIter<'a> {
     type Item = &'a str;
 
-    #[inline]
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.as_mut()?.next()
     }
@@ -134,6 +135,7 @@ impl<'a> Mark<'a> {
         match self {
             Mark::Empty => {
                 if !idx.is_empty() {
+                    cold_path();
                     panic!("Index out of bounds for empty marker");
                 }
                 Value::Empty
@@ -254,6 +256,7 @@ impl<'a> Mark<'a> {
             }
             Mark::LowCardinality(lc) => {
                 let Some(keys) = &lc.additional_keys else {
+                    cold_path();
                     return Err(crate::Error::CorruptedData(
                         "LowCardinality marker without additional keys".to_owned(),
                     ));
@@ -268,12 +271,16 @@ impl<'a> Mark<'a> {
                 }
 
                 let Mark::String(keys) = keys.as_ref() else {
+                    cold_path();
                     return Err(crate::Error::MismatchedType(keys.as_str(), "&str"));
                 };
 
                 Ok(keys.get(value_index))
             }
-            mark => Err(crate::Error::MismatchedType(mark.as_str(), "&str")),
+            mark => {
+                cold_path();
+                Err(crate::Error::MismatchedType(mark.as_str(), "&str"))
+            }
         }
     }
 
@@ -314,6 +321,7 @@ impl<'a> Mark<'a> {
                     .get(index)
                     .map(|dt| {
                         dt.with_tz_and_precision(d.tz, d.precision).ok_or_else(|| {
+                            cold_path();
                             crate::Error::Overflow("DateTime64 value out of range".to_owned())
                         })
                     })
@@ -322,13 +330,17 @@ impl<'a> Mark<'a> {
 
                 Ok(value)
             }
-            _ => Err(crate::Error::MismatchedType(self.as_str(), "DateTime")),
+            _ => {
+                cold_path();
+                Err(crate::Error::MismatchedType(self.as_str(), "DateTime"))
+            }
         }
     }
 
     #[inline]
     pub fn slice_lc_strs(&'a self, idx: Range<usize>) -> crate::Result<LcStrIter<'a>> {
         let Mark::LowCardinality(lc) = self else {
+            cold_path();
             return Err(crate::Error::MismatchedType(
                 self.as_str(),
                 "LowCardinality",
@@ -336,12 +348,14 @@ impl<'a> Mark<'a> {
         };
 
         let Some(keys) = &lc.additional_keys else {
+            cold_path();
             return Err(crate::Error::CorruptedData(
                 "LowCardinality marker without additional keys".to_owned(),
             ));
         };
 
         let Mark::String(keys) = keys.as_ref() else {
+            cold_path();
             return Err(crate::Error::MismatchedType(keys.as_str(), "String"));
         };
 
@@ -362,10 +376,12 @@ impl<'a> Mark<'a> {
         index: usize,
     ) -> crate::Result<Option<impl Iterator<Item = &'a str>>> {
         if matches!(self, Mark::Empty) {
+            cold_path();
             return Ok(None);
         }
 
         let Mark::Array(array) = self else {
+            cold_path();
             return Err(crate::Error::MismatchedType(self.as_str(), "Array"));
         };
 
@@ -384,6 +400,7 @@ impl<'a> Mark<'a> {
     #[inline]
     pub fn get_map<K, V>(&'a self, index: usize) -> crate::Result<Option<MapIterator<'a, K, V>>> {
         let Mark::Map(map) = self else {
+            cold_path();
             return Err(crate::Error::MismatchedType(self.as_str(), "Map"));
         };
         let Some((start, end)) = map.offsets.offset_indices(index)? else {
@@ -406,6 +423,7 @@ impl<'a> Mark<'a> {
         index: usize,
     ) -> crate::Result<Option<impl Iterator<Item = bool>>> {
         let Mark::Array(arr) = self else {
+            cold_path();
             return Err(crate::Error::MismatchedType(self.as_str(), "Array"));
         };
 
@@ -416,7 +434,10 @@ impl<'a> Mark<'a> {
         let slice = match arr.values.as_ref() {
             Mark::Bool(bv) => &bv.data[start..end],
             Mark::Empty => &[],
-            other => return Err(crate::Error::MismatchedType(other.as_str(), "Int8")),
+            other => {
+                cold_path();
+                return Err(crate::Error::MismatchedType(other.as_str(), "Int8"));
+            }
         };
 
         Ok(Some(slice.iter().copied().map(|b| b != 0)))
@@ -428,7 +449,10 @@ impl<'a> Mark<'a> {
                 let value = bv.get(index);
                 Ok(value)
             }
-            _ => Err(crate::Error::MismatchedType(self.as_str(), "bool")),
+            _ => {
+                cold_path();
+                Err(crate::Error::MismatchedType(self.as_str(), "bool"))
+            }
         }
     }
 

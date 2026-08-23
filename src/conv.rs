@@ -41,7 +41,7 @@ pub fn datetime32(secs: u32) -> DateTime<Utc> {
     DateTime::<Utc>::from_timestamp(i64::from(secs), 0).unwrap()
 }
 
-#[inline(always)]
+#[inline]
 pub fn datetime32_tz(secs: u32, tz: Tz) -> DateTime<Tz> {
     let dt_utc = datetime32(secs);
     if is_utc_alias(tz) {
@@ -59,7 +59,7 @@ pub fn datetime64(timestamp: i64, precision: u8) -> Option<DateTime<Utc>> {
     DateTime::<Utc>::from_timestamp(secs, nsec)
 }
 
-#[inline(always)]
+#[inline]
 pub fn datetime64_tz(timestamp: i64, precision: u8, tz: Tz) -> Option<DateTime<Tz>> {
     let dt_utc = datetime64(timestamp, precision)?;
     if is_utc_alias(tz) {
