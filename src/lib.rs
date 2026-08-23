@@ -9,7 +9,7 @@ use std::{
     ops::Range,
 };
 
-use chrono::{NaiveDate, TimeZone};
+use chrono::NaiveDate;
 use chrono_tz::Tz;
 use log::debug;
 use uuid::Uuid;
@@ -323,39 +323,6 @@ impl<'a> BlockRow<'a> {
     }
 }
 
-impl<'a> Iterator for BlockRow<'a> {
-    type Item = (&'a str, ColumnAccessor<'a>);
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        let col_name = self.col_names.get(self.col_index)?;
-        let marker = self.cols.get(self.col_index)?;
-
-        self.col_index += 1;
-
-        Some((
-            col_name,
-            ColumnAccessor {
-                col_name,
-                marker,
-                row_index: self.row_index,
-            },
-        ))
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self
-            .col_names
-            .len()
-            .min(self.cols.len())
-            .saturating_sub(self.col_index);
-        (remaining, Some(remaining))
-    }
-}
-
-impl ExactSizeIterator for BlockRow<'_> {}
-
 impl<'a> Iterator for BlocksIterator<'a> {
     type Item = BlockRow<'a>;
 
@@ -395,86 +362,6 @@ impl<'a> Iterator for BlocksIterator<'a> {
 }
 
 impl ExactSizeIterator for BlocksIterator<'_> {}
-
-pub struct ColumnAccessor<'a> {
-    pub col_name: &'a str,
-    pub marker: &'a mark::Mark<'a>,
-    row_index: usize,
-}
-
-/// Provides access to the column value and allows to avoid constructing new
-/// Value instances. For small types it can have a large performance impact.
-impl<'a> ColumnAccessor<'a> {
-    #[inline]
-    pub fn get(self) -> value::Value<'a> {
-        self.marker
-            .get(self.row_index)
-            .expect("bug: crate-created row index must be valid")
-    }
-
-    #[inline]
-    pub fn into_str(self) -> Result<&'a str> {
-        let str = self.marker.get_str(self.row_index)?;
-        Ok(str.expect("bug: crate-created row index must be valid"))
-    }
-
-    #[inline]
-    pub fn into_opt_str(self) -> Result<Option<&'a str>> {
-        let str = self.marker.get_opt_str(self.row_index)?;
-        Ok(str.expect("bug: crate-created row index must be valid"))
-    }
-
-    #[inline]
-    pub fn into_datetime<T: TimeZone>(self, tz: T) -> Result<chrono::DateTime<T>> {
-        let dt = self.marker.get_datetime(self.row_index, tz)?;
-        Ok(dt.expect("bug: crate-created row index must be valid"))
-    }
-
-    #[inline]
-    pub fn into_uuid(self) -> Result<Uuid> {
-        let uuid = self.marker.get_uuid(self.row_index)?;
-        Ok(uuid.expect("bug: crate-created row index must be valid"))
-    }
-
-    #[inline]
-    pub fn into_ipv4(self) -> Result<Ipv4Addr> {
-        let ipv4 = self.marker.get_ipv4(self.row_index)?;
-        Ok(ipv4.expect("bug: crate-created row index must be valid"))
-    }
-
-    #[inline]
-    pub fn into_ipv6(self) -> Result<Ipv6Addr> {
-        let ipv6 = self.marker.get_ipv6(self.row_index)?;
-        Ok(ipv6.expect("bug: crate-created row index must be valid"))
-    }
-
-    #[inline]
-    pub fn into_opt_ipv6(self) -> Result<Option<Ipv6Addr>> {
-        let ipv6 = self.marker.get_opt_ipv6(self.row_index)?;
-        Ok(ipv6.expect("bug: crate-created row index must be valid"))
-    }
-
-    #[inline]
-    pub fn into_bool(self) -> Result<bool> {
-        let value = self.marker.get_bool(self.row_index)?;
-        Ok(value.expect("bug: crate-created row index must be valid"))
-    }
-
-    #[inline]
-    pub fn into_f64(self) -> Result<f64> {
-        let value = self.marker.get_f64(self.row_index)?;
-        Ok(value.expect("bug: crate-created row index must be valid"))
-    }
-
-    #[inline]
-    pub fn into_array_lc_strs(self) -> Result<impl Iterator<Item = &'a str>> {
-        let it = self
-            .marker
-            .get_array_lc_strs(self.row_index)?
-            .expect("bug: crate-created row index must be valid");
-        Ok(it.into_iter())
-    }
-}
 
 pub fn iter_blocks<'a>(blocks: &'a [ParsedBlock]) -> BlocksIterator<'a> {
     BlocksIterator::new(blocks)
