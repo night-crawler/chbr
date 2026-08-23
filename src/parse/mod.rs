@@ -1,12 +1,11 @@
 use std::hint::cold_path;
 
-use zerocopy::{LittleEndian, U64};
-
 use crate::{
     error::Error,
     parse::typ::parse_type,
     slice::ByteView,
     types::{Offsets, Type},
+    zc,
 };
 
 pub mod block;
@@ -162,7 +161,7 @@ fn take_elements<'a>(
 
 fn parse_offsets(input: &[u8], num_rows: usize) -> IResult<&[u8], Offsets<'_>> {
     let (input, offsets) = take_elements(input, num_rows, size_of::<u64>(), "offset byte length")?;
-    let offsets = ByteView::<U64<LittleEndian>>::try_from(offsets)?;
+    let offsets = ByteView::<zc::U64>::try_from(offsets)?;
 
     Ok((input, offsets))
 }

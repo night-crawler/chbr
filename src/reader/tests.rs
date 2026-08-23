@@ -10,12 +10,12 @@ use crate::{FromBlock, FromVariant};
 
 #[test]
 fn array_map_sample_typed() -> TestResult {
-    type ArrMap<'a> = ColArray<'a, ColMap<'a, ColStr<'a>, ColStr<'a>>>;
+    type ArrMap<'a> = Array<'a, Map<'a, Str<'a>, Str<'a>>>;
 
     let buf = load("./testdata/array_map_sample.native")?;
     let (_, block) = parse_single(&buf)?;
 
-    let reader: ArrMap = ColArray::try_from(&block.markers[1])?;
+    let reader: ArrMap = Array::try_from(&block.markers[1])?;
 
     let expected: [Vec<HashMap<&str, &str>>; 6] = [
         vec![
@@ -59,10 +59,10 @@ fn derive_from_block_with_names() -> TestResult {
     #[derive(FromBlock)]
     struct ArrMapRow<'a> {
         #[col(name = ID_COL)]
-        id: ColI64<'a>,
+        id: I64<'a>,
 
         #[col(name = "arr_map")]
-        maps: ColArray<'a, ColMap<'a, ColStr<'a>, ColStr<'a>>>,
+        maps: Array<'a, Map<'a, Str<'a>, Str<'a>>>,
     }
 
     let buf = load("./testdata/array_map_sample.native")?;
@@ -104,14 +104,14 @@ fn derive_from_block_with_names() -> TestResult {
 fn derive_nested_struct_in_array_of_tuples() -> TestResult {
     #[derive(FromBlock)]
     struct Fruit<'a> {
-        name: ColLcStr<'a>,
-        rank: ColI64<'a>,
+        name: LcStr<'a>,
+        rank: I64<'a>,
     }
 
     #[derive(FromBlock)]
     struct Row<'a> {
-        id: ColI64<'a>,
-        arr: ColArray<'a, Fruit<'a>>,
+        id: I64<'a>,
+        arr: Array<'a, Fruit<'a>>,
     }
 
     let buf = load("./testdata/array_of_tuples.native")?;
@@ -143,14 +143,14 @@ fn derive_nested_struct_in_array_of_tuples() -> TestResult {
 fn derive_nested_column_positional() -> TestResult {
     #[derive(FromBlock)]
     struct Child<'a> {
-        child_id: ColU64<'a>,
-        child_name: ColStr<'a>,
+        child_id: U64<'a>,
+        child_name: Str<'a>,
     }
 
     #[derive(FromBlock)]
     struct Row<'a> {
-        id: ColI64<'a>,
-        nes: ColArray<'a, Child<'a>>,
+        id: I64<'a>,
+        nes: Array<'a, Child<'a>>,
     }
 
     let buf = load("./testdata/simple_nested.native")?;
@@ -182,8 +182,8 @@ fn derive_nested_column_positional() -> TestResult {
 fn derive_col_tuple() -> TestResult {
     #[derive(FromBlock)]
     struct Row<'a> {
-        id: ColI64<'a>,
-        tup: ColTuple<(ColI64<'a>, ColStr<'a>)>,
+        id: I64<'a>,
+        tup: Tuple<(I64<'a>, Str<'a>)>,
     }
 
     let buf = load("./testdata/tuple.native")?;
@@ -212,8 +212,8 @@ fn derive_col_tuple() -> TestResult {
 fn derive_nullable() -> TestResult {
     #[derive(FromBlock)]
     struct NullableRow<'a> {
-        id: ColI64<'a>,
-        nstr: ColNullable<'a, ColStr<'a>>,
+        id: I64<'a>,
+        nstr: Nullable<'a, Str<'a>>,
     }
 
     let buf = load("./testdata/nullable_string.native")?;
@@ -240,8 +240,8 @@ fn derive_nullable() -> TestResult {
 fn derive_lc_nullable() -> TestResult {
     #[derive(FromBlock)]
     struct LcRow<'a> {
-        id: ColI64<'a>,
-        nlc_str: ColLcNullableStr<'a>,
+        id: I64<'a>,
+        nlc_str: LcNullableStr<'a>,
     }
 
     let buf = load("./testdata/nullable_lc_str.native")?;
@@ -270,7 +270,7 @@ fn derive_missing_column() -> TestResult {
     #[derive(FromBlock)]
     struct Row<'a> {
         #[col(name = "no_such_column")]
-        id: ColI64<'a>,
+        id: I64<'a>,
     }
 
     let buf = load("./testdata/nullable_string.native")?;
@@ -291,8 +291,8 @@ fn derive_missing_column() -> TestResult {
 fn array_try_as_slice() -> TestResult {
     #[derive(FromBlock)]
     struct Row<'a> {
-        id: ColI64<'a>,
-        u128_array: ColArray<'a, ColU128<'a>>,
+        id: I64<'a>,
+        u128_array: Array<'a, U128<'a>>,
     }
 
     let buf = load("./testdata/sample_128.native")?;
@@ -325,9 +325,9 @@ fn array_try_as_slice() -> TestResult {
 fn derive_col_value_escape_hatch() -> TestResult {
     #[derive(FromBlock)]
     struct Row<'a> {
-        id: ColI64<'a>,
+        id: I64<'a>,
         #[col(name = "dyn")]
-        value: ColValue<'a>,
+        value: Value<'a>,
     }
 
     let buf = load("./testdata/dynamic.native")?;
@@ -346,7 +346,7 @@ fn derive_col_value_escape_hatch() -> TestResult {
 fn derive_iter_blocks_flat() -> TestResult {
     #[derive(FromBlock)]
     struct Row<'a> {
-        id: ColUuid<'a>,
+        id: Uuid<'a>,
     }
 
     let buf = load("./testdata/benchmark_sample.native")?;
@@ -370,7 +370,7 @@ fn try_read_out_of_bounds() -> TestResult {
     let buf = load("./testdata/nullable_string.native")?;
     let (_, block) = parse_single(&buf)?;
 
-    let reader = ColNullable::<ColStr>::try_from(&block.markers[1])?;
+    let reader = Nullable::<Str>::try_from(&block.markers[1])?;
     let Err(err) = reader.try_read(block.num_rows) else {
         panic!("expected out of bounds error");
     };
@@ -387,14 +387,14 @@ fn named_tuple_by_name() -> TestResult {
     // Field order deliberately doesn't match the def
     #[derive(FromBlock)]
     struct Fruit<'a> {
-        rank: ColI64<'a>,
+        rank: I64<'a>,
         #[col(name = "name")]
-        title: ColStr<'a>,
+        title: Str<'a>,
     }
 
     #[derive(FromBlock)]
     struct Row<'a> {
-        id: ColI64<'a>,
+        id: I64<'a>,
         tup: Fruit<'a>,
     }
 
@@ -424,7 +424,7 @@ fn named_tuple_missing_field() -> TestResult {
     #[derive(FromBlock)]
     struct Fruit<'a> {
         #[col(name = "no_such_field")]
-        rank: ColI64<'a>,
+        rank: I64<'a>,
     }
 
     let buf = load("./testdata/named_tuple.native")?;
@@ -446,7 +446,7 @@ fn col_tuple_reads_named_tuple_positionally() -> TestResult {
     let buf = load("./testdata/named_tuple.native")?;
     let (_, block) = parse_single(&buf)?;
 
-    let reader = ColTuple::<(ColStr, ColI64)>::try_from(&block.markers[1])?;
+    let reader = Tuple::<(Str, I64)>::try_from(&block.markers[1])?;
     assert_eq!(reader.try_read(0)?, ("apple", 0));
     assert_eq!(reader.try_read(5)?, ("fig", 50));
 
@@ -458,7 +458,7 @@ fn derive_variant_enum() -> TestResult {
     // Variants in the server-canonicalized order of Variant(Array(Int64), Int64, String).
     #[derive(FromVariant)]
     enum Var<'a> {
-        Arr(ArrayIter<'a, ColI64<'a>>),
+        Arr(ArrayIter<'a, I64<'a>>),
         Num(i64),
         Str(&'a str),
     }
@@ -466,7 +466,7 @@ fn derive_variant_enum() -> TestResult {
     let buf = load("./testdata/variant.native")?;
     let (_, block) = parse_single(&buf)?;
 
-    let reader: ColVariant<Var> = ColVariant::try_from(&block.markers[1])?;
+    let reader: Variant<Var> = Variant::try_from(&block.markers[1])?;
 
     let mut repr = Vec::with_capacity(block.num_rows);
     for i in 0..block.num_rows {
@@ -485,9 +485,9 @@ fn derive_variant_enum() -> TestResult {
 fn derive_variant_reader_override() -> TestResult {
     #[derive(FromVariant)]
     enum Var<'a> {
-        #[col(reader = ColArray<'a, ColI64<'a>>)]
-        Arr(ArrayIter<'a, ColI64<'a>>),
-        #[col(reader = ColI64<'a>)]
+        #[col(reader = Array<'a, I64<'a>>)]
+        Arr(ArrayIter<'a, I64<'a>>),
+        #[col(reader = I64<'a>)]
         Num(i64),
         Str(&'a str),
     }
@@ -495,7 +495,7 @@ fn derive_variant_reader_override() -> TestResult {
     let buf = load("./testdata/variant.native")?;
     let (_, block) = parse_single(&buf)?;
 
-    let reader: ColVariant<Var> = ColVariant::try_from(&block.markers[1])?;
+    let reader: Variant<Var> = Variant::try_from(&block.markers[1])?;
     let mut repr = Vec::with_capacity(block.num_rows);
     for i in 0..block.num_rows {
         repr.push(match reader.try_read(i)? {
@@ -539,7 +539,7 @@ fn variant_null_rows_and_arity() -> TestResult {
         types: vec![Mark::Int64(ByteView::try_from(data.as_slice())?)],
     });
 
-    let strict: ColVariant<JustNum> = ColVariant::try_from(&mark)?;
+    let strict: Variant<JustNum> = Variant::try_from(&mark)?;
     let JustNum::Num(n) = strict.try_read(0)?;
     assert_eq!(n, 1);
     assert!(matches!(
@@ -547,7 +547,7 @@ fn variant_null_rows_and_arity() -> TestResult {
         Err(Error::MismatchedType("Null", _))
     ));
 
-    let nullable: ColVariantNullable<JustNum> = ColVariantNullable::try_from(&mark)?;
+    let nullable: VariantNullable<JustNum> = VariantNullable::try_from(&mark)?;
     assert!(matches!(nullable.try_read(0)?, Some(JustNum::Num(1))));
     assert!(nullable.try_read(1)?.is_none());
     assert!(matches!(nullable.try_read(2)?, Some(JustNum::Num(2))));
@@ -557,7 +557,7 @@ fn variant_null_rows_and_arity() -> TestResult {
     ));
 
     assert!(matches!(
-        ColVariant::<TooWide>::try_from(&mark),
+        Variant::<TooWide>::try_from(&mark),
         Err(Error::MismatchedType("Variant", _))
     ));
 
@@ -568,15 +568,15 @@ fn variant_null_rows_and_arity() -> TestResult {
 fn derive_variant_in_from_block() -> TestResult {
     #[derive(FromVariant)]
     enum Var<'a> {
-        Arr(ArrayIter<'a, ColI64<'a>>),
+        Arr(ArrayIter<'a, I64<'a>>),
         Num(i64),
         Str(&'a str),
     }
 
     #[derive(FromBlock)]
     struct Row<'a> {
-        id: ColI64<'a>,
-        var: ColVariantNullable<'a, Var<'a>>,
+        id: I64<'a>,
+        var: VariantNullable<'a, Var<'a>>,
     }
 
     let buf = load("./testdata/variant.native")?;

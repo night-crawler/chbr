@@ -1,3 +1,4 @@
+use crate::zc;
 use core::hint::cold_path;
 use core::{
     fmt,
@@ -6,15 +7,13 @@ use core::{
     ops::{Index, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive},
 };
 
-use zerocopy::{FromBytes, Unaligned};
-
 #[repr(transparent)]
-pub struct ByteView<'a, T: Unaligned + FromBytes + Copy> {
+pub struct ByteView<'a, T: zc::Unaligned + zc::FromBytes + Copy> {
     bytes: &'a [u8],
     _pd: PhantomData<&'a T>,
 }
 
-impl<'a, T: Unaligned + FromBytes + Copy> TryFrom<&'a [u8]> for ByteView<'a, T> {
+impl<'a, T: zc::Unaligned + zc::FromBytes + Copy> TryFrom<&'a [u8]> for ByteView<'a, T> {
     type Error = crate::Error;
 
     fn try_from(bytes: &'a [u8]) -> Result<Self, Self::Error> {
@@ -30,7 +29,7 @@ impl<'a, T: Unaligned + FromBytes + Copy> TryFrom<&'a [u8]> for ByteView<'a, T> 
     }
 }
 
-impl<'a, T: Unaligned + FromBytes + Copy> ByteView<'a, T> {
+impl<'a, T: zc::Unaligned + zc::FromBytes + Copy> ByteView<'a, T> {
     #[inline]
     pub const fn len(&self) -> usize {
         self.bytes.len() / size_of::<T>()
@@ -63,7 +62,7 @@ impl<'a, T: Unaligned + FromBytes + Copy> ByteView<'a, T> {
     }
 }
 
-impl<T: Unaligned + FromBytes + Copy> Index<usize> for ByteView<'_, T> {
+impl<T: zc::Unaligned + zc::FromBytes + Copy> Index<usize> for ByteView<'_, T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -80,7 +79,7 @@ impl<T: Unaligned + FromBytes + Copy> Index<usize> for ByteView<'_, T> {
 
 impl<T> fmt::Debug for ByteView<'_, T>
 where
-    T: Unaligned + FromBytes + Copy + fmt::Debug,
+    T: zc::Unaligned + zc::FromBytes + Copy + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ByteView")
@@ -94,7 +93,7 @@ macro_rules! impl_slice_index {
     ($range:ty) => {
         impl<'a, T> Index<$range> for ByteView<'a, T>
         where
-            T: Unaligned + FromBytes + Copy,
+            T: zc::Unaligned + zc::FromBytes + Copy,
         {
             type Output = [T];
 
@@ -117,7 +116,6 @@ impl_slice_index!(RangeFull);
 mod tests {
     use pretty_assertions::{assert_eq, assert_ne};
     use testresult::TestResult;
-    use zerocopy::byteorder::{LittleEndian, U64};
 
     use super::*;
 
@@ -134,7 +132,7 @@ mod tests {
         let nums = [1u64, 0xfeed_beef_dead_cafe, 0x0123_4567_89ab_cdef];
 
         let raw = to_le_bytes(&nums);
-        let view_aligned = ByteView::<U64<LittleEndian>>::try_from(raw.as_slice())?;
+        let view_aligned = ByteView::<zc::U64>::try_from(raw.as_slice())?;
 
         assert_eq!(view_aligned.len(), nums.len());
         for (i, &expect) in nums.iter().enumerate() {
@@ -152,7 +150,7 @@ mod tests {
             "test setup failed: slice is still 8-byte aligned"
         );
 
-        let view_unaligned = ByteView::<U64<LittleEndian>>::try_from(misaligned)?;
+        let view_unaligned = ByteView::<zc::U64>::try_from(misaligned)?;
 
         for (i, &expect) in nums.iter().enumerate() {
             assert_eq!(view_unaligned[i].get(), expect);
@@ -164,7 +162,7 @@ mod tests {
     #[test]
     fn construction_fails_if_length_is_wrong() {
         let bad = [0u8; 115];
-        match ByteView::<U64<LittleEndian>>::try_from(bad.as_slice()) {
+        match ByteView::<zc::U64>::try_from(bad.as_slice()) {
             Ok(_) => {
                 panic!("Expected error, but got Ok");
             }

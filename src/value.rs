@@ -5,12 +5,6 @@ use std::{
     ops::Range,
 };
 
-use chrono_tz::Tz;
-use half::bf16;
-use rust_decimal::Decimal;
-use uuid::Uuid;
-use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
-
 use crate::{
     Bf16Data, ByteExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data,
     Decimal64Data, Decimal128Data, Decimal256Data, I256, Ipv4Data, Ipv6Data, TinyRange, U256,
@@ -23,6 +17,11 @@ use crate::{
     },
     types::{OffsetIndexPair as _, Offsets},
 };
+use chbr::zc;
+use chrono_tz::Tz;
+use half::bf16;
+use rust_decimal::Decimal;
+use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub enum Value<'a> {
@@ -32,13 +31,13 @@ pub enum Value<'a> {
     Int16(i16),
     Int32(i32),
     Int64(i64),
-    Int128(&'a I128),
+    Int128(&'a zc::I128),
     Int256(&'a I256),
     UInt8(u8),
     UInt16(u16),
     UInt32(u32),
     UInt64(u64),
-    UInt128(&'a U128),
+    UInt128(&'a zc::U128),
     UInt256(&'a U256),
     Float32(f32),
     Float64(f64),
@@ -59,19 +58,19 @@ pub enum Value<'a> {
     StringSlice(&'a [&'a str]),
     BoolSlice(&'a [u8]),
     Int8Slice(&'a [i8]),
-    Int16Slice(&'a [I16]),
-    Int32Slice(&'a [I32]),
-    Int64Slice(&'a [I64]),
-    Int128Slice(&'a [I128]),
+    Int16Slice(&'a [zc::I16]),
+    Int32Slice(&'a [zc::I32]),
+    Int64Slice(&'a [zc::I64]),
+    Int128Slice(&'a [zc::I128]),
     Int256Slice(&'a [I256]),
     UInt8Slice(&'a [u8]),
-    UInt16Slice(&'a [U16]),
-    UInt32Slice(&'a [U32]),
-    UInt64Slice(&'a [U64]),
-    UInt128Slice(&'a [U128]),
+    UInt16Slice(&'a [zc::U16]),
+    UInt32Slice(&'a [zc::U32]),
+    UInt64Slice(&'a [zc::U64]),
+    UInt128Slice(&'a [zc::U128]),
     UInt256Slice(&'a [U256]),
-    Float32Slice(&'a [F32]),
-    Float64Slice(&'a [F64]),
+    Float32Slice(&'a [zc::F32]),
+    Float64Slice(&'a [zc::F64]),
     BFloat16Slice(&'a [Bf16Data]),
 
     Decimal32Slice {
@@ -307,19 +306,19 @@ impl_try_from_value!(String, &'a str);
 impl_try_from_value_slice!(StringSlice, &'a [&'a str]);
 
 impl_try_from_value_slice!(Int8Slice, &'a [i8]);
-impl_try_from_value_slice!(Int16Slice, &'a [I16]);
-impl_try_from_value_slice!(Int32Slice, &'a [I32]);
-impl_try_from_value_slice!(Int64Slice, &'a [I64]);
-impl_try_from_value_slice!(Int128Slice, &'a [I128]);
+impl_try_from_value_slice!(Int16Slice, &'a [zc::I16]);
+impl_try_from_value_slice!(Int32Slice, &'a [zc::I32]);
+impl_try_from_value_slice!(Int64Slice, &'a [zc::I64]);
+impl_try_from_value_slice!(Int128Slice, &'a [zc::I128]);
 
 impl_try_from_value_slice!(UInt8Slice, &'a [u8]);
-impl_try_from_value_slice!(UInt16Slice, &'a [U16]);
-impl_try_from_value_slice!(UInt32Slice, &'a [U32]);
-impl_try_from_value_slice!(UInt64Slice, &'a [U64]);
-impl_try_from_value_slice!(UInt128Slice, &'a [U128]);
+impl_try_from_value_slice!(UInt16Slice, &'a [zc::U16]);
+impl_try_from_value_slice!(UInt32Slice, &'a [zc::U32]);
+impl_try_from_value_slice!(UInt64Slice, &'a [zc::U64]);
+impl_try_from_value_slice!(UInt128Slice, &'a [zc::U128]);
 
-impl_try_from_value_slice!(Float32Slice, &'a [F32]);
-impl_try_from_value_slice!(Float64Slice, &'a [F64]);
+impl_try_from_value_slice!(Float32Slice, &'a [zc::F32]);
+impl_try_from_value_slice!(Float64Slice, &'a [zc::F64]);
 
 impl_try_from_value_slice!(UuidSlice, &'a [UuidData]);
 impl_try_from_value_slice!(Date16Slice, &'a [Date16Data]);
@@ -1603,7 +1602,7 @@ impl ExactSizeIterator for Enum8SliceIterator<'_> {}
 
 pub struct Enum16SliceIterator<'a> {
     variants: &'a [(&'a str, i16)],
-    data: std::slice::Iter<'a, I16>,
+    data: std::slice::Iter<'a, zc::I16>,
 }
 
 impl<'a> TryFrom<Value<'a>> for Enum16SliceIterator<'a> {

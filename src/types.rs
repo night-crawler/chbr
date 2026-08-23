@@ -1,8 +1,5 @@
 use std::hint::cold_path;
 
-pub use chrono_tz::Tz;
-use zerocopy::little_endian::U64;
-
 use crate::mark::BoolView;
 use crate::{
     mark::{
@@ -12,8 +9,10 @@ use crate::{
     parse::typ::parse_type,
     slice::ByteView,
 };
+use chbr::zc;
+pub use chrono_tz::Tz;
 
-pub type Offsets<'a> = ByteView<'a, U64>;
+pub type Offsets<'a> = ByteView<'a, zc::U64>;
 
 pub(crate) trait OffsetIndexPair {
     fn offset_indices(&self, index: usize) -> crate::Result<Option<(usize, usize)>>;

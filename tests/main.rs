@@ -4,9 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use chbr::parse::block::parse_single;
-use chbr::reader::{
-    ArrayIter, ColArray, ColI64, ColLcStr, ColMap, ColStr, ColVariant, TryRead as _,
-};
+use chbr::reader::{Array, ArrayIter, I64, LcStr, Map, Str, TryRead as _, Variant};
 use chbr::{FromBlock, FromVariant};
 use testresult::TestResult;
 
@@ -44,9 +42,9 @@ static ALLOCATOR: CountingAlloc = CountingAlloc;
 fn derive_alloc() -> TestResult {
     #[derive(FromBlock)]
     struct MapRow<'a> {
-        id: ColI64<'a>,
+        id: I64<'a>,
         #[col(name = "arr_map")]
-        maps: ColArray<'a, ColMap<'a, ColStr<'a>, ColStr<'a>>>,
+        maps: Array<'a, Map<'a, Str<'a>, Str<'a>>>,
     }
 
     let _guard = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
@@ -79,7 +77,7 @@ fn derive_alloc() -> TestResult {
 fn smoke_derive_variant() -> TestResult {
     #[derive(FromVariant)]
     enum Var<'a> {
-        Arr(ArrayIter<'a, ColI64<'a>>),
+        Arr(ArrayIter<'a, I64<'a>>),
         Num(i64),
         Str(&'a str),
     }
@@ -89,7 +87,7 @@ fn smoke_derive_variant() -> TestResult {
     let buf = fs::read("./testdata/variant.native")?;
     let (_, block) = parse_single(&buf)?;
 
-    let reader: ColVariant<Var> = ColVariant::try_from(&block.markers[1])?;
+    let reader: Variant<Var> = Variant::try_from(&block.markers[1])?;
     let mut repr = Vec::with_capacity(block.num_rows);
     for i in 0..block.num_rows {
         repr.push(match reader.try_read(i)? {
@@ -107,14 +105,14 @@ fn smoke_derive_variant() -> TestResult {
 fn smoke_derive_nested_struct() -> TestResult {
     #[derive(FromBlock)]
     struct Fruit<'a> {
-        name: ColLcStr<'a>,
-        rank: ColI64<'a>,
+        name: LcStr<'a>,
+        rank: I64<'a>,
     }
 
     #[derive(FromBlock)]
     struct Row<'a> {
-        id: ColI64<'a>,
-        arr: ColArray<'a, Fruit<'a>>,
+        id: I64<'a>,
+        arr: Array<'a, Fruit<'a>>,
     }
 
     let _guard = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);

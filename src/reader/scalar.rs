@@ -5,8 +5,6 @@ use std::ops::Range;
 use chrono::NaiveDate;
 use chrono_tz::Tz;
 use rust_decimal::Decimal;
-use uuid::Uuid;
-use zerocopy::little_endian::{F32, F64, I16, I32, I64, I128, U16, U32, U64, U128};
 
 use super::{ReadSlice, Readable, TryRead};
 use crate::error::Error;
@@ -16,10 +14,7 @@ use crate::mark::{
     Enum16 as Enum16Mark, FixedString as FixedStringMark, Mark, StringView,
 };
 use crate::slice::ByteView;
-use crate::value::Value;
-use crate::{
-    Bf16Data, ByteExt as _, Date16Data, Date32Data, I256, Ipv4Data, Ipv6Data, U256, UuidData,
-};
+use crate::{Bf16Data, ByteExt as _, Date16Data, Date32Data, Ipv4Data, Ipv6Data, UuidData, zc};
 
 macro_rules! col_view {
     ($($name:ident, $variant:ident, $elem:ty, $item:ty, |$v:ident| $conv:expr;)+) => {
@@ -76,32 +71,32 @@ macro_rules! col_view {
 }
 
 col_view! {
-    ColI8, Int8, i8, i8, |v| *v;
-    ColI16, Int16, I16, i16, |v| v.get();
-    ColI32, Int32, I32, i32, |v| v.get();
-    ColI64, Int64, I64, i64, |v| v.get();
-    ColI128, Int128, I128, i128, |v| v.get();
-    ColI256, Int256, I256, &'a I256, |v| v;
-    ColU8, UInt8, u8, u8, |v| *v;
-    ColU16, UInt16, U16, u16, |v| v.get();
-    ColU32, UInt32, U32, u32, |v| v.get();
-    ColU64, UInt64, U64, u64, |v| v.get();
-    ColU128, UInt128, U128, u128, |v| v.get();
-    ColU256, UInt256, U256, &'a U256, |v| v;
-    ColF32, Float32, F32, f32, |v| v.get();
-    ColF64, Float64, F64, f64, |v| v.get();
-    ColBf16, BFloat16, Bf16Data, half::bf16, |v| half::bf16::from(*v);
-    ColUuid, Uuid, UuidData, Uuid, |v| Uuid::from(*v);
-    ColIpv4, Ipv4, Ipv4Data, Ipv4Addr, |v| Ipv4Addr::from(*v);
-    ColIpv6, Ipv6, Ipv6Data, Ipv6Addr, |v| Ipv6Addr::from(*v);
-    ColDate, Date, Date16Data, NaiveDate, |v| NaiveDate::from(*v);
-    ColDate32, Date32, Date32Data, NaiveDate, |v| NaiveDate::from(*v);
+    I8, Int8, i8, i8, |v| *v;
+    I16, Int16, zc::I16, i16, |v| v.get();
+    I32, Int32, zc::I32, i32, |v| v.get();
+    I64, Int64, zc::I64, i64, |v| v.get();
+    I128, Int128, zc::I128, i128, |v| v.get();
+    I256, Int256, crate::I256, &'a crate::I256, |v| v;
+    U8, UInt8, u8, u8, |v| *v;
+    U16, UInt16, zc::U16, u16, |v| v.get();
+    U32, UInt32, zc::U32, u32, |v| v.get();
+    U64, UInt64, zc::U64, u64, |v| v.get();
+    U128, UInt128, zc::U128, u128, |v| v.get();
+    U256, UInt256, crate::U256, &'a crate::U256, |v| v;
+    F32, Float32, zc::F32, f32, |v| v.get();
+    F64, Float64, zc::F64, f64, |v| v.get();
+    Bf16, BFloat16, Bf16Data, half::bf16, |v| half::bf16::from(*v);
+    Uuid, Uuid, UuidData, uuid::Uuid, |v| uuid::Uuid::from(*v);
+    Ipv4, Ipv4, Ipv4Data, Ipv4Addr, |v| Ipv4Addr::from(*v);
+    Ipv6, Ipv6, Ipv6Data, Ipv6Addr, |v| Ipv6Addr::from(*v);
+    Date, Date, Date16Data, NaiveDate, |v| NaiveDate::from(*v);
+    Date32, Date32, Date32Data, NaiveDate, |v| NaiveDate::from(*v);
 }
 
 #[derive(Clone, Copy)]
-pub struct ColUsize<'a>(pub &'a Mark<'a>);
+pub struct Usize<'a>(pub &'a Mark<'a>);
 
-impl<'a> TryRead<'a> for ColUsize<'a> {
+impl<'a> TryRead<'a> for Usize<'a> {
     type Item = usize;
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
@@ -126,14 +121,14 @@ impl<'a> TryRead<'a> for ColUsize<'a> {
     }
 }
 
-impl<'a> TryFrom<&'a Mark<'a>> for ColUsize<'a> {
+impl<'a> TryFrom<&'a Mark<'a>> for Usize<'a> {
     type Error = Error;
 
     #[inline]
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::UInt8(_) | Mark::UInt16(_) | Mark::UInt32(_) | Mark::UInt64(_) => {
-                Ok(ColUsize(value))
+                Ok(Usize(value))
             }
             other => {
                 cold_path();
@@ -144,9 +139,9 @@ impl<'a> TryFrom<&'a Mark<'a>> for ColUsize<'a> {
 }
 
 #[derive(Clone, Copy)]
-pub struct ColBool<'a>(pub &'a BoolView<'a>);
+pub struct Bool<'a>(pub &'a BoolView<'a>);
 
-impl<'a> TryFrom<&'a Mark<'a>> for ColBool<'a> {
+impl<'a> TryFrom<&'a Mark<'a>> for Bool<'a> {
     type Error = Error;
 
     #[inline]
@@ -161,7 +156,7 @@ impl<'a> TryFrom<&'a Mark<'a>> for ColBool<'a> {
     }
 }
 
-impl<'a> TryRead<'a> for ColBool<'a> {
+impl<'a> TryRead<'a> for Bool<'a> {
     type Item = bool;
 
     #[inline(always)]
@@ -174,7 +169,7 @@ impl<'a> TryRead<'a> for ColBool<'a> {
     }
 }
 
-impl<'a> ReadSlice<'a> for ColBool<'a> {
+impl<'a> ReadSlice<'a> for Bool<'a> {
     /// Raw mask bytes; `1` is `true`.
     type Elem = u8;
 
@@ -190,15 +185,15 @@ impl<'a> ReadSlice<'a> for ColBool<'a> {
 }
 
 #[derive(Clone, Copy)]
-pub struct ColStr<'a>(pub &'a StringView<'a>);
+pub struct Str<'a>(pub &'a StringView<'a>);
 
-impl<'a> TryFrom<&'a Mark<'a>> for ColStr<'a> {
+impl<'a> TryFrom<&'a Mark<'a>> for Str<'a> {
     type Error = Error;
 
     #[inline]
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
-            Mark::String(s) => Ok(ColStr(s)),
+            Mark::String(s) => Ok(Str(s)),
             other => {
                 cold_path();
                 Err(Error::MismatchedType(other.as_str(), "String"))
@@ -207,7 +202,7 @@ impl<'a> TryFrom<&'a Mark<'a>> for ColStr<'a> {
     }
 }
 
-impl<'a> TryRead<'a> for ColStr<'a> {
+impl<'a> TryRead<'a> for Str<'a> {
     type Item = &'a str;
 
     #[inline(always)]
@@ -220,7 +215,7 @@ impl<'a> TryRead<'a> for ColStr<'a> {
     }
 }
 
-impl<'a> ReadSlice<'a> for ColStr<'a> {
+impl<'a> ReadSlice<'a> for Str<'a> {
     type Elem = &'a str;
 
     #[inline(always)]
@@ -235,9 +230,9 @@ impl<'a> ReadSlice<'a> for ColStr<'a> {
 }
 
 #[derive(Clone, Copy)]
-pub struct ColFixedStr<'a>(pub &'a FixedStringMark<'a>);
+pub struct FixedStr<'a>(pub &'a FixedStringMark<'a>);
 
-impl<'a> TryFrom<&'a Mark<'a>> for ColFixedStr<'a> {
+impl<'a> TryFrom<&'a Mark<'a>> for FixedStr<'a> {
     type Error = Error;
 
     #[inline]
@@ -252,7 +247,7 @@ impl<'a> TryFrom<&'a Mark<'a>> for ColFixedStr<'a> {
     }
 }
 
-impl<'a> TryRead<'a> for ColFixedStr<'a> {
+impl<'a> TryRead<'a> for FixedStr<'a> {
     type Item = &'a str;
 
     #[inline(always)]
@@ -269,9 +264,9 @@ impl<'a> TryRead<'a> for ColFixedStr<'a> {
 }
 
 #[derive(Clone, Copy)]
-pub struct ColEnum8<'a>(pub &'a Enum8Mark<'a>);
+pub struct Enum8<'a>(pub &'a Enum8Mark<'a>);
 
-impl<'a> TryFrom<&'a Mark<'a>> for ColEnum8<'a> {
+impl<'a> TryFrom<&'a Mark<'a>> for Enum8<'a> {
     type Error = Error;
 
     #[inline]
@@ -286,7 +281,7 @@ impl<'a> TryFrom<&'a Mark<'a>> for ColEnum8<'a> {
     }
 }
 
-impl<'a> TryRead<'a> for ColEnum8<'a> {
+impl<'a> TryRead<'a> for Enum8<'a> {
     type Item = &'a str;
 
     #[inline(always)]
@@ -308,9 +303,9 @@ impl<'a> TryRead<'a> for ColEnum8<'a> {
 }
 
 #[derive(Clone, Copy)]
-pub struct ColEnum16<'a>(pub &'a Enum16Mark<'a>);
+pub struct Enum16<'a>(pub &'a Enum16Mark<'a>);
 
-impl<'a> TryFrom<&'a Mark<'a>> for ColEnum16<'a> {
+impl<'a> TryFrom<&'a Mark<'a>> for Enum16<'a> {
     type Error = Error;
 
     #[inline]
@@ -325,7 +320,7 @@ impl<'a> TryFrom<&'a Mark<'a>> for ColEnum16<'a> {
     }
 }
 
-impl<'a> TryRead<'a> for ColEnum16<'a> {
+impl<'a> TryRead<'a> for Enum16<'a> {
     type Item = &'a str;
 
     #[inline(always)]
@@ -348,9 +343,9 @@ impl<'a> TryRead<'a> for ColEnum16<'a> {
 }
 
 #[derive(Clone, Copy)]
-pub struct ColDateTime<'a>(pub &'a DateTimeMark<'a>);
+pub struct DateTime<'a>(pub &'a DateTimeMark<'a>);
 
-impl<'a> TryFrom<&'a Mark<'a>> for ColDateTime<'a> {
+impl<'a> TryFrom<&'a Mark<'a>> for DateTime<'a> {
     type Error = Error;
 
     #[inline]
@@ -365,7 +360,7 @@ impl<'a> TryFrom<&'a Mark<'a>> for ColDateTime<'a> {
     }
 }
 
-impl<'a> TryRead<'a> for ColDateTime<'a> {
+impl<'a> TryRead<'a> for DateTime<'a> {
     type Item = chrono::DateTime<Tz>;
 
     #[inline(always)]
@@ -379,9 +374,9 @@ impl<'a> TryRead<'a> for ColDateTime<'a> {
 }
 
 #[derive(Clone, Copy)]
-pub struct ColDateTime64<'a>(pub &'a DateTime64Mark<'a>);
+pub struct DateTime64<'a>(pub &'a DateTime64Mark<'a>);
 
-impl<'a> TryFrom<&'a Mark<'a>> for ColDateTime64<'a> {
+impl<'a> TryFrom<&'a Mark<'a>> for DateTime64<'a> {
     type Error = Error;
 
     #[inline]
@@ -396,7 +391,7 @@ impl<'a> TryFrom<&'a Mark<'a>> for ColDateTime64<'a> {
     }
 }
 
-impl<'a> TryRead<'a> for ColDateTime64<'a> {
+impl<'a> TryRead<'a> for DateTime64<'a> {
     type Item = chrono::DateTime<Tz>;
 
     #[inline(always)]
@@ -458,9 +453,9 @@ macro_rules! col_decimal {
 }
 
 col_decimal! {
-    ColDecimal32, Decimal32, Decimal32Mark<'a>, |v, p| Ok(v.with_precision(p));
-    ColDecimal64, Decimal64, Decimal64Mark<'a>, |v, p| Ok(v.with_precision(p));
-    ColDecimal128, Decimal128, Decimal128Mark<'a>, |v, p| v.with_precision(p);
+    Decimal32, Decimal32, Decimal32Mark<'a>, |v, p| Ok(v.with_precision(p));
+    Decimal64, Decimal64, Decimal64Mark<'a>, |v, p| Ok(v.with_precision(p));
+    Decimal128, Decimal128, Decimal128Mark<'a>, |v, p| v.with_precision(p);
 }
 
 /// It's an escape hatch for runtime-typed columns like [`Mark::Variant`], [`Mark::Dynamic`],
@@ -470,9 +465,9 @@ col_decimal! {
 ///
 /// If you don't want the Value explicitly for some reason, use normal columns.
 #[derive(Clone, Copy)]
-pub struct ColValue<'a>(pub &'a Mark<'a>);
+pub struct Value<'a>(pub &'a Mark<'a>);
 
-impl<'a> TryFrom<&'a Mark<'a>> for ColValue<'a> {
+impl<'a> TryFrom<&'a Mark<'a>> for Value<'a> {
     type Error = Error;
 
     #[inline]
@@ -481,8 +476,8 @@ impl<'a> TryFrom<&'a Mark<'a>> for ColValue<'a> {
     }
 }
 
-impl<'a> TryRead<'a> for ColValue<'a> {
-    type Item = Value<'a>;
+impl<'a> TryRead<'a> for Value<'a> {
+    type Item = crate::value::Value<'a>;
 
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
@@ -506,27 +501,27 @@ macro_rules! readable {
 }
 
 readable! {
-    i8 => ColI8<'a>;
-    i16 => ColI16<'a>;
-    i32 => ColI32<'a>;
-    i64 => ColI64<'a>;
-    i128 => ColI128<'a>;
-    &'a I256 => ColI256<'a>;
-    u8 => ColU8<'a>;
-    u16 => ColU16<'a>;
-    u32 => ColU32<'a>;
-    u64 => ColU64<'a>;
-    u128 => ColU128<'a>;
-    &'a U256 => ColU256<'a>;
-    f32 => ColF32<'a>;
-    f64 => ColF64<'a>;
-    half::bf16 => ColBf16<'a>;
-    bool => ColBool<'a>;
-    &'a str => ColStr<'a>;
-    Uuid => ColUuid<'a>;
-    Ipv4Addr => ColIpv4<'a>;
-    Ipv6Addr => ColIpv6<'a>;
-    NaiveDate => ColDate<'a>;
-    chrono::DateTime<Tz> => ColDateTime<'a>;
-    Value<'a> => ColValue<'a>;
+    i8 => I8<'a>;
+    i16 => I16<'a>;
+    i32 => I32<'a>;
+    i64 => I64<'a>;
+    i128 => I128<'a>;
+    &'a crate::I256 => I256<'a>;
+    u8 => U8<'a>;
+    u16 => U16<'a>;
+    u32 => U32<'a>;
+    u64 => U64<'a>;
+    u128 => U128<'a>;
+    &'a crate::U256 => U256<'a>;
+    f32 => F32<'a>;
+    f64 => F64<'a>;
+    half::bf16 => Bf16<'a>;
+    bool => Bool<'a>;
+    &'a str => Str<'a>;
+    uuid::Uuid => Uuid<'a>;
+    Ipv4Addr => Ipv4<'a>;
+    Ipv6Addr => Ipv6<'a>;
+    NaiveDate => Date<'a>;
+    chrono::DateTime<Tz> => DateTime<'a>;
+    crate::value::Value<'a> => Value<'a>;
 }

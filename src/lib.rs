@@ -13,13 +13,6 @@ use chrono::{NaiveDate, TimeZone};
 use chrono_tz::Tz;
 use log::debug;
 use uuid::Uuid;
-use zerocopy::little_endian::{I32, I64, I128, U16, U32, U64};
-
-use crate::{
-    conv::{date16, date32, datetime32, datetime32_tz, datetime64_tz},
-    mark::Mark,
-    value::Value,
-};
 
 pub mod conv;
 pub mod error;
@@ -31,6 +24,7 @@ pub mod reader;
 pub mod slice;
 pub mod types;
 pub mod value;
+mod zc;
 
 pub use chbr_derive::{FromBlock, FromVariant};
 pub use error::Error;
@@ -141,16 +135,16 @@ macro_rules! impl_from {
 transparent_newtype! {
     pub I256 ([u8; 32]);
     pub U256 ([u8; 32]);
-    pub UuidData([U64; 2]);
-    pub Ipv4Data (U32);
+    pub UuidData([zc::U64; 2]);
+    pub Ipv4Data (zc::U32);
     pub Ipv6Data ([u8; 16]);
-    pub Date16Data (U16);
-    pub Date32Data (I32);
-    pub DateTime32Data (U32);
-    pub DateTime64Data (I64);
-    pub Decimal32Data (I32);
-    pub Decimal64Data (I64);
-    pub Decimal128Data (I128);
+    pub Date16Data (zc::U16);
+    pub Date32Data (zc::I32);
+    pub DateTime32Data (zc::U32);
+    pub DateTime64Data (zc::I64);
+    pub Decimal32Data (zc::I32);
+    pub Decimal64Data (zc::I64);
+    pub Decimal128Data (zc::I128);
     pub Decimal256Data (I256);
     pub Bf16Data ([u8; 2]);
 }
@@ -162,21 +156,21 @@ impl_from!(UuidData => Uuid, |d| {
     let [hi, lo] = d.0;
     Uuid::from_u64_pair(hi.get(), lo.get())
 });
-impl_from!(Date16Data => NaiveDate, |d| date16(d.0.get()));
-impl_from!(Date32Data => NaiveDate, |d| date32(d.0.get()));
-impl_from!(DateTime32Data => chrono::DateTime<chrono::Utc>, |d| datetime32(d.0.get()));
+impl_from!(Date16Data => NaiveDate, |d| conv::date16(d.0.get()));
+impl_from!(Date32Data => NaiveDate, |d| conv::date32(d.0.get()));
+impl_from!(DateTime32Data => chrono::DateTime<chrono::Utc>, |d| conv::datetime32(d.0.get()));
 
 impl DateTime64Data {
     #[inline(always)]
     pub fn with_tz_and_precision(&self, tz: Tz, precision: u8) -> Option<chrono::DateTime<Tz>> {
-        datetime64_tz(self.0.get(), precision, tz)
+        conv::datetime64_tz(self.0.get(), precision, tz)
     }
 }
 
 impl DateTime32Data {
     #[inline(always)]
     pub fn with_tz(&self, tz: Tz) -> chrono::DateTime<Tz> {
-        datetime32_tz(self.0.get(), tz)
+        conv::datetime32_tz(self.0.get(), tz)
     }
 }
 
@@ -210,7 +204,7 @@ impl Decimal128Data {
 }
 
 pub struct ParsedBlock<'a> {
-    pub markers: Vec<Mark<'a>>,
+    pub markers: Vec<mark::Mark<'a>>,
     pub col_names: Vec<&'a str>,
     pub num_rows: usize,
 }
@@ -302,14 +296,14 @@ pub fn reorder_block_cols(blocks: &mut [ParsedBlock<'_>], order: &[&str]) -> Res
 
 pub struct BlockRow<'a> {
     col_names: &'a [&'a str],
-    cols: &'a [Mark<'a>],
+    cols: &'a [mark::Mark<'a>],
     col_index: usize,
     row_index: usize,
 }
 
 impl<'a> BlockRow<'a> {
     #[inline]
-    pub const fn cols(&self) -> &'a [Mark<'a>] {
+    pub const fn cols(&self) -> &'a [mark::Mark<'a>] {
         self.cols
     }
 
@@ -404,7 +398,7 @@ impl ExactSizeIterator for BlocksIterator<'_> {}
 
 pub struct ColumnAccessor<'a> {
     pub col_name: &'a str,
-    pub marker: &'a Mark<'a>,
+    pub marker: &'a mark::Mark<'a>,
     row_index: usize,
 }
 
@@ -412,7 +406,7 @@ pub struct ColumnAccessor<'a> {
 /// Value instances. For small types it can have a large performance impact.
 impl<'a> ColumnAccessor<'a> {
     #[inline]
-    pub fn get(self) -> Value<'a> {
+    pub fn get(self) -> value::Value<'a> {
         self.marker
             .get(self.row_index)
             .expect("bug: crate-created row index must be valid")
