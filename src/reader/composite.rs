@@ -2,8 +2,9 @@ use std::ops::Range;
 
 use super::{ColStr, FromVariant, ReadSlice, Readable, TryRead};
 use crate::error::Error;
-use crate::mark::{LowCardinality as LowCardinalityMark, Mark, Variant as VariantMark};
+use crate::mark::{Mark, Variant as VariantMark};
 use crate::types::{OffsetIndexPair as _, Offsets};
+use zerocopy::little_endian::{U16, U32, U64};
 
 #[derive(Clone, Copy)]
 pub struct ColNullable<'a, Inner> {
@@ -45,8 +46,46 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for ColNullable<'a, Inner> {
 }
 
 #[derive(Clone, Copy)]
+enum LcIndices<'a> {
+    Empty,
+    U8(&'a [u8]),
+    U16(&'a [U16]),
+    U32(&'a [U32]),
+    U64(&'a [U64]),
+}
+
+impl<'a> LcIndices<'a> {
+    fn resolve(mark: &'a Mark<'a>) -> Result<Self, Error> {
+        Ok(match mark {
+            Mark::Empty => LcIndices::Empty,
+            Mark::UInt8(bv) => LcIndices::U8(bv.as_slice()),
+            Mark::UInt16(bv) => LcIndices::U16(bv.as_slice()),
+            Mark::UInt32(bv) => LcIndices::U32(bv.as_slice()),
+            Mark::UInt64(bv) => LcIndices::U64(bv.as_slice()),
+            other => {
+                return Err(Error::CorruptedData(format!(
+                    "unexpected LowCardinality indices type: {}",
+                    other.as_str()
+                )));
+            }
+        })
+    }
+
+    #[inline(always)]
+    fn get(self, idx: usize) -> Option<usize> {
+        match self {
+            LcIndices::Empty => None,
+            LcIndices::U8(s) => Some(usize::from(*s.get(idx)?)),
+            LcIndices::U16(s) => Some(usize::from(s.get(idx)?.get())),
+            LcIndices::U32(s) => Some(s.get(idx)?.get() as usize),
+            LcIndices::U64(s) => Some(usize::try_from(s.get(idx)?.get()).unwrap()),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct ColLc<'a, Inner> {
-    lc: &'a LowCardinalityMark<'a>,
+    indices: LcIndices<'a>,
     dict: Option<Inner>,
 }
 
@@ -62,11 +101,12 @@ where
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::LowCardinality(lc) if !lc.is_nullable => {
+                let indices = LcIndices::resolve(lc.indices.as_ref())?;
                 let dict = match lc.additional_keys.as_deref() {
                     Some(keys) => Some(Inner::try_from(keys)?),
                     None => None,
                 };
-                Ok(ColLc { lc, dict })
+                Ok(ColLc { indices, dict })
             }
             Mark::LowCardinality(_) => Err(Error::MismatchedType(
                 "LowCardinality(Nullable)",
@@ -82,7 +122,7 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for ColLc<'a, Inner> {
 
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value_index) = self.lc.value_index(idx) else {
+        let Some(value_index) = self.indices.get(idx) else {
             return Err(Error::IndexOutOfBounds(idx, "LowCardinality"));
         };
         let Some(dict) = self.dict.as_ref() else {
@@ -96,7 +136,7 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for ColLc<'a, Inner> {
 
 #[derive(Clone, Copy)]
 pub struct ColLcNullable<'a, Inner> {
-    lc: &'a LowCardinalityMark<'a>,
+    indices: LcIndices<'a>,
     dict: Option<Inner>,
 }
 
@@ -112,11 +152,12 @@ where
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::LowCardinality(lc) if lc.is_nullable => {
+                let indices = LcIndices::resolve(lc.indices.as_ref())?;
                 let dict = match lc.additional_keys.as_deref() {
                     Some(keys) => Some(Inner::try_from(keys)?),
                     None => None,
                 };
-                Ok(ColLcNullable { lc, dict })
+                Ok(ColLcNullable { indices, dict })
             }
             Mark::LowCardinality(_) => Err(Error::MismatchedType(
                 "LowCardinality",
@@ -132,7 +173,7 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for ColLcNullable<'a, Inner> {
 
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value_index) = self.lc.value_index(idx) else {
+        let Some(value_index) = self.indices.get(idx) else {
             return Err(Error::IndexOutOfBounds(idx, "LowCardinality"));
         };
         if value_index == 0 {

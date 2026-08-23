@@ -41,18 +41,11 @@ impl<'a, T: Unaligned + FromBytes + Copy> ByteView<'a, T> {
 
     #[inline(always)]
     pub fn get(&self, index: usize) -> Option<&T> {
-        if self.is_empty() || index >= self.len() {
-            return None;
-        }
-        Some(&self[index])
+        self.as_slice().get(index)
     }
 
-    pub fn last(&self) -> Option<&T> {
-        if self.is_empty() {
-            None
-        } else {
-            Some(&self[self.len() - 1])
-        }
+    pub const fn last(&self) -> Option<&T> {
+        self.as_slice().last()
     }
 
     #[inline(always)]
