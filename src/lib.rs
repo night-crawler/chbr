@@ -86,9 +86,17 @@ impl TryFrom<Range<usize>> for TinyRange {
             Error::ValueOutOfRange("usize", "u32", value.start.to_string())
         })?;
 
-        let length = u32::try_from(value.end - value.start).map_err(|_| {
+        let raw_length = value.end.checked_sub(value.start).ok_or_else(|| {
             cold_path();
-            Error::ValueOutOfRange("usize", "u32", (value.end - value.start).to_string())
+            Error::ValueOutOfRange(
+                "Range<usize>",
+                "TinyRange",
+                format!("{}..{}", value.start, value.end),
+            )
+        })?;
+        let length = u32::try_from(raw_length).map_err(|_| {
+            cold_path();
+            Error::ValueOutOfRange("usize", "u32", raw_length.to_string())
         })?;
 
         Ok(TinyRange { start, length })
@@ -405,68 +413,71 @@ pub struct ColumnAccessor<'a> {
 impl<'a> ColumnAccessor<'a> {
     #[inline]
     pub fn get(self) -> Value<'a> {
-        // row index is private and created by us, so it should always be valid, thus safe
-        // to unwrap
-        self.marker.get(self.row_index).unwrap()
+        self.marker
+            .get(self.row_index)
+            .expect("bug: crate-created row index must be valid")
     }
 
     #[inline]
     pub fn into_str(self) -> Result<&'a str> {
         let str = self.marker.get_str(self.row_index)?;
-        Ok(str.unwrap())
+        Ok(str.expect("bug: crate-created row index must be valid"))
     }
 
     #[inline]
     pub fn into_opt_str(self) -> Result<Option<&'a str>> {
         let str = self.marker.get_opt_str(self.row_index)?;
-        Ok(str.unwrap())
+        Ok(str.expect("bug: crate-created row index must be valid"))
     }
 
     #[inline]
     pub fn into_datetime<T: TimeZone>(self, tz: T) -> Result<chrono::DateTime<T>> {
         let dt = self.marker.get_datetime(self.row_index, tz)?;
-        Ok(dt.unwrap())
+        Ok(dt.expect("bug: crate-created row index must be valid"))
     }
 
     #[inline]
     pub fn into_uuid(self) -> Result<Uuid> {
         let uuid = self.marker.get_uuid(self.row_index)?;
-        Ok(uuid.unwrap())
+        Ok(uuid.expect("bug: crate-created row index must be valid"))
     }
 
     #[inline]
     pub fn into_ipv4(self) -> Result<Ipv4Addr> {
         let ipv4 = self.marker.get_ipv4(self.row_index)?;
-        Ok(ipv4.unwrap())
+        Ok(ipv4.expect("bug: crate-created row index must be valid"))
     }
 
     #[inline]
     pub fn into_ipv6(self) -> Result<Ipv6Addr> {
         let ipv6 = self.marker.get_ipv6(self.row_index)?;
-        Ok(ipv6.unwrap())
+        Ok(ipv6.expect("bug: crate-created row index must be valid"))
     }
 
     #[inline]
     pub fn into_opt_ipv6(self) -> Result<Option<Ipv6Addr>> {
         let ipv6 = self.marker.get_opt_ipv6(self.row_index)?;
-        Ok(ipv6.unwrap())
+        Ok(ipv6.expect("bug: crate-created row index must be valid"))
     }
 
     #[inline]
     pub fn into_bool(self) -> Result<bool> {
         let value = self.marker.get_bool(self.row_index)?;
-        Ok(value.unwrap())
+        Ok(value.expect("bug: crate-created row index must be valid"))
     }
 
     #[inline]
     pub fn into_f64(self) -> Result<f64> {
         let value = self.marker.get_f64(self.row_index)?;
-        Ok(value.unwrap())
+        Ok(value.expect("bug: crate-created row index must be valid"))
     }
 
     #[inline]
     pub fn into_array_lc_strs(self) -> Result<impl Iterator<Item = &'a str>> {
-        let it = self.marker.get_array_lc_strs(self.row_index)?.unwrap();
+        let it = self
+            .marker
+            .get_array_lc_strs(self.row_index)?
+            .expect("bug: crate-created row index must be valid");
         Ok(it.into_iter())
     }
 }

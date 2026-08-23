@@ -376,7 +376,13 @@ impl<'a> Mark<'a> {
             Mark::UInt16(bv) => LcIndexIter::U16(bv[idx].iter()),
             Mark::UInt32(bv) => LcIndexIter::U32(bv[idx].iter()),
             Mark::UInt64(bv) => LcIndexIter::U64(bv[idx].iter()),
-            _ => unreachable!("must never have any other type"),
+            other => {
+                cold_path();
+                return Err(crate::Error::CorruptedData(format!(
+                    "unexpected LowCardinality indices type: {}",
+                    other.as_str()
+                )));
+            }
         };
 
         Ok(LcStrIter { indices, keys })
