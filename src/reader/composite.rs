@@ -1,8 +1,7 @@
 use super::{FromVariant, ReadSlice, Readable, Str, TryRead};
 use crate::error::Error;
-use crate::mark::{Mark, Variant as VariantMark};
+use crate::mark::{LcIndices, Mark, Variant as VariantMark};
 use crate::types::{OffsetIndexPair as _, Offsets};
-use chbr::zc;
 use std::hint::cold_path;
 use std::ops::Range;
 
@@ -46,45 +45,6 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for Nullable<'a, Inner> {
             return Ok(None);
         }
         Ok(Some(self.inner.try_read(idx)?))
-    }
-}
-
-#[derive(Clone, Copy)]
-enum LcIndices<'a> {
-    Empty,
-    U8(&'a [u8]),
-    U16(&'a [zc::U16]),
-    U32(&'a [zc::U32]),
-    U64(&'a [zc::U64]),
-}
-
-impl<'a> LcIndices<'a> {
-    fn resolve(mark: &'a Mark<'a>) -> Result<Self, Error> {
-        Ok(match mark {
-            Mark::Empty => LcIndices::Empty,
-            Mark::UInt8(bv) => LcIndices::U8(bv.as_slice()),
-            Mark::UInt16(bv) => LcIndices::U16(bv.as_slice()),
-            Mark::UInt32(bv) => LcIndices::U32(bv.as_slice()),
-            Mark::UInt64(bv) => LcIndices::U64(bv.as_slice()),
-            other => {
-                cold_path();
-                return Err(Error::CorruptedData(format!(
-                    "unexpected LowCardinality indices type: {}",
-                    other.as_str()
-                )));
-            }
-        })
-    }
-
-    #[inline(always)]
-    fn get(self, idx: usize) -> Option<usize> {
-        match self {
-            LcIndices::Empty => None,
-            LcIndices::U8(s) => Some(usize::from(*s.get(idx)?)),
-            LcIndices::U16(s) => Some(usize::from(s.get(idx)?.get())),
-            LcIndices::U32(s) => Some(s.get(idx)?.get() as usize),
-            LcIndices::U64(s) => Some(usize::try_from(s.get(idx)?.get()).unwrap()),
-        }
     }
 }
 
@@ -133,7 +93,7 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for Lc<'a, Inner> {
 
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value_index) = self.indices.get(idx) else {
+        let Some(value_index) = self.indices.get(idx)? else {
             cold_path();
             return Err(Error::IndexOutOfBounds(idx, "LowCardinality"));
         };
@@ -192,7 +152,7 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for LcNullable<'a, Inner> {
 
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value_index) = self.indices.get(idx) else {
+        let Some(value_index) = self.indices.get(idx)? else {
             cold_path();
             return Err(Error::IndexOutOfBounds(idx, "LowCardinality"));
         };

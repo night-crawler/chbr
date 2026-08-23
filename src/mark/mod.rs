@@ -408,42 +408,8 @@ impl<'a> Mark<'a> {
     pub fn get_str(&'a self, index: usize) -> crate::Result<Option<&'a str>> {
         match self {
             Mark::String(strings) => Ok(strings.get(index)),
-            Mark::FixedString(fs) => {
-                let Some(offset) = fs.size.checked_mul(index) else {
-                    return Ok(None);
-                };
-                let Some(end) = offset.checked_add(fs.size) else {
-                    return Ok(None);
-                };
-                let Some(slice) = fs.data.get(offset..end) else {
-                    return Ok(None);
-                };
-                let slice = unsafe { std::str::from_utf8_unchecked(slice.rtrim_zeros()) };
-                Ok(Some(slice))
-            }
-            Mark::LowCardinality(lc) => {
-                let Some(keys) = &lc.additional_keys else {
-                    cold_path();
-                    return Err(Error::CorruptedData(
-                        "LowCardinality marker without additional keys".to_owned(),
-                    ));
-                };
-
-                let Some(value_index) = lc.value_index(index)? else {
-                    return Ok(None);
-                };
-
-                if value_index == 0 && lc.is_nullable {
-                    return Ok(None);
-                }
-
-                let Mark::String(keys) = keys.as_ref() else {
-                    cold_path();
-                    return Err(Error::MismatchedType(keys.as_str(), "&str"));
-                };
-
-                Ok(keys.get(value_index))
-            }
+            Mark::FixedString(fs) => Ok(fs.get_str(index)),
+            Mark::LowCardinality(lc) => lc.get_str(index),
             mark => {
                 cold_path();
                 Err(Error::MismatchedType(mark.as_str(), "&str"))
@@ -755,6 +721,66 @@ impl Variant<'_> {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum LcIndices<'a> {
+    Empty,
+    U8(&'a [u8]),
+    U16(&'a [zc::U16]),
+    U32(&'a [zc::U32]),
+    U64(&'a [zc::U64]),
+}
+
+impl<'a> LcIndices<'a> {
+    pub(crate) fn resolve(mark: &Mark<'a>) -> crate::Result<Self> {
+        match mark {
+            Mark::Empty => Ok(Self::Empty),
+            Mark::UInt8(indices) => Ok(Self::U8(indices.as_slice())),
+            Mark::UInt16(indices) => Ok(Self::U16(indices.as_slice())),
+            Mark::UInt32(indices) => Ok(Self::U32(indices.as_slice())),
+            Mark::UInt64(indices) => Ok(Self::U64(indices.as_slice())),
+            other => {
+                cold_path();
+                Err(Error::CorruptedData(format!(
+                    "unexpected LowCardinality indices type: {}",
+                    other.as_str()
+                )))
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn get(self, index: usize) -> crate::Result<Option<usize>> {
+        let value = match self {
+            Self::Empty => return Ok(None),
+            Self::U8(indices) => {
+                let Some(value) = indices.get(index) else {
+                    return Ok(None);
+                };
+                usize::from(*value)
+            }
+            Self::U16(indices) => {
+                let Some(value) = indices.get(index) else {
+                    return Ok(None);
+                };
+                usize::from(value.get())
+            }
+            Self::U32(indices) => {
+                let Some(value) = indices.get(index) else {
+                    return Ok(None);
+                };
+                value.get() as usize
+            }
+            Self::U64(indices) => {
+                let Some(value) = indices.get(index) else {
+                    return Ok(None);
+                };
+                usize::try_from(value.get())?
+            }
+        };
+        Ok(Some(value))
+    }
+}
+
 #[derive(Debug)]
 pub struct LowCardinality<'a> {
     pub is_nullable: bool,
@@ -782,41 +808,30 @@ impl LowCardinality<'_> {
 
     #[inline(always)]
     pub fn value_index(&self, index: usize) -> crate::Result<Option<usize>> {
-        let value_index = match self.indices.as_ref() {
-            Mark::UInt8(indices) => {
-                let Some(value) = indices.get(index) else {
-                    return Ok(None);
-                };
-                usize::from(*value)
-            }
-            Mark::UInt16(indices) => {
-                let Some(value) = indices.get(index) else {
-                    return Ok(None);
-                };
-                usize::from(value.get())
-            }
-            Mark::UInt32(indices) => {
-                let Some(value) = indices.get(index) else {
-                    return Ok(None);
-                };
-                value.get() as usize
-            }
-            Mark::UInt64(indices) => {
-                let Some(value) = indices.get(index) else {
-                    return Ok(None);
-                };
-                usize::try_from(value.get())?
-            }
-            other => {
-                cold_path();
-                return Err(Error::CorruptedData(format!(
-                    "unexpected LowCardinality indices type: {}",
-                    other.as_str()
-                )));
-            }
+        LcIndices::resolve(self.indices.as_ref())?.get(index)
+    }
+
+    #[inline]
+    fn get_str(&self, index: usize) -> crate::Result<Option<&str>> {
+        let Some(keys) = &self.additional_keys else {
+            cold_path();
+            return Err(Error::CorruptedData(
+                "LowCardinality marker without additional keys".to_owned(),
+            ));
         };
 
-        Ok(Some(value_index))
+        let Some(value_index) = self.value_index(index)? else {
+            return Ok(None);
+        };
+        if value_index == 0 && self.is_nullable {
+            return Ok(None);
+        }
+
+        let Mark::String(keys) = keys.as_ref() else {
+            cold_path();
+            return Err(Error::MismatchedType(keys.as_str(), "&str"));
+        };
+        Ok(keys.get(value_index))
     }
 
     #[inline]
@@ -927,16 +942,18 @@ pub struct FixedString<'a> {
     pub data: &'a [u8],
 }
 
-impl FixedString<'_> {
+impl<'a> FixedString<'a> {
     #[inline]
-    pub fn get(&self, index: usize) -> Option<Value<'_>> {
+    pub(crate) fn get_str(&self, index: usize) -> Option<&'a str> {
         let offset = self.size.checked_mul(index)?;
         let end = offset.checked_add(self.size)?;
         let slice = self.data.get(offset..end)?.rtrim_zeros();
+        Some(unsafe { std::str::from_utf8_unchecked(slice) })
+    }
 
-        Some(Value::String(unsafe {
-            std::str::from_utf8_unchecked(slice)
-        }))
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<Value<'a>> {
+        self.get_str(index).map(Value::String)
     }
 }
 

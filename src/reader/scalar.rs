@@ -14,7 +14,7 @@ use crate::mark::{
     Enum16 as Enum16Mark, FixedString as FixedStringMark, Mark, StringView,
 };
 use crate::slice::ByteView;
-use crate::{Bf16Data, ByteExt as _, Date16Data, Date32Data, Ipv4Data, Ipv6Data, UuidData, zc};
+use crate::{Bf16Data, Date16Data, Date32Data, Ipv4Data, Ipv6Data, UuidData, zc};
 
 macro_rules! col_view {
     ($($name:ident, $variant:ident, $elem:ty, $item:ty, |$v:ident| $conv:expr;)+) => {
@@ -252,14 +252,11 @@ impl<'a> TryRead<'a> for FixedStr<'a> {
 
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let data: &'a [u8] = self.0.data;
-        let offset = self.0.size * idx;
-        let Some(bytes) = data.get(offset..offset + self.0.size) else {
+        let Some(value) = self.0.get_str(idx) else {
             cold_path();
             return Err(Error::IndexOutOfBounds(idx, "FixedString"));
         };
-        let bytes = bytes.rtrim_zeros();
-        Ok(unsafe { std::str::from_utf8_unchecked(bytes) })
+        Ok(value)
     }
 }
 

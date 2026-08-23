@@ -1721,7 +1721,7 @@ fn mark_accessors_return_errors() -> TestResult {
 
     let low_cardinality = Mark::LowCardinality(LowCardinality {
         is_nullable: false,
-        indices: Box::new(Mark::Empty),
+        indices: Box::new(Mark::String(StringView { data: Vec::new() })),
         global_dictionary: None,
         additional_keys: Some(Box::new(Mark::String(StringView { data: vec!["key"] }))),
     });
