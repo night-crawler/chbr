@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use chrono::{DateTime, Duration, NaiveDate, TimeZone as _, Utc};
 use chrono_tz::{Tz, TzOffset};
 
-const EPOCH_DATE: NaiveDate = NaiveDate::from_yo_opt(1970, 1).unwrap();
+const EPOCH_DATE: NaiveDate = NaiveDate::from_yo_opt(1970, 1).expect("1970 day 1 is a valid date");
 
 static UTC_TZ_OFFSET: LazyLock<TzOffset> =
     LazyLock::new(|| Tz::UTC.offset_from_utc_datetime(&DateTime::UNIX_EPOCH.naive_utc()));
@@ -38,7 +38,9 @@ pub fn date32(days: i32) -> NaiveDate {
 
 #[inline(always)]
 pub fn datetime32(secs: u32) -> DateTime<Utc> {
-    DateTime::<Utc>::from_timestamp(i64::from(secs), 0).unwrap()
+    // SAFETY: every u32 timestamp is within chrono's DateTime range, and
+    // zero nanoseconds is valid.
+    unsafe { DateTime::<Utc>::from_timestamp(i64::from(secs), 0).unwrap_unchecked() }
 }
 
 #[inline]
@@ -51,7 +53,7 @@ pub fn datetime32_tz(secs: u32, tz: Tz) -> DateTime<Tz> {
 }
 #[inline(always)]
 pub fn datetime64(timestamp: i64, precision: u8) -> Option<DateTime<Utc>> {
-    let pow = 10i64.pow(u32::from(precision));
+    let pow = 10i64.checked_pow(u32::from(precision))?;
     let secs = timestamp / pow;
     let rem_ms = (timestamp % pow).abs();
     let nsec = rem_ms.checked_mul(1_000_000)?;

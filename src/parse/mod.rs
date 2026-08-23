@@ -94,7 +94,7 @@ where
         return Err(Error::Length(8));
     }
     let (bytes, rest) = input.split_at(8);
-    let value = u64::from_le_bytes(bytes.try_into().unwrap());
+    let value = u64::from_le_bytes(bytes.try_into().expect("we checked"));
 
     let Ok(value) = T::try_from(value) else {
         cold_path();
@@ -142,8 +142,26 @@ fn parse_var_str_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     Ok((input, typ))
 }
 
+#[inline]
+fn take_elements<'a>(
+    input: &'a [u8],
+    left: usize,
+    right: usize,
+    description: &str,
+) -> IResult<&'a [u8], &'a [u8]> {
+    let byte_len = left.checked_mul(right).ok_or_else(|| {
+        cold_path();
+        Error::Overflow(format!("{description}: {left} * {right}"))
+    })?;
+    let Some((data, input)) = input.split_at_checked(byte_len) else {
+        cold_path();
+        return Err(Error::Length(byte_len));
+    };
+    Ok((input, data))
+}
+
 fn parse_offsets(input: &[u8], num_rows: usize) -> IResult<&[u8], Offsets<'_>> {
-    let (offsets, input) = input.split_at(num_rows * size_of::<u64>());
+    let (input, offsets) = take_elements(input, num_rows, size_of::<u64>(), "offset byte length")?;
     let offsets = ByteView::<U64<LittleEndian>>::try_from(offsets)?;
 
     Ok((input, offsets))

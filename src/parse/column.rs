@@ -17,7 +17,7 @@ use crate::{
             HAS_ADDITIONAL_KEYS_BIT, NEED_GLOBAL_DICTIONARY_BIT, NEED_UPDATE_DICTIONARY_BIT,
             TUINT8, TUINT16, TUINT32, TUINT64,
         },
-        header, parse_offsets, parse_u64, parse_var_str_bytes, parse_varuint,
+        header, parse_offsets, parse_u64, parse_var_str_bytes, parse_varuint, take_elements,
     },
     types::{DynamicHeader, Field, JsonHeader, MapHeader, OffsetIndexPair as _, Type, TypeHeader},
 };
@@ -88,7 +88,7 @@ impl<'a> Type<'a> {
         debug!("Decoding type: {self:?} with header: {header:?}");
 
         if let Some(size) = self.size() {
-            let (data, input) = ctx.input.split_at(size * ctx.num_rows);
+            let (input, data) = take_elements(ctx.input, size, ctx.num_rows, "column byte length")?;
             let marker = self.into_fixed_size_marker(data)?;
             return Ok((input, marker));
         }
@@ -111,7 +111,7 @@ impl<'a> Type<'a> {
             Type::NamedTuple(fields) => named_tuple(fields, &ctx, header.into_nested()),
             _ => {
                 cold_path();
-                unimplemented!("decode is not implemented for {self:?}")
+                Err(Error::NotImplemented(format!("decode for {self:?}")))
             }
         }
     }
@@ -129,8 +129,11 @@ fn json<'a>(
     let num_rows = ctx.num_rows;
 
     for (col_header, type_header) in col_headers.iter_mut().zip(type_headers) {
-        let discriminators;
-        (discriminators, input) = input.split_at(num_rows);
+        let Some((discriminators, remainder)) = input.split_at_checked(num_rows) else {
+            cold_path();
+            return Err(Error::Length(num_rows));
+        };
+        input = remainder;
 
         let offsets = &mut col_header.offsets;
 
@@ -159,9 +162,7 @@ fn json<'a>(
     });
 
     // https://github.com/ClickHouse/clickhouse-go/blob/71a2b475e899afe9626f40af513bcf25aa3098a2/lib/column/json.go#L569-L572
-    let shared_data_size = num_rows * 8;
-    let _shared_data;
-    (_shared_data, input) = input.split_at(shared_data_size);
+    let (input, _shared_data) = take_elements(input, num_rows, 8, "JSON shared data size")?;
 
     Ok((input, marker))
 }
@@ -178,8 +179,15 @@ fn dynamic<'a>(ctx: &ParseContext<'a>, header: DynamicHeader<'a>) -> IResult<&'a
         let disc;
         (input, disc) = parse_varuint(input)?;
 
-        *offset = row_counts[disc];
-        row_counts[disc] += 1;
+        let Some(row_count) = row_counts.get_mut(disc) else {
+            cold_path();
+            return Err(Error::CorruptedData(format!(
+                "Dynamic discriminator {disc} out of bounds for {} types",
+                types.len()
+            )));
+        };
+        *offset = *row_count;
+        *row_count += 1;
 
         discriminators.push(disc);
     }
@@ -216,7 +224,10 @@ fn nullable<'a>(
     ctx: &ParseContext<'a>,
     header: TypeHeader<'a>,
 ) -> IResult<&'a [u8], Mark<'a>> {
-    let (mask, input) = ctx.input.split_at(ctx.num_rows);
+    let Some((mask, input)) = ctx.input.split_at_checked(ctx.num_rows) else {
+        cold_path();
+        return Err(Error::Length(ctx.num_rows));
+    };
     // here we pass through the header
     let (input, marker) = inner.decode(ctx.fork(input), header)?;
     let mark_nullable = Nullable {
@@ -318,7 +329,10 @@ fn variant<'a>(
 ) -> IResult<&'a [u8], Mark<'a>> {
     let input = ctx.input;
 
-    let (discriminators, mut input) = input.split_at(ctx.num_rows);
+    let Some((discriminators, mut input)) = input.split_at_checked(ctx.num_rows) else {
+        cold_path();
+        return Err(Error::Length(ctx.num_rows));
+    };
     let mut offsets = vec![0; ctx.num_rows];
     let mut row_counts = vec![0; inner.len()];
     for (discriminator, offset) in discriminators.iter().copied().zip(offsets.iter_mut()) {

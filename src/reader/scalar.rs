@@ -113,9 +113,9 @@ impl<'a> TryRead<'a> for ColUsize<'a> {
                 Some(v) => Some(usize::try_from(v.get())?),
                 None => None,
             },
-            _ => {
+            other => {
                 cold_path();
-                unreachable!("unsupported index type for usize")
+                return Err(Error::MismatchedType(other.as_str(), "UInt8/16/32/64"));
             }
         };
         let Some(value) = value else {

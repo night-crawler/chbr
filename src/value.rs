@@ -379,15 +379,18 @@ impl TryFrom<Value<'_>> for chrono::DateTime<Tz> {
     fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
         match value {
             Value::DateTime(index, d) => {
-                // we checked the boundary before creating the Value
-                let value = d.data.get(index).unwrap().with_tz(d.tz);
+                let value = d
+                    .data
+                    .get(index)
+                    .expect("bug: we checked the boundary before creating the Value")
+                    .with_tz(d.tz);
                 Ok(value)
             }
             Value::DateTime64(index, d) => {
                 let value = d
                     .data
                     .get(index)
-                    .unwrap()
+                    .expect("bug: we checked the boundary before creating the Value")
                     .with_tz_and_precision(d.tz, d.precision);
                 let Some(value) = value else {
                     cold_path();
@@ -643,8 +646,14 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         let slice_idx = self.range.next()?;
 
-        let mark = self.mark.unwrap();
-        let (start, end) = mark.offsets.offset_indices(slice_idx).unwrap()?;
+        let mark = self
+            .mark
+            .expect("bug: an empty array iterator has an empty range");
+        let (start, end) = match mark.offsets.offset_indices(slice_idx) {
+            Ok(Some(indices)) => indices,
+            Ok(None) => return None,
+            Err(error) => return Some(Err(error)),
+        };
         let res = T::try_from(mark.values.slice(start..end));
         Some(res)
     }
@@ -852,7 +861,11 @@ where
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let slice_idx = self.range.next()?;
-        let (start, end) = self.offsets.offset_indices(slice_idx).unwrap()?;
+        let (start, end) = match self.offsets.offset_indices(slice_idx) {
+            Ok(Some(indices)) => indices,
+            Ok(None) => return None,
+            Err(error) => return Some(Err(error)),
+        };
 
         Some(Ok(MapIterator {
             keys: self.keys,
@@ -1105,7 +1118,9 @@ impl<'a> Iterator for NullableSliceIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.range.next()?;
 
-        let mark = self.mark.unwrap();
+        let mark = self
+            .mark
+            .expect("bug: an empty nullable iterator has an empty range");
         if mark.mask.get(index).copied()? == 1 {
             return Some(Value::Empty);
         }

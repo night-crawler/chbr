@@ -405,7 +405,12 @@ impl<'a> Type<'a> {
                 data: ByteView::try_from(data)?,
             }),
 
-            _ => unimplemented!("Const size is not implemented for type: {:?}", self),
+            _ => {
+                cold_path();
+                return Err(crate::Error::NotImplemented(format!(
+                    "fixed-size marker conversion for {self:?}"
+                )));
+            }
         };
 
         Ok(mark)

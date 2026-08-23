@@ -528,7 +528,10 @@ impl Debug for Mark<'_> {
 
             Bool(b) => dbg_slice(
                 f,
-                core::any::type_name::<Self>().rsplit("::").next().unwrap(),
+                core::any::type_name::<Self>()
+                    .rsplit("::")
+                    .next()
+                    .expect("bug: must have at least one element always"),
                 b.data,
             ),
 
