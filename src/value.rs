@@ -589,12 +589,12 @@ impl<'a> TryFrom<Value<'a>> for LowCardinalitySliceIterator<'a> {
 }
 
 impl<'a> Iterator for LowCardinalitySliceIterator<'a> {
-    type Item = Value<'a>;
+    type Item = Result<Value<'a>, Error>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.indices.next()?;
-        self.additional_keys.get(index)
+        self.additional_keys.get(index).transpose()
     }
 
     #[inline(always)]
@@ -653,7 +653,7 @@ where
             Ok(None) => return None,
             Err(error) => return Some(Err(error)),
         };
-        let res = T::try_from(mark.values.slice(start..end));
+        let res = mark.values.slice(start..end).and_then(T::try_from);
         Some(res)
     }
 
@@ -723,12 +723,13 @@ macro_rules! impl_try_from_tuple {
                 Ok((
                     $(
                         {
-                            let field_val = values[$idx]
-                                .get(index)
-                                .ok_or(Error::IndexOutOfBounds(
+                            let Some(field_val) = values[$idx].get(index)? else {
+                                cold_path();
+                                return Err(Error::IndexOutOfBounds(
                                     index,
                                     concat!("Tuple", stringify!($len)),
-                                ))?;
+                                ));
+                            };
                             <$T>::try_from(field_val)?
                         },
                     )+
@@ -798,10 +799,24 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.range.next()?;
 
-        let raw_key = self.keys.get(idx)?;
-        let raw_value = self.values.get(idx)?;
+        let raw_key = match self.keys.get(idx) {
+            Ok(Some(value)) => value,
+            Ok(None) => {
+                cold_path();
+                return Some(Err(Error::IndexOutOfBounds(idx, "Map key")));
+            }
+            Err(error) => return Some(Err(error)),
+        };
+        let raw_value = match self.values.get(idx) {
+            Ok(Some(value)) => value,
+            Ok(None) => {
+                cold_path();
+                return Some(Err(Error::IndexOutOfBounds(idx, "Map value")));
+            }
+            Err(error) => return Some(Err(error)),
+        };
 
-        Some(K::try_from(raw_key).and_then(|k| V::try_from(raw_value).map(|v| (k, v))))
+        Some(K::try_from(raw_key).and_then(|key| V::try_from(raw_value).map(|value| (key, value))))
     }
 
     #[inline(always)]
@@ -1111,7 +1126,7 @@ impl<'a> TryFrom<Value<'a>> for NullableSliceIterator<'a> {
 }
 
 impl<'a> Iterator for NullableSliceIterator<'a> {
-    type Item = Value<'a>;
+    type Item = Result<Value<'a>, Error>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
@@ -1121,9 +1136,9 @@ impl<'a> Iterator for NullableSliceIterator<'a> {
             .mark
             .expect("bug: an empty nullable iterator has an empty range");
         if mark.mask.get(index).copied()? == 1 {
-            return Some(Value::Empty);
+            return Some(Ok(Value::Empty));
         }
-        mark.data.get(index)
+        mark.data.get(index).transpose()
     }
 
     #[inline(always)]
@@ -1272,10 +1287,10 @@ impl<'a> TryFrom<Value<'a>> for NestedIterator<'a> {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Nested { mark, index } => {
-                let value = mark
-                    .array_of_tuples
-                    .get(index)
-                    .ok_or(Error::IndexOutOfBounds(index, "Nested"))?;
+                let Some(value) = mark.array_of_tuples.get(index)? else {
+                    cold_path();
+                    return Err(Error::IndexOutOfBounds(index, "Nested"));
+                };
                 let tuple_slice: TupleSliceIterator = value.try_into()?;
                 Ok(Self {
                     col_names: &mark.col_names,
@@ -1322,13 +1337,14 @@ pub struct NestedItemsIterator<'a> {
 }
 
 impl<'a> Iterator for NestedItemsIterator<'a> {
-    type Item = (&'a str, Value<'a>);
+    type Item = Result<(&'a str, Value<'a>), Error>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let (mark, col_name) = self.mark_ter.next()?;
-        let value = mark.get(self.row)?;
-        Some((col_name, value))
+        mark.get(self.row)
+            .transpose()
+            .map(|result| result.map(|value| (*col_name, value)))
     }
 
     #[inline(always)]
@@ -1371,7 +1387,7 @@ impl<'a> TryFrom<Value<'a>> for NamedTupleIterator<'a> {
 }
 
 impl<'a> Iterator for NamedTupleIterator<'a> {
-    type Item = (&'a str, Value<'a>);
+    type Item = Result<(&'a str, Value<'a>), Error>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
@@ -1381,8 +1397,9 @@ impl<'a> Iterator for NamedTupleIterator<'a> {
             .mark
             .values
             .get(self.mark.values.len() - self.col_names.len() - 1)?;
-        let value = mark.get(self.row)?;
-        Some((col_name, value))
+        mark.get(self.row)
+            .transpose()
+            .map(|result| result.map(|value| (*col_name, value)))
     }
 
     #[inline(always)]
@@ -1476,16 +1493,20 @@ impl<'a> Iterator for NestedSliceIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let slice_idx = self.range.next()?;
-        let Some(val) = self.array_of_tuples.get(slice_idx) else {
-            cold_path();
-            return Some(Err(Error::IndexOutOfBounds(slice_idx, "NestedSlice")));
+        let val = match self.array_of_tuples.get(slice_idx) {
+            Ok(Some(value)) => value,
+            Ok(None) => {
+                cold_path();
+                return Some(Err(Error::IndexOutOfBounds(slice_idx, "NestedSlice")));
+            }
+            Err(error) => return Some(Err(error)),
         };
 
         let tuple_slice: TupleSliceIterator = match val.try_into() {
-            Ok(v) => v,
-            Err(e) => {
+            Ok(value) => value,
+            Err(error) => {
                 cold_path();
-                return Some(Err(e));
+                return Some(Err(error));
             }
         };
 
@@ -1673,7 +1694,7 @@ impl<'a> TryFrom<Value<'a>> for JsonIterator<'a> {
 }
 
 impl<'a> Iterator for JsonIterator<'a> {
-    type Item = (&'a str, Value<'a>);
+    type Item = Result<(&'a str, Value<'a>), Error>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
@@ -1686,12 +1707,11 @@ impl<'a> Iterator for JsonIterator<'a> {
             }
 
             let path = self.mark.paths.get(self.path_index).copied()?;
-
             let index = header.offsets.get(self.index).copied()?;
-            let value = header.mark.get(index)?;
+            let value = header.mark.get(index).transpose()?;
             self.path_index += 1;
 
-            break Some((path, value));
+            break Some(value.map(|value| (path, value)));
         }
     }
 
@@ -1774,12 +1794,12 @@ impl<'a> TryFrom<Value<'a>> for VariantSliceIterator<'a> {
 }
 
 impl<'a> Iterator for VariantSliceIterator<'a> {
-    type Item = Value<'a>;
+    type Item = Result<Value<'a>, Error>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.range.next()?;
-        self.mark.get(index)
+        self.mark.get(index).transpose()
     }
 
     #[inline(always)]
@@ -1817,12 +1837,12 @@ impl<'a> TryFrom<Value<'a>> for DynamicSliceIterator<'a> {
 }
 
 impl<'a> Iterator for DynamicSliceIterator<'a> {
-    type Item = Value<'a>;
+    type Item = Result<Value<'a>, Error>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.range.next()?;
-        self.mark.get(index)
+        self.mark.get(index).transpose()
     }
 
     #[inline(always)]
