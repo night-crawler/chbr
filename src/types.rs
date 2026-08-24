@@ -83,7 +83,6 @@ pub struct DynamicHeader<'a> {
 pub struct JsonHeader<'a> {
     pub paths: Vec<&'a str>,
     pub col_headers: Vec<JsonColumnHeader<'a>>,
-    pub type_headers: Vec<TypeHeader<'a>>,
 }
 
 #[derive(Debug)]
@@ -246,7 +245,7 @@ pub enum Type<'a> {
     NamedTuple(Vec<Field<'a>>),
 
     Dynamic,
-    Json,
+    Json(Vec<Field<'a>>),
 
     SharedVariant,
 }
@@ -324,7 +323,7 @@ impl<'a> Type<'a> {
             // TODO: is it always variable?
             Self::Variant(_) => None,
             Self::Dynamic => None,
-            Self::Json => None,
+            Self::Json(_) => None,
 
             Self::Nullable(_) => None,
             Self::LowCardinality(_) => None,
@@ -334,6 +333,7 @@ impl<'a> Type<'a> {
         }
     }
 
+    #[inline]
     pub fn from_bytes(s: &[u8]) -> Result<Type<'_>, crate::Error> {
         let (remainder, typ) = parse_type(s).map_err(|e| crate::Error::Parse(e.to_string()))?;
         if !remainder.trim_ascii().is_empty() {
@@ -421,11 +421,11 @@ pub struct JsonColumnHeader<'a> {
     pub path_version: u64,
     pub max_types: usize,
     pub total_types: usize,
-    pub typ: Box<Type<'a>>,
+    pub types: Vec<Type<'a>>,
     pub variant_version: u64,
+    pub is_typed: bool,
+    pub type_headers: Vec<TypeHeader<'a>>,
     pub mark: Mark<'a>,
-    pub discriminators: &'a [u8],
-    pub offsets: Vec<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

@@ -607,3 +607,34 @@ fn derive_variant_in_from_block() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn low_cardinality_reader_rejects_readable_indices_without_dictionary() {
+    let indices = [1_u8];
+    let mark = crate::mark::Mark::LowCardinality(crate::mark::LowCardinality {
+        is_nullable: false,
+        indices: crate::mark::LcIndices::U8(&indices),
+        global_dictionary: None,
+        additional_keys: Some(Box::new(crate::mark::Mark::Empty)),
+    });
+
+    assert!(matches!(
+        LcStr::try_from(&mark),
+        Err(Error::CorruptedData(_))
+    ));
+}
+
+#[test]
+fn nullable_low_cardinality_reader_allows_missing_unused_dictionary() -> TestResult {
+    let indices = [0_u8];
+    let mark = crate::mark::Mark::LowCardinality(crate::mark::LowCardinality {
+        is_nullable: true,
+        indices: crate::mark::LcIndices::U8(&indices),
+        global_dictionary: None,
+        additional_keys: None,
+    });
+
+    let reader = LcNullableStr::try_from(&mark)?;
+    assert_eq!(reader.try_read(0)?, None);
+    Ok(())
+}

@@ -66,14 +66,18 @@ where
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::LowCardinality(lc) if !lc.is_nullable => {
+                let indices = lc.indices;
                 let dict = match lc.additional_keys.as_deref() {
-                    Some(Mark::Empty) | None => None,
+                    Some(Mark::Empty) | None if indices.is_empty() => None,
+                    Some(Mark::Empty) | None => {
+                        cold_path();
+                        return Err(Error::CorruptedData(
+                            "LowCardinality dictionary is missing".to_owned(),
+                        ));
+                    }
                     Some(keys) => Some(Inner::try_from(keys)?),
                 };
-                Ok(Lc {
-                    indices: lc.indices,
-                    dict,
-                })
+                Ok(Lc { indices, dict })
             }
             Mark::LowCardinality(_) => {
                 cold_path();
@@ -99,12 +103,9 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for Lc<'a, Inner> {
             cold_path();
             return Err(Error::IndexOutOfBounds(idx, "LowCardinality"));
         };
-        let Some(dict) = self.dict.as_ref() else {
-            cold_path();
-            return Err(Error::CorruptedData(
-                "LowCardinality dictionary is missing".to_owned(),
-            ));
-        };
+        // Construction guarantees that a missing dictionary has no readable index.
+        // Reaching this point therefore proves that the common populated case has a dictionary.
+        let dict = unsafe { self.dict.as_ref().unwrap_unchecked() };
         dict.try_read(value_index)
     }
 }
@@ -129,7 +130,13 @@ where
             Mark::LowCardinality(lc) if lc.is_nullable => {
                 let indices = lc.indices;
                 let dict = match lc.additional_keys.as_deref() {
-                    Some(Mark::Empty) | None => None,
+                    Some(Mark::Empty) | None if indices.all_zero() => None,
+                    Some(Mark::Empty) | None => {
+                        cold_path();
+                        return Err(Error::CorruptedData(
+                            "LowCardinality dictionary is missing".to_owned(),
+                        ));
+                    }
                     Some(keys) => Some(Inner::try_from(keys)?),
                 };
                 Ok(LcNullable { indices, dict })
@@ -161,12 +168,9 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for LcNullable<'a, Inner> {
         if value_index == 0 {
             return Ok(None);
         }
-        let Some(dict) = self.dict.as_ref() else {
-            cold_path();
-            return Err(Error::CorruptedData(
-                "LowCardinality dictionary is missing".to_owned(),
-            ));
-        };
+        // Construction guarantees that a missing dictionary has only null indices.
+        // A non-null index therefore proves that the common populated case has a dictionary.
+        let dict = unsafe { self.dict.as_ref().unwrap_unchecked() };
         Ok(Some(dict.try_read(value_index)?))
     }
 }

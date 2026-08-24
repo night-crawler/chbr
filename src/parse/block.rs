@@ -4,7 +4,8 @@ use log::debug;
 
 use crate::{
     ParsedBlock,
-    parse::{IResult, parse_var_str, parse_varuint, typ::parse_type},
+    parse::{IResult, parse_var_str, parse_varuint},
+    types::Type,
 };
 
 #[derive(Debug, Clone)]
@@ -96,9 +97,7 @@ pub fn parse_single(input: &[u8]) -> IResult<&[u8], ParsedBlock<'_>> {
         (input, column_type) = parse_var_str(input)?;
         debug!("{column_name}: column type: {column_type}");
 
-        // convert back to bytes, converting to string needed to ensure encoding
-        // and fail earlier, can be removed later
-        let (_, typ) = parse_type(column_type.as_bytes())?;
+        let typ = Type::from_bytes(column_type.as_bytes())?;
         debug!("column type parsed: {:?}", typ);
 
         let ctx = parse_context.fork(input);

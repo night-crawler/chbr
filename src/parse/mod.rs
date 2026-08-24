@@ -1,12 +1,6 @@
 use std::hint::cold_path;
 
-use crate::{
-    error::Error,
-    parse::typ::parse_type,
-    slice::ByteView,
-    types::{Offsets, Type},
-    zc,
-};
+use crate::{error::Error, slice::ByteView, types::Offsets, zc};
 
 pub mod block;
 pub mod column;
@@ -129,16 +123,6 @@ pub(crate) fn parse_var_str(input: &[u8]) -> IResult<&[u8], &str> {
         Error::Utf8Decode(e, str_bytes.to_vec())
     })?;
     Ok((remainder, str_value))
-}
-
-fn parse_var_str_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
-    let (input, str_bytes) = parse_var_str_bytes(input)?;
-    std::str::from_utf8(str_bytes).map_err(|e| {
-        cold_path();
-        Error::Utf8Decode(e, str_bytes.to_vec())
-    })?;
-    let (_, typ) = parse_type(str_bytes)?;
-    Ok((input, typ))
 }
 
 #[inline]
