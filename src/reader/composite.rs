@@ -67,8 +67,8 @@ where
         match value {
             Mark::LowCardinality(lc) if !lc.is_nullable => {
                 let dict = match lc.additional_keys.as_deref() {
+                    Some(Mark::Empty) | None => None,
                     Some(keys) => Some(Inner::try_from(keys)?),
-                    None => None,
                 };
                 Ok(Lc {
                     indices: lc.indices,
@@ -129,8 +129,8 @@ where
             Mark::LowCardinality(lc) if lc.is_nullable => {
                 let indices = lc.indices;
                 let dict = match lc.additional_keys.as_deref() {
+                    Some(Mark::Empty) | None => None,
                     Some(keys) => Some(Inner::try_from(keys)?),
-                    None => None,
                 };
                 Ok(LcNullable { indices, dict })
             }
