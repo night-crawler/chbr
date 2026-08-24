@@ -33,6 +33,17 @@ pub use reader::{FromBlock, FromVariant};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+fn mark_by_name<'a, T>(col_names: &[&str], columns: &'a [T], name: &str) -> Result<&'a T> {
+    col_names
+        .iter()
+        .zip(columns)
+        .find_map(|(column_name, column)| (*column_name == name).then_some(column))
+        .ok_or_else(|| {
+            cold_path();
+            Error::ColumnNotFound(name.to_owned())
+        })
+}
+
 pub(crate) trait ByteExt {
     fn rtrim_zeros(&self) -> &[u8];
 }
@@ -208,7 +219,12 @@ pub struct ParsedBlock<'a> {
     pub num_rows: usize,
 }
 
-impl ParsedBlock<'_> {
+impl<'a> ParsedBlock<'a> {
+    #[inline]
+    pub fn mark(&self, name: &str) -> Result<&mark::Mark<'a>> {
+        mark_by_name(&self.col_names, &self.markers, name)
+    }
+
     fn reorder(&mut self, order: &HashMap<&str, usize>) -> Result<()> {
         let num_cols = self.col_names.len();
         let col_names = std::mem::replace(&mut self.col_names, Vec::with_capacity(num_cols));

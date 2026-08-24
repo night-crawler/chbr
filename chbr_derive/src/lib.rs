@@ -61,12 +61,7 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
             quote! {
                 #ident: {
                     let name: &str = #name;
-                    let index = block
-                        .col_names
-                        .iter()
-                        .position(|n| *n == name)
-                        .ok_or_else(|| ::chbr::error::Error::ColumnNotFound(name.to_owned()))?;
-                    ::core::convert::TryFrom::try_from(&block.markers[index])?
+                    ::core::convert::TryFrom::try_from(block.mark(name)?)?
                 }
             }
         })
@@ -78,12 +73,7 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
             quote! {
                 #ident: {
                     let name: &str = #name;
-                    let index = nt
-                        .col_names
-                        .iter()
-                        .position(|n| *n == name)
-                        .ok_or_else(|| ::chbr::error::Error::ColumnNotFound(name.to_owned()))?;
-                    ::core::convert::TryFrom::try_from(&tuple.values[index])?
+                    ::core::convert::TryFrom::try_from(nt.mark(name)?)?
                 }
             }
         })
@@ -145,11 +135,6 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
             ) -> ::core::result::Result<Self, Self::Error> {
                 match mark {
                     ::chbr::mark::Mark::NamedTuple(nt) => {
-                        let ::chbr::mark::Mark::Tuple(tuple) = nt.tuple.as_ref() else {
-                            return ::core::result::Result::Err(
-                                ::chbr::error::Error::MismatchedType(nt.tuple.as_str(), "Tuple"),
-                            );
-                        };
                         ::core::result::Result::Ok(Self { #(#named_inits,)* })
                     }
                     ::chbr::mark::Mark::Tuple(tuple) => {

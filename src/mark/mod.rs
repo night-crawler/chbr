@@ -931,7 +931,16 @@ pub struct NamedTuple<'a> {
     pub tuple: Box<Mark<'a>>,
 }
 
-impl NamedTuple<'_> {
+impl<'a> NamedTuple<'a> {
+    #[inline]
+    pub fn mark(&self, name: &str) -> crate::Result<&Mark<'a>> {
+        let Mark::Tuple(tuple) = self.tuple.as_ref() else {
+            cold_path();
+            return Err(Error::MismatchedType(self.tuple.as_str(), "Tuple"));
+        };
+        crate::mark_by_name(&self.col_names, &tuple.values, name)
+    }
+
     #[inline]
     pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         if self.tuple.get(index)?.is_none() {
