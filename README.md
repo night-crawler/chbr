@@ -24,12 +24,17 @@ Keep in mind that it still needs the whole block in memory, and, for example, if
 you will need to allocate memory for all blocks and only then parse/process it. Since the original `clickhouse-rs`
 does not expose the RowBinary reader, I had to hack it to have some sort of apples-to-apples comparison.
 
+- `serde` means `clickhouse-rs` deserializer from a pinned version I need to update some day
+- `chbr` means manual read with column sorting
+- `chbr_derive` - derive a struct and use the generated `*Item` column to access
+- `chbr_derive_direct` read with try_read.
+
 ```bash
 cargo bench --bench refs
-serde                   time:   [26.130 ms 26.215 ms 26.307 ms]
-chbr                    time:   [14.579 ms 14.715 ms 14.859 ms]
-chbr_derive             time:   [10.937 ms 11.049 ms 11.167 ms]
-chbr_derive_direct      time:   [9.9814 ms 10.092 ms 10.210 ms]
+serde                   time:   [26.363 ms 26.447 ms 26.536 ms]
+chbr                    time:   [13.660 ms 13.760 ms 13.868 ms]
+chbr_derive             time:   [10.669 ms 10.767 ms 10.877 ms]
+chbr_derive_direct      time:   [9.6742 ms 9.7298 ms 9.7872 ms]
 ```
 
 ## Quick start
