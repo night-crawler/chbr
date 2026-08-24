@@ -9,7 +9,7 @@ use nom::{
     character::complete::{alphanumeric1, char, digit1, multispace0, multispace1},
     combinator::{map, map_res, opt, recognize},
     error::{ErrorKind, FromExternalError as _, ParseError},
-    multi::{many0, separated_list1},
+    multi::{many0, separated_list0, separated_list1},
     sequence::{delimited, pair, preceded, separated_pair},
 };
 
@@ -182,11 +182,81 @@ fn parse_geo_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     ))
     .parse(input)
 }
+fn parse_json_path(input: &[u8]) -> IResult<&[u8], &[u8]> {
+    alt((
+        delimited(char('`'), take_while1(|c| c != b'`'), char('`')),
+        take_while1(|c: u8| !c.is_ascii_whitespace() && c != b',' && c != b')'),
+    ))
+    .parse(input)
+}
+
+fn parse_json_setting(input: &[u8]) -> IResult<&[u8], Option<Field<'_>>> {
+    map(
+        pair(
+            alt((tag("max_dynamic_paths"), tag("max_dynamic_types"))),
+            preceded(ws(char('=')), digit1),
+        ),
+        |_| None,
+    )
+    .parse(input)
+}
+
+fn parse_json_skip(input: &[u8]) -> IResult<&[u8], Option<Field<'_>>> {
+    map(
+        preceded(
+            alt((tag("SKIP REGEXP"), tag("SKIP"))),
+            preceded(
+                multispace1,
+                alt((
+                    delimited(char('\''), take_while1(|c| c != b'\''), char('\'')),
+                    parse_json_path,
+                )),
+            ),
+        ),
+        |_| None,
+    )
+    .parse(input)
+}
+
+fn parse_json_typed_path(input: &[u8]) -> IResult<&[u8], Option<Field<'_>>> {
+    map(
+        separated_pair(parse_json_path, multispace1, parse_type),
+        |(name, typ)| {
+            Some(Field {
+                name: unsafe { std::str::from_utf8_unchecked(name) },
+                typ,
+            })
+        },
+    )
+    .parse(input)
+}
+
+fn parse_json(input: &[u8]) -> IResult<&[u8], Type<'_>> {
+    let (input, arguments) = preceded(
+        tag("JSON"),
+        opt(delimited(
+            ws(char('(')),
+            separated_list0(
+                ws(char(',')),
+                alt((parse_json_setting, parse_json_skip, parse_json_typed_path)),
+            ),
+            ws(char(')')),
+        )),
+    )
+    .parse(input)?;
+
+    let mut typed_paths = arguments
+        .unwrap_or_default()
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    typed_paths.sort_unstable_by_key(|field| field.name);
+    Ok((input, Type::Json(typed_paths)))
+}
 
 fn parse_other_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     alt((
         map(tag("Dynamic"), |_| Type::Dynamic),
-        map(tag("JSON"), |_| Type::Json),
         map(tag("SharedVariant"), |_| Type::SharedVariant),
     ))
     .parse(input)
@@ -388,6 +458,7 @@ pub fn parse_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
         parse_named_tuple,
         parse_enum8,
         parse_enum16,
+        parse_json,
         parse_other_primitives,
     ))
     .parse(input)
@@ -522,5 +593,39 @@ mod tests {
         let input = b"Enum16('Foo' = 1000, 'Bar' = 2000)";
         let (_, typ) = parse_type(input).unwrap();
         assert_eq!(typ, Type::Enum16(vec![("Foo", 1000), ("Bar", 2000)]));
+    }
+
+    #[test]
+    fn json_with_typed_paths_and_settings() {
+        let typ = Type::from_bytes(
+            b"JSON(max_dynamic_paths=2, `nested.name` String, a UInt64, \
+              max_dynamic_types=4, SKIP ignored, SKIP REGEXP '^private')",
+        )
+        .unwrap();
+        assert_eq!(
+            typ,
+            Type::Json(vec![
+                Field {
+                    name: "a",
+                    typ: Type::UInt64,
+                },
+                Field {
+                    name: "nested.name",
+                    typ: Type::String,
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn json_type_rejects_unparsed_arguments() {
+        assert!(Type::from_bytes(b"JSON(a UInt64) trailing").is_err());
+        assert!(Type::from_bytes(b"JSON(unknown_setting=1)").is_err());
+    }
+
+    #[test]
+    fn json_without_arguments() {
+        assert_eq!(Type::from_bytes(b"JSON").unwrap(), Type::Json(vec![]));
+        assert_eq!(Type::from_bytes(b"JSON()").unwrap(), Type::Json(vec![]));
     }
 }

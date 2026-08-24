@@ -57,8 +57,8 @@ impl<'a> Type<'a> {
                 let (input, header) = header::dynamic(ctx)?;
                 Ok((input, TypeHeader::Dynamic(header.into())))
             }
-            Type::Json => {
-                let (input, header) = header::json(ctx)?;
+            Type::Json(typed_paths) => {
+                let (input, header) = header::json(ctx, typed_paths)?;
                 Ok((input, TypeHeader::Json(header.into())))
             }
             Type::Nested(fields) => {
@@ -106,7 +106,7 @@ impl<'a> Type<'a> {
             Type::LowCardinality(inner) => lc(inner.as_ref(), &ctx),
             Type::Nullable(inner) => nullable(*inner, &ctx, header.into_nullable()),
             Type::Dynamic => dynamic(&ctx, header.into_dynamic()),
-            Type::Json => json(&ctx, header.into_json()),
+            Type::Json(_) => json(&ctx, header.into_json()),
             Type::Nested(fields) => nested(fields, ctx, header.into_nested()),
             Type::NamedTuple(fields) => named_tuple(fields, &ctx, header.into_nested()),
             _ => {
@@ -122,38 +122,79 @@ fn json<'a>(
     JsonHeader {
         paths,
         mut col_headers,
-        type_headers,
     }: JsonHeader<'a>,
 ) -> IResult<&'a [u8], Mark<'a>> {
     let mut input = ctx.input;
     let num_rows = ctx.num_rows;
 
-    for (col_header, type_header) in col_headers.iter_mut().zip(type_headers) {
-        let Some((discriminators, remainder)) = input.split_at_checked(num_rows) else {
+    for col_header in &mut col_headers {
+        if col_header.is_typed {
+            let Some(typ) = col_header.types.pop() else {
+                cold_path();
+                return Err(Error::CorruptedData(
+                    "typed JSON path is missing its type".to_owned(),
+                ));
+            };
+            let Some(type_header) = col_header.type_headers.pop() else {
+                cold_path();
+                return Err(Error::CorruptedData(
+                    "typed JSON path is missing its type header".to_owned(),
+                ));
+            };
+            (input, col_header.mark) = typ.decode(ctx.fork(input), type_header)?;
+            continue;
+        }
+
+        let Some((raw_discriminators, remainder)) = input.split_at_checked(num_rows) else {
             cold_path();
             return Err(Error::Length(num_rows));
         };
         input = remainder;
 
-        let offsets = &mut col_header.offsets;
-
-        offsets.resize(num_rows, 0);
-        let mut counter = 0usize;
-
-        for (discriminator, offset) in discriminators.iter().copied().zip(offsets.iter_mut()) {
-            *offset = counter;
-            if discriminator != 255 {
-                counter += 1;
+        let mut discriminators = Vec::with_capacity(num_rows);
+        let mut offsets = vec![0usize; num_rows];
+        let mut row_counts = vec![0usize; col_header.types.len()];
+        for (raw_discriminator, offset) in
+            raw_discriminators.iter().copied().zip(offsets.iter_mut())
+        {
+            let discriminator = usize::from(raw_discriminator);
+            discriminators.push(discriminator);
+            if raw_discriminator == 255 {
+                continue;
             }
+            let Some(row_count) = row_counts.get_mut(discriminator) else {
+                cold_path();
+                return Err(Error::CorruptedData(format!(
+                    "JSON path discriminator {discriminator} out of bounds for {} types",
+                    col_header.types.len()
+                )));
+            };
+            *offset = *row_count;
+            *row_count += 1;
         }
 
-        let marker;
-        (input, marker) = col_header
-            .typ
-            .clone()
-            .decode(ctx.fork(input).with_num_rows(counter), type_header)?;
-        col_header.mark = marker;
-        col_header.discriminators = discriminators;
+        let mut columns = Vec::with_capacity(col_header.types.len());
+        for (((index, typ), type_header), read_rows) in col_header
+            .types
+            .drain(..)
+            .enumerate()
+            .zip(col_header.type_headers.drain(..))
+            .zip(row_counts)
+        {
+            if matches!(typ, Type::SharedVariant) {
+                columns.push(Mark::Empty);
+                continue;
+            }
+            let marker;
+            (input, marker) = typ.decode(ctx.fork(input).with_num_rows(read_rows), type_header)?;
+            debug!("Decoded JSON path type {index} with {read_rows} rows");
+            columns.push(marker);
+        }
+        col_header.mark = Mark::Dynamic(Dynamic {
+            offsets,
+            discriminators,
+            columns,
+        });
     }
 
     let marker = Mark::Json(Json {
@@ -161,8 +202,17 @@ fn json<'a>(
         headers: col_headers,
     });
 
-    // https://github.com/ClickHouse/clickhouse-go/blob/71a2b475e899afe9626f40af513bcf25aa3098a2/lib/column/json.go#L569-L572
-    let (input, _shared_data) = take_elements(input, num_rows, 8, "JSON shared data size")?;
+    let (input, shared_data_offsets) =
+        take_elements(input, num_rows, 8, "JSON shared data offsets")?;
+    if shared_data_offsets
+        .chunks_exact(8)
+        .any(|offset| offset != [0; 8])
+    {
+        cold_path();
+        return Err(Error::NotImplemented(
+            "non-empty JSON shared data".to_owned(),
+        ));
+    }
 
     Ok((input, marker))
 }

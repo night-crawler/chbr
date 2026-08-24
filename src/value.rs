@@ -1700,18 +1700,14 @@ impl<'a> Iterator for JsonIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             let header = self.mark.headers.get(self.path_index)?;
-
-            if header.discriminators.get(self.index)? == &255 {
-                self.path_index += 1;
-                continue;
-            }
-
             let path = self.mark.paths.get(self.path_index).copied()?;
-            let index = header.offsets.get(self.index).copied()?;
-            let value = header.mark.get(index).transpose()?;
             self.path_index += 1;
 
-            break Some(value.map(|value| (path, value)));
+            match header.mark.get(self.index) {
+                Ok(Some(value)) => break Some(Ok((path, value))),
+                Ok(None) => continue,
+                Err(error) => break Some(Err(error)),
+            }
         }
     }
 

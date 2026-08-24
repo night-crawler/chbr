@@ -755,6 +755,28 @@ impl<'a> LcIndices<'a> {
     }
 
     #[inline]
+    pub const fn is_empty(self) -> bool {
+        match self {
+            Self::Empty => true,
+            Self::U8(indices) => indices.is_empty(),
+            Self::U16(indices) => indices.is_empty(),
+            Self::U32(indices) => indices.is_empty(),
+            Self::U64(indices) => indices.is_empty(),
+        }
+    }
+
+    #[inline]
+    pub fn all_zero(self) -> bool {
+        match self {
+            Self::Empty => true,
+            Self::U8(indices) => indices.iter().all(|&value| value == 0),
+            Self::U16(indices) => indices.iter().all(|value| value.get() == 0),
+            Self::U32(indices) => indices.iter().all(|value| value.get() == 0),
+            Self::U64(indices) => indices.iter().all(|value| value.get() == 0),
+        }
+    }
+
+    #[inline]
     pub fn slice(self, range: Range<usize>) -> crate::Result<Value<'a>> {
         match self {
             Self::Empty => {
