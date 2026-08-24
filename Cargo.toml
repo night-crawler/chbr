@@ -101,3 +101,7 @@ clippy.unnested_or_patterns = "deny"
 clippy.unused_trait_names = "deny"
 clippy.missing_const_for_fn = "deny"
 rust.unfulfilled_lint_expectations = "deny"
+
+[workspace]
+members = ["examples"]
+resolver = "3"

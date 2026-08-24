@@ -1,0 +1,13 @@
+[package]
+name = "chbr-examples"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+chbr = { path = ".." }
+chrono = "0.4"
+chrono-tz = "0.10"
+half = "2.6"
+rust_decimal = "1.37.1"
+uuid = "1.16"

@@ -125,17 +125,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-See same example in [`examples/basic.rs`](examples/basic.rs), and `testdata/example.native`.
+The standalone examples crate keeps both access styles as executable tests:
+
+- [`examples/tests/basic.rs`](examples/tests/basic.rs) uses `Mark` accessors directly.
+- The other files in [`examples/tests`](examples/tests) exercise one schema apiece through
+  `#[derive(FromBlock)]` (and `#[derive(FromVariant)]` for variant schemas).
 
 ```sh
-cargo run --example basic
-```
-
-Output:
-
-```text
-id=1 tags=["fast", "cpu"] attrs=[("region", "eu"), ("host", "a1")] payload=string: hello
-id=2 tags=[] attrs=[("region", "us")] payload=int: 42
-id=3 tags=["gpu"] attrs=[] payload=array: [1, 2, 3]
+cargo test -p chbr-examples
 ```
 
