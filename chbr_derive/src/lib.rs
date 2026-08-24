@@ -16,6 +16,37 @@ struct ColSpec {
     name: TokenStream2,
 }
 
+/// Derives `chbr::reader::FromBlock` for a named struct of column readers.
+///
+/// # Example
+///
+/// ```ignore
+/// use chbr::reader::{Array, I64, Map, Str};
+/// use chbr::{FromBlock, ParsedBlock};
+///
+/// const ID_COLUMN: &str = "id";
+///
+/// #[derive(FromBlock)]
+/// struct MapRow<'a> {
+///     #[col(name = ID_COLUMN)]
+///     id: I64<'a>,
+///     #[col(name = "arr_map")]
+///     maps: Array<'a, Map<'a, Str<'a>, Str<'a>>>,
+/// }
+///
+/// fn read(block: &ParsedBlock<'_>) -> chbr::Result<()> {
+///     let mut total_pairs = 0;
+///     for (row_index, row) in MapRow::rows(block)?.enumerate() {
+///         let row = row?;
+///         assert_eq!(row.id, i64::try_from(row_index)?);
+///         for map in row.maps {
+///             total_pairs += map?.count();
+///         }
+///     }
+///     assert!(total_pairs > 0);
+///     Ok(())
+/// }
+/// ```
 #[proc_macro_derive(FromBlock, attributes(col))]
 pub fn derive_from_block(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -25,6 +56,30 @@ pub fn derive_from_block(input: TokenStream) -> TokenStream {
         .into()
 }
 
+/// Derives `chbr::reader::FromVariant` for an enum representing one ClickHouse `Variant` value.
+///
+/// # Example
+///
+/// ```ignore
+/// use chbr::reader::{Array, ArrayIter, I64, TryRead as _, Variant};
+/// use chbr::FromVariant;
+///
+/// // This order matches Variant(Array(Int64), Int64, String).
+/// #[derive(FromVariant)]
+/// enum Value<'a> {
+///     #[col(reader = Array<'a, I64<'a>>)]
+///     Array(ArrayIter<'a, I64<'a>>),
+///     Integer(i64),
+///     String(&'a str),
+/// }
+///
+/// let reader: Variant<Value<'_>> = Variant::try_from(mark)?;
+/// match reader.try_read(row_index)? {
+///     Value::Array(values) => println!("{:?}", values.try_collect_vec()?),
+///     Value::Integer(value) => println!("{value}"),
+///     Value::String(value) => println!("{value}"),
+/// }
+/// ```
 #[proc_macro_derive(FromVariant, attributes(col))]
 pub fn derive_from_variant(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
