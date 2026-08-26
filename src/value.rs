@@ -183,7 +183,7 @@ pub enum Value<'a> {
 }
 
 impl Value<'_> {
-    const fn as_str(&self) -> &'static str {
+    pub(crate) const fn as_str(&self) -> &'static str {
         match self {
             Value::Empty => "Empty",
             Value::Bool(_) => "Bool",
@@ -208,7 +208,8 @@ impl Value<'_> {
             Value::Decimal256(_, _) => "Decimal256",
             Value::String(_) => "String",
             Value::Uuid(_) => "Uuid",
-            Value::Date(_) | Value::Date32(_) => "Date",
+            Value::Date(_) => "Date",
+            Value::Date32(_) => "Date32",
             Value::DateTime(_, _) => "DateTime",
             Value::DateTime64(_, _) => "DateTime64",
             Value::Ipv4(_) => "Ipv4",
@@ -252,8 +253,8 @@ impl Value<'_> {
             Value::NamedTuple { .. } => "NamedTuple",
             Value::NamedTupleSlice { .. } => "NamedTupleSlice",
             Value::FixedStringSlice { .. } => "FixedStringSlice",
-            Value::Enum8Slice { .. } => "Enum8SliceIterator",
-            Value::Enum16Slice { .. } => "Enum16SliceIterator",
+            Value::Enum8Slice { .. } => "Enum8Slice",
+            Value::Enum16Slice { .. } => "Enum16Slice",
             Value::BFloat16Slice(_) => "BFloat16Slice",
             Value::Json { .. } => "Json",
             Value::JsonSlice { .. } => "JsonSlice",
@@ -1667,101 +1668,6 @@ impl<'a> Iterator for Enum16SliceIterator<'a> {
 }
 
 impl ExactSizeIterator for Enum16SliceIterator<'_> {}
-
-pub struct JsonIterator<'a> {
-    mark: &'a Json<'a>,
-    index: usize,
-    path_index: usize,
-}
-
-impl<'a> TryFrom<Value<'a>> for JsonIterator<'a> {
-    type Error = Error;
-
-    #[inline(always)]
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::Json { mark, index } => Ok(Self {
-                mark,
-                index,
-                path_index: 0,
-            }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "JsonIterator"))
-            }
-        }
-    }
-}
-
-impl<'a> Iterator for JsonIterator<'a> {
-    type Item = Result<(&'a str, Value<'a>), Error>;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let header = self.mark.headers.get(self.path_index)?;
-            let path = self.mark.paths.get(self.path_index).copied()?;
-            self.path_index += 1;
-
-            match header.mark.get(self.index) {
-                Ok(Some(value)) => break Some(Ok((path, value))),
-                Ok(None) => continue,
-                Err(error) => break Some(Err(error)),
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.mark.headers.len() - self.path_index;
-        (0, Some(remaining))
-    }
-}
-
-pub struct JsonSliceIterator<'a> {
-    mark: &'a Json<'a>,
-    range: Range<usize>,
-}
-
-impl<'a> TryFrom<Value<'a>> for JsonSliceIterator<'a> {
-    type Error = Error;
-
-    #[inline(always)]
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::JsonSlice { mark, range } => Ok(Self {
-                mark,
-                range: range.into(),
-            }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "JsonSliceIterator"))
-            }
-        }
-    }
-}
-
-impl<'a> Iterator for JsonSliceIterator<'a> {
-    type Item = JsonIterator<'a>;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        let index = self.range.next()?;
-
-        Some(JsonIterator {
-            mark: self.mark,
-            index,
-            path_index: 0,
-        })
-    }
-
-    #[inline(always)]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.range.size_hint()
-    }
-}
-
-impl ExactSizeIterator for JsonSliceIterator<'_> {}
 
 pub struct VariantSliceIterator<'a> {
     mark: &'a Variant<'a>,

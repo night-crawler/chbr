@@ -1,12 +1,14 @@
+mod json;
+
+pub use json::Json;
+
 use crate::{
     Bf16Data, ByteExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data,
     Decimal64Data, Decimal128Data, Decimal256Data, Error, I256, Ipv4Data, Ipv6Data, U256, UuidData,
     macros::{define_int_getters, define_ip_getters, define_opt_getters, define_slice_fns},
     slice::ByteView,
-    types::{JsonColumnHeader, OffsetIndexPair as _, Offsets},
-    value::{
-        LowCardinalitySliceIterator, MapIterator, SliceUsizeIterator, Value, Value::JsonSlice,
-    },
+    types::{OffsetIndexPair as _, Offsets},
+    value::{LowCardinalitySliceIterator, MapIterator, SliceUsizeIterator, Value},
     zc,
 };
 use chrono::{DateTime as ChronoDateTime, TimeZone};
@@ -219,7 +221,7 @@ impl<'a> Mark<'a> {
             Mark::Nested(n) => n.get(index),
             Mark::NamedTuple(n) => n.get(index),
             Mark::Dynamic(d) => d.get(index),
-            Mark::Json(j) => Ok(Some(Value::Json { mark: j, index })),
+            Mark::Json(j) => Ok(j.get(index)),
         }
     }
 
@@ -397,10 +399,7 @@ impl<'a> Mark<'a> {
                 mark,
                 range: idx.try_into()?,
             }),
-            Mark::Json(mark) => Ok(JsonSlice {
-                mark,
-                range: idx.try_into()?,
-            }),
+            Mark::Json(mark) => mark.slice(idx),
         }
     }
 
@@ -970,12 +969,6 @@ impl<'a> NamedTuple<'a> {
         }
         Ok(Some(Value::NamedTuple { mark: self, index }))
     }
-}
-
-#[derive(Debug)]
-pub struct Json<'a> {
-    pub paths: Vec<&'a str>,
-    pub headers: Vec<JsonColumnHeader<'a>>,
 }
 
 #[derive(Debug)]

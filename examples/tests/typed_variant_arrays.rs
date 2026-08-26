@@ -1,8 +1,7 @@
 mod common;
 
 use chbr::parse::block::parse_single;
-use chbr::reader::{Array, ArrayIter, I64, U64, Variant};
-use chbr::value::{JsonIterator, Value};
+use chbr::reader::{Array, ArrayIter, I64, JsonValue, U64, Variant};
 use chbr::{FromBlock, FromVariant};
 
 // Variant alternatives follow ClickHouse's canonical type order:
@@ -10,7 +9,7 @@ use chbr::{FromBlock, FromVariant};
 #[derive(FromVariant)]
 enum VariantValue<'a> {
     Array(ArrayIter<'a, U64<'a>>),
-    Json(Value<'a>),
+    Json(JsonValue<'a>),
     String(&'a str),
     Integer(u64),
 }
@@ -58,7 +57,7 @@ fn reads_variant_arrays_into_typed_values() -> Result<(), Box<dyn std::error::Er
         let Some(VariantValue::Json(json)) = values.next().transpose()? else {
             panic!("expected JSON at row {index}");
         };
-        let _: JsonIterator = json.try_into()?;
+        let _ = json.paths();
         assert!(values.next().is_none());
     }
 

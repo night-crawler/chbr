@@ -6,12 +6,12 @@ use crate::{
     Bf16Data,
     common::load,
     parse::block::parse_single,
+    reader::{JsonIterator, JsonSliceIterator},
     value::{
         ArraySliceIterator, BoolSliceIterator, DynamicSliceIterator, Enum8SliceIterator,
-        Enum16SliceIterator, FixedStringSliceIterator, JsonIterator, JsonSliceIterator,
-        LowCardinalitySliceIterator, MapIterator, MapSliceIterator, NestedIterator,
-        NestedSliceIterator, NullableSliceIterator, TupleSliceIterator, Value,
-        VariantSliceIterator,
+        Enum16SliceIterator, FixedStringSliceIterator, LowCardinalitySliceIterator, MapIterator,
+        MapSliceIterator, NestedIterator, NestedSliceIterator, NullableSliceIterator,
+        TupleSliceIterator, Value, VariantSliceIterator,
     },
 };
 use chbr::zc;

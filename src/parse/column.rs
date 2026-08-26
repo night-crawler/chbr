@@ -197,10 +197,7 @@ fn json<'a>(
         });
     }
 
-    let marker = Mark::Json(Json {
-        paths,
-        headers: col_headers,
-    });
+    let marker = Mark::Json(Json::new(paths, col_headers, num_rows)?);
 
     let (input, shared_data_offsets) =
         take_elements(input, num_rows, 8, "JSON shared data offsets")?;
