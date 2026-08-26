@@ -2,8 +2,8 @@ mod common;
 
 use chbr::FromBlock;
 use chbr::parse::block::parse_single;
+use chbr::reader::JsonIterator;
 use chbr::reader::{Array, I64, Value};
-use chbr::value::JsonIterator;
 
 #[derive(FromBlock)]
 struct Row<'a> {

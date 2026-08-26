@@ -2,11 +2,13 @@ use std::hint::cold_path;
 use std::ops::Range;
 
 mod composite;
+mod json;
 mod scalar;
 #[cfg(test)]
 mod tests;
 
 pub use composite::*;
+pub use json::*;
 pub use scalar::*;
 
 /// Reads values by index from an underlying storage, i.e., from a [`crate::Mark`].
