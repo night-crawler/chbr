@@ -5,25 +5,28 @@ use chrono_tz::{Tz, TzOffset};
 
 const EPOCH_DATE: NaiveDate = NaiveDate::from_yo_opt(1970, 1).expect("1970 day 1 is a valid date");
 
-static UTC_TZ_OFFSET: LazyLock<TzOffset> =
-    LazyLock::new(|| Tz::UTC.offset_from_utc_datetime(&DateTime::UNIX_EPOCH.naive_utc()));
+const UTC_ALIASES: [Tz; 11] = [
+    Tz::UTC,
+    Tz::GMT,
+    Tz::Zulu,
+    Tz::Etc__UTC,
+    Tz::Etc__GMT,
+    Tz::Universal,
+    Tz::UCT,
+    Tz::Etc__Zulu,
+    Tz::Etc__Universal,
+    Tz::Etc__GMTPlus0,
+    Tz::Etc__GMTMinus0,
+];
+
+static UTC_ALIAS_OFFSETS: LazyLock<[TzOffset; UTC_ALIASES.len()]> = LazyLock::new(|| {
+    UTC_ALIASES.map(|tz| tz.offset_from_utc_datetime(&DateTime::UNIX_EPOCH.naive_utc()))
+});
 
 #[inline]
-const fn is_utc_alias(tz: Tz) -> bool {
-    matches!(
-        tz,
-        Tz::UTC
-            | Tz::Zulu
-            | Tz::Universal
-            | Tz::UCT
-            | Tz::Etc__UTC
-            | Tz::Etc__Zulu
-            | Tz::Etc__Universal
-            | Tz::GMT
-            | Tz::Etc__GMT
-            | Tz::Etc__GMTPlus0
-            | Tz::Etc__GMTMinus0
-    )
+fn utc_alias_offset(tz: Tz) -> Option<TzOffset> {
+    let idx = UTC_ALIASES.iter().position(|&alias| alias == tz)?;
+    Some(UTC_ALIAS_OFFSETS[idx])
 }
 
 #[inline(always)]
@@ -46,11 +49,12 @@ pub fn datetime32(secs: u32) -> DateTime<Utc> {
 #[inline]
 pub fn datetime32_tz(secs: u32, tz: Tz) -> DateTime<Tz> {
     let dt_utc = datetime32(secs);
-    if is_utc_alias(tz) {
-        return DateTime::<Tz>::from_naive_utc_and_offset(dt_utc.naive_utc(), *UTC_TZ_OFFSET);
+    match utc_alias_offset(tz) {
+        Some(offset) => DateTime::from_naive_utc_and_offset(dt_utc.naive_utc(), offset),
+        None => dt_utc.with_timezone(&tz),
     }
-    dt_utc.with_timezone(&tz)
 }
+
 #[inline(always)]
 pub fn datetime64(timestamp: i64, precision: u8) -> Option<DateTime<Utc>> {
     let pow = 10i64.checked_pow(u32::from(precision))?;
@@ -64,11 +68,55 @@ pub fn datetime64(timestamp: i64, precision: u8) -> Option<DateTime<Utc>> {
 #[inline]
 pub fn datetime64_tz(timestamp: i64, precision: u8, tz: Tz) -> Option<DateTime<Tz>> {
     let dt_utc = datetime64(timestamp, precision)?;
-    if is_utc_alias(tz) {
-        return Some(DateTime::<Tz>::from_naive_utc_and_offset(
-            dt_utc.naive_utc(),
-            *UTC_TZ_OFFSET,
-        ));
+    Some(match utc_alias_offset(tz) {
+        Some(offset) => DateTime::from_naive_utc_and_offset(dt_utc.naive_utc(), offset),
+        None => dt_utc.with_timezone(&tz),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SECS: u32 = 1_700_000_000;
+
+    #[test]
+    fn datetime32_tz_preserves_zone_identity() {
+        for tz in [
+            Tz::UTC,
+            Tz::Zulu,
+            Tz::Universal,
+            Tz::UCT,
+            Tz::Etc__UTC,
+            Tz::GMT,
+            Tz::Etc__GMT,
+            Tz::Etc__GMTPlus0,
+        ] {
+            let actual = datetime32_tz(SECS, tz);
+            assert_eq!(actual.timezone(), tz, "zone identity lost for {tz}");
+        }
     }
-    Some(dt_utc.with_timezone(&tz))
+
+    #[test]
+    fn datetime32_tz_matches_with_timezone() {
+        for tz in [Tz::GMT, Tz::Etc__GMT, Tz::Zulu] {
+            let actual = datetime32_tz(SECS, tz);
+            let expected = datetime32(SECS).with_timezone(&tz);
+            assert_eq!(
+                actual.to_string(),
+                expected.to_string(),
+                "fast path diverges from with_timezone for {tz}"
+            );
+        }
+    }
+
+    #[test]
+    fn datetime32_tz_gmt_abbreviation() {
+        let actual = datetime32_tz(SECS, Tz::GMT);
+        assert_eq!(
+            actual.format("%Z").to_string(),
+            "GMT",
+            "GMT column rendered with the wrong abbreviation"
+        );
+    }
 }
