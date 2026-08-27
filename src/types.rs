@@ -47,23 +47,27 @@ impl OffsetIndexPair for Offsets<'_> {
         let Some(value) = self.get(index).map(|v| v.get()) else {
             return Ok(None);
         };
-        let value = T::try_from(value).map_err(|_| {
-            cold_path();
-            crate::Error::Overflow(value.to_string())
-        })?;
-        Ok(Some(value))
+        match T::try_from(value) {
+            Ok(value) => Ok(Some(value)),
+            Err(_) => {
+                cold_path();
+                Err(crate::Error::Overflow(value.to_string()))
+            }
+        }
     }
 
     fn last_or_default(&self) -> crate::Result<usize> {
-        if let Some(last) = self.last().map(|last| last.get()) {
-            let last = usize::try_from(last).map_err(|_| {
+        if let Some(last) = self.last()
+            && let last = last.get()
+        {
+            let Ok(last) = usize::try_from(last) else {
                 cold_path();
-                crate::Error::Overflow(last.to_string())
-            })?;
-            Ok(last)
-        } else {
-            Ok(usize::default())
+                return Err(crate::Error::Overflow(last.to_string()));
+            };
+            return Ok(last);
         }
+
+        Ok(0)
     }
 }
 
@@ -335,7 +339,10 @@ impl<'a> Type<'a> {
 
     #[inline]
     pub fn from_bytes(s: &[u8]) -> Result<Type<'_>, crate::Error> {
-        let (remainder, typ) = parse_type(s).map_err(|e| crate::Error::Parse(e.to_string()))?;
+        let (remainder, typ) = match parse_type(s) {
+            Ok(parsed) => parsed,
+            Err(e) => return Err(crate::Error::Parse(e.to_string())),
+        };
         if !remainder.trim_ascii().is_empty() {
             return Err(crate::Error::Parse(format!(
                 "Unparsed remainder: {remainder:?}"

@@ -178,7 +178,7 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for LcNullable<'a, Inner> {
 #[derive(Clone, Copy)]
 pub struct Array<'a, Inner: TryRead<'a>> {
     pub offsets: &'a Offsets<'a>,
-    pub values: Inner,
+    pub values: Option<Inner>,
 }
 
 impl<'a, Inner> TryFrom<&'a Mark<'a>> for Array<'a, Inner>
@@ -190,10 +190,22 @@ where
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
-            Mark::Array(arr) => Ok(Array {
-                offsets: &arr.offsets,
-                values: Inner::try_from(arr.values.as_ref())?,
-            }),
+            Mark::Array(arr) => {
+                let values = match arr.values.as_ref() {
+                    Mark::Empty if arr.offsets.last_or_default()? == 0 => None,
+                    Mark::Empty => {
+                        cold_path();
+                        return Err(Error::CorruptedData(
+                            "Array values are missing for non-empty offsets".to_owned(),
+                        ));
+                    }
+                    values => Some(Inner::try_from(values)?),
+                };
+                Ok(Array {
+                    offsets: &arr.offsets,
+                    values,
+                })
+            }
             // `Nested(...)` is stored as an array of tuples.
             Mark::Nested(n) => Self::try_from(n.array_of_tuples.as_ref()),
             other => {
@@ -222,7 +234,7 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for Array<'a, Inner> {
 }
 
 pub struct ArrayIter<'a, Inner: TryRead<'a>> {
-    inner: Inner,
+    inner: Option<Inner>,
     range: Range<usize>,
     _marker: std::marker::PhantomData<&'a ()>,
 }
@@ -244,7 +256,13 @@ impl<'a, Inner: TryRead<'a>> Iterator for ArrayIter<'a, Inner> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.range.next()?;
-        Some(self.inner.try_read(i))
+        let Some(inner) = self.inner else {
+            cold_path();
+            return Some(Err(Error::CorruptedData(
+                "Array values are missing for a non-empty range".to_owned(),
+            )));
+        };
+        Some(inner.try_read(i))
     }
 
     #[inline(always)]
@@ -267,7 +285,16 @@ impl<'a, Inner: ReadSlice<'a>> ArrayIter<'a, Inner> {
     /// The contiguous backing slice for this array cell.
     #[inline]
     pub fn try_as_slice(&self) -> crate::Result<&'a [Inner::Elem]> {
-        self.inner.try_read_slice(self.range.clone())
+        match self.inner {
+            Some(inner) => inner.try_read_slice(self.range.clone()),
+            None if self.range.is_empty() => Ok(&[]),
+            None => {
+                cold_path();
+                Err(Error::CorruptedData(
+                    "Array values are missing for a non-empty range".to_owned(),
+                ))
+            }
+        }
     }
 }
 
@@ -331,11 +358,15 @@ impl<'a, K: TryRead<'a>, V: TryRead<'a>> Iterator for MapIter<'a, K, V> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.range.next()?;
-        Some(
-            self.keys
-                .try_read(i)
-                .and_then(|k| Ok((k, self.values.try_read(i)?))),
-        )
+        let key = match self.keys.try_read(i) {
+            Ok(key) => key,
+            Err(error) => return Some(Err(error)),
+        };
+        let value = match self.values.try_read(i) {
+            Ok(value) => value,
+            Err(error) => return Some(Err(error)),
+        };
+        Some(Ok((key, value)))
     }
 
     #[inline(always)]

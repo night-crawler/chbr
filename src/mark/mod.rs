@@ -448,19 +448,14 @@ impl<'a> Mark<'a> {
                 Ok(value)
             }
             Mark::DateTime64(d) => {
-                let value = d
-                    .data
-                    .get(index)
-                    .map(|dt| {
-                        dt.with_tz_and_precision(d.tz, d.precision).ok_or_else(|| {
-                            cold_path();
-                            Error::Overflow("DateTime64 value out of range".to_owned())
-                        })
-                    })
-                    .transpose()?
-                    .map(|dt| dt.with_timezone(&tz));
-
-                Ok(value)
+                let Some(dt) = d.data.get(index) else {
+                    return Ok(None);
+                };
+                let Some(dt) = dt.with_tz_and_precision(d.tz, d.precision) else {
+                    cold_path();
+                    return Err(Error::Overflow("DateTime64 value out of range".to_owned()));
+                };
+                Ok(Some(dt.with_timezone(&tz)))
             }
             _ => {
                 cold_path();
@@ -834,7 +829,11 @@ impl Iterator for LcIndexIter<'_> {
             Self::U16(iter) => usize::from(iter.next()?.get()),
             Self::U32(iter) => iter.next()?.get() as usize,
             Self::U64(iter) => {
-                return Some(usize::try_from(iter.next()?.get()).map_err(Error::from));
+                let value = iter.next()?.get();
+                return match usize::try_from(value) {
+                    Ok(value) => Some(Ok(value)),
+                    Err(error) => Some(Err(Error::from(error))),
+                };
             }
         };
         Some(Ok(value))

@@ -287,14 +287,16 @@ impl<'a> TryRead<'a> for Enum8<'a> {
             cold_path();
             return Err(Error::IndexOutOfBounds(idx, "Enum8"));
         };
-        let pos = self
+        let Ok(pos) = self
             .0
             .variants
             .binary_search_by_key(&variant, |(_, id)| *id)
-            .map_err(|_| {
-                cold_path();
-                Error::CorruptedData(format!("invalid Enum8 discriminant: {variant}"))
-            })?;
+        else {
+            cold_path();
+            return Err(Error::CorruptedData(format!(
+                "invalid Enum8 discriminant: {variant}"
+            )));
+        };
         Ok(self.0.variants[pos].0)
     }
 }
@@ -327,14 +329,16 @@ impl<'a> TryRead<'a> for Enum16<'a> {
             return Err(Error::IndexOutOfBounds(idx, "Enum16"));
         };
         let variant = variant.get();
-        let pos = self
+        let Ok(pos) = self
             .0
             .variants
             .binary_search_by_key(&variant, |(_, id)| *id)
-            .map_err(|_| {
-                cold_path();
-                Error::CorruptedData(format!("invalid Enum16 discriminant: {variant}"))
-            })?;
+        else {
+            cold_path();
+            return Err(Error::CorruptedData(format!(
+                "invalid Enum16 discriminant: {variant}"
+            )));
+        };
         Ok(self.0.variants[pos].0)
     }
 }
