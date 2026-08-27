@@ -5,6 +5,7 @@ use testresult::TestResult;
 use super::*;
 use crate::common::load;
 use crate::error::Error;
+use crate::mark;
 use crate::parse::block::parse_single;
 use crate::{FromBlock, FromVariant};
 
@@ -70,9 +71,9 @@ fn array_all_empty_rows_from_fixture() -> TestResult {
 #[test]
 fn array_empty_values_plain_inner() -> TestResult {
     let offsets = [0_u8; 24];
-    let mark = crate::mark::Mark::Array(crate::mark::Array {
+    let mark = mark::Mark::Array(mark::Array {
         offsets: crate::slice::ByteView::try_from(offsets.as_slice())?,
-        values: Box::new(crate::mark::Mark::Empty),
+        values: Box::new(mark::Mark::Empty),
     });
 
     let reader: Array<Str> = Array::try_from(&mark)?;
@@ -644,11 +645,11 @@ fn derive_variant_in_from_block() -> TestResult {
 #[test]
 fn low_cardinality_reader_rejects_readable_indices_without_dictionary() {
     let indices = [1_u8];
-    let mark = crate::mark::Mark::LowCardinality(crate::mark::LowCardinality {
+    let mark = mark::Mark::LowCardinality(mark::lc::LowCardinality {
         is_nullable: false,
-        indices: crate::mark::LcIndices::U8(&indices),
+        indices: mark::lc::Indices::U8(&indices),
         global_dictionary: None,
-        additional_keys: Some(Box::new(crate::mark::Mark::Empty)),
+        additional_keys: Some(Box::new(mark::Mark::Empty)),
     });
 
     assert!(matches!(
@@ -660,9 +661,9 @@ fn low_cardinality_reader_rejects_readable_indices_without_dictionary() {
 #[test]
 fn nullable_low_cardinality_reader_allows_missing_unused_dictionary() -> TestResult {
     let indices = [0_u8];
-    let mark = crate::mark::Mark::LowCardinality(crate::mark::LowCardinality {
+    let mark = mark::Mark::LowCardinality(mark::lc::LowCardinality {
         is_nullable: true,
-        indices: crate::mark::LcIndices::U8(&indices),
+        indices: mark::lc::Indices::U8(&indices),
         global_dictionary: None,
         additional_keys: None,
     });

@@ -5,19 +5,18 @@ use std::{
     ops::Range,
 };
 
+use crate::zc;
 use crate::{
     Bf16Data, ByteExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data,
     Decimal64Data, Decimal128Data, Decimal256Data, I256, Ipv4Data, Ipv6Data, TinyRange, U256,
     UuidData,
     error::Error,
     mark::{
-        Array, DateTime, DateTime64, Decimal32, Decimal64, Decimal128, Decimal256, Dynamic, Enum8,
-        Enum16, FixedString, Json, LowCardinality, Map, Mark, NamedTuple, Nested, Nullable, Tuple,
-        Variant,
+        self, Array, DateTime, DateTime64, Decimal32, Decimal64, Decimal128, Decimal256, Dynamic,
+        Enum8, Enum16, FixedString, Json, Map, Mark, NamedTuple, Nested, Nullable, Tuple, Variant,
     },
     types::{OffsetIndexPair as _, Offsets},
 };
-use chbr::zc;
 use chrono_tz::Tz;
 use half::bf16;
 use rust_decimal::Decimal;
@@ -108,7 +107,7 @@ pub enum Value<'a> {
 
     LowCardinalitySlice {
         range: TinyRange,
-        mark: &'a LowCardinality<'a>,
+        mark: &'a mark::lc::LowCardinality<'a>,
     },
 
     ArraySlice {

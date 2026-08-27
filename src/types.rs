@@ -1,6 +1,7 @@
 use std::hint::cold_path;
 
 use crate::mark::BoolView;
+use crate::zc;
 use crate::{
     mark::{
         DateTime, DateTime64, Decimal32, Decimal64, Decimal128, Decimal256, Enum8, Enum16,
@@ -9,7 +10,6 @@ use crate::{
     parse::typ::parse_type,
     slice::ByteView,
 };
-use chbr::zc;
 pub use chrono_tz::Tz;
 
 pub type Offsets<'a> = ByteView<'a, zc::U64>;

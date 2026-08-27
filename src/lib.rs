@@ -28,7 +28,7 @@ mod zc;
 pub use chbr_derive::{FromBlock, FromVariant};
 pub use error::Error;
 // Same name as the derive macro on purpose (macro vs type namespace):
-// `use chbr::FromBlock;` imports both, serde-style.
+// `use crate::FromBlock;` imports both, serde-style.
 pub use reader::{FromBlock, FromVariant};
 
 pub type Result<T> = std::result::Result<T, Error>;
