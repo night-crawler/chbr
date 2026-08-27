@@ -656,6 +656,7 @@ macro_rules! impl_get {
             #[inline]
             pub const fn get(&'a self, index: usize) -> Option<Value<'a>> {
                 if self.data.len() <= index {
+                    cold_path();
                     None
                 } else {
                     Some(Value::$variant(index, self))
