@@ -358,12 +358,13 @@ fn parse_col_reader(variant: &Variant) -> Result<Option<syn::Type>, syn::Error> 
 }
 
 fn extract_lifetime(input: &DeriveInput) -> Result<&Lifetime, syn::Error> {
-    extract_optional_lifetime(input)?.ok_or_else(|| {
-        syn::Error::new(
+    match extract_optional_lifetime(input)? {
+        Some(lifetime) => Ok(lifetime),
+        None => Err(syn::Error::new(
             input.generics.span(),
             "FromBlock requires exactly one lifetime parameter",
-        )
-    })
+        )),
+    }
 }
 
 fn extract_optional_lifetime(input: &DeriveInput) -> Result<Option<&Lifetime>, syn::Error> {

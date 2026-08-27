@@ -118,10 +118,13 @@ pub(crate) fn parse_var_str(input: &[u8]) -> IResult<&[u8], &str> {
 
     let (str_bytes, remainder) = input.split_at(len);
 
-    let str_value = std::str::from_utf8(str_bytes).map_err(|e| {
-        cold_path();
-        Error::Utf8Decode(e, str_bytes.to_vec())
-    })?;
+    let str_value = match std::str::from_utf8(str_bytes) {
+        Ok(str_value) => str_value,
+        Err(e) => {
+            cold_path();
+            return Err(Error::Utf8Decode(e, str_bytes.to_vec()));
+        }
+    };
     Ok((remainder, str_value))
 }
 
@@ -132,10 +135,10 @@ fn take_elements<'a>(
     right: usize,
     description: &str,
 ) -> IResult<&'a [u8], &'a [u8]> {
-    let byte_len = left.checked_mul(right).ok_or_else(|| {
+    let Some(byte_len) = left.checked_mul(right) else {
         cold_path();
-        Error::Overflow(format!("{description}: {left} * {right}"))
-    })?;
+        return Err(Error::Overflow(format!("{description}: {left} * {right}")));
+    };
     let Some((data, input)) = input.split_at_checked(byte_len) else {
         cold_path();
         return Err(Error::Length(byte_len));

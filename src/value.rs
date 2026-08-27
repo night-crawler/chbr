@@ -432,47 +432,77 @@ macro_rules! impl_try_from_integer_value {
                 fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
 
                     match value {
-                        Value::Int8(v) => <$target>::try_from(v).map_err(|_| {
-                            cold_path();
-                            Error::ValueOutOfRange("i8", stringify!($target), v.to_string())
-                        }),
-                        Value::Int16(v) => <$target>::try_from(v).map_err(|_| {
-                            cold_path();
-                            Error::ValueOutOfRange("i16", stringify!($target), v.to_string())
-                        }),
-                        Value::Int32(v) => <$target>::try_from(v).map_err(|_| {
-                            cold_path();
-                            Error::ValueOutOfRange("i32", stringify!($target), v.to_string())
-                        }),
-                        Value::Int64(v) => <$target>::try_from(v).map_err(|_| {
-                            cold_path();
-                            Error::ValueOutOfRange("i64", stringify!($target), v.to_string())
-                        }),
-                        Value::Int128(v) => <$target>::try_from(v.get()).map_err(|_| {
-                            cold_path();
-                            Error::ValueOutOfRange("i128", stringify!($target), v.to_string())
-                        }),
+                        Value::Int8(v) => match <$target>::try_from(v) {
+                            Ok(value) => Ok(value),
+                            Err(_) => {
+                                cold_path();
+                                Err(Error::ValueOutOfRange("i8", stringify!($target), v.to_string()))
+                            }
+                        },
+                        Value::Int16(v) => match <$target>::try_from(v) {
+                            Ok(value) => Ok(value),
+                            Err(_) => {
+                                cold_path();
+                                Err(Error::ValueOutOfRange("i16", stringify!($target), v.to_string()))
+                            }
+                        },
+                        Value::Int32(v) => match <$target>::try_from(v) {
+                            Ok(value) => Ok(value),
+                            Err(_) => {
+                                cold_path();
+                                Err(Error::ValueOutOfRange("i32", stringify!($target), v.to_string()))
+                            }
+                        },
+                        Value::Int64(v) => match <$target>::try_from(v) {
+                            Ok(value) => Ok(value),
+                            Err(_) => {
+                                cold_path();
+                                Err(Error::ValueOutOfRange("i64", stringify!($target), v.to_string()))
+                            }
+                        },
+                        Value::Int128(v) => match <$target>::try_from(v.get()) {
+                            Ok(value) => Ok(value),
+                            Err(_) => {
+                                cold_path();
+                                Err(Error::ValueOutOfRange("i128", stringify!($target), v.to_string()))
+                            }
+                        },
 
-                        Value::UInt8(v) => <$target>::try_from(v).map_err(|_| {
-                            cold_path();
-                            Error::ValueOutOfRange("u8", stringify!($target), v.to_string())
-                        }),
-                        Value::UInt16(v) => <$target>::try_from(v).map_err(|_| {
-                            cold_path();
-                            Error::ValueOutOfRange("u16", stringify!($target), v.to_string())
-                        }),
-                        Value::UInt32(v) => <$target>::try_from(v).map_err(|_| {
-                            cold_path();
-                            Error::ValueOutOfRange("u32", stringify!($target), v.to_string())
-                        }),
-                        Value::UInt64(v) => <$target>::try_from(v).map_err(|_| {
-                            cold_path();
-                            Error::ValueOutOfRange("u64", stringify!($target), v.to_string())
-                        }),
-                        Value::UInt128(v) => <$target>::try_from(v.get()).map_err(|_| {
-                            cold_path();
-                            Error::ValueOutOfRange("u128", stringify!($target), v.to_string())
-                        }),
+                        Value::UInt8(v) => match <$target>::try_from(v) {
+                            Ok(value) => Ok(value),
+                            Err(_) => {
+                                cold_path();
+                                Err(Error::ValueOutOfRange("u8", stringify!($target), v.to_string()))
+                            }
+                        },
+                        Value::UInt16(v) => match <$target>::try_from(v) {
+                            Ok(value) => Ok(value),
+                            Err(_) => {
+                                cold_path();
+                                Err(Error::ValueOutOfRange("u16", stringify!($target), v.to_string()))
+                            }
+                        },
+                        Value::UInt32(v) => match <$target>::try_from(v) {
+                            Ok(value) => Ok(value),
+                            Err(_) => {
+                                cold_path();
+                                Err(Error::ValueOutOfRange("u32", stringify!($target), v.to_string()))
+                            }
+                        },
+                        Value::UInt64(v) => match <$target>::try_from(v) {
+                            Ok(value) => Ok(value),
+                            Err(_) => {
+                                cold_path();
+                                Err(Error::ValueOutOfRange("u64", stringify!($target), v.to_string()))
+                            }
+                        },
+                        Value::UInt128(v) => match <$target>::try_from(v.get()) {
+                            Ok(value) => Ok(value),
+                            Err(_) => {
+                                cold_path();
+                                Err(Error::ValueOutOfRange("u128", stringify!($target), v.to_string()))
+                            }
+                        },
 
                         other => {
                             cold_path();
@@ -654,8 +684,11 @@ where
             Ok(None) => return None,
             Err(error) => return Some(Err(error)),
         };
-        let res = mark.values.slice(start..end).and_then(T::try_from);
-        Some(res)
+        let value = match mark.values.slice(start..end) {
+            Ok(value) => value,
+            Err(error) => return Some(Err(error)),
+        };
+        Some(T::try_from(value))
     }
 
     #[inline(always)]
@@ -770,10 +803,9 @@ where
         match value {
             Value::Map { mark, index } => {
                 // Resolve (start, end) for the requested row in the Map column
-                let (start, end) = mark
-                    .offsets
-                    .offset_indices(index)?
-                    .ok_or(Error::IndexOutOfBounds(index, "Map"))?;
+                let Some((start, end)) = mark.offsets.offset_indices(index)? else {
+                    return Err(Error::IndexOutOfBounds(index, "Map"));
+                };
 
                 Ok(Self {
                     keys: &mark.keys,
@@ -817,7 +849,15 @@ where
             Err(error) => return Some(Err(error)),
         };
 
-        Some(K::try_from(raw_key).and_then(|key| V::try_from(raw_value).map(|value| (key, value))))
+        let key = match K::try_from(raw_key) {
+            Ok(key) => key,
+            Err(error) => return Some(Err(error)),
+        };
+        let value = match V::try_from(raw_value) {
+            Ok(value) => value,
+            Err(error) => return Some(Err(error)),
+        };
+        Some(Ok((key, value)))
     }
 
     #[inline(always)]

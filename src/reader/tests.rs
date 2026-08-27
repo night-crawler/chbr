@@ -53,6 +53,39 @@ fn array_map_sample_typed() -> TestResult {
 }
 
 #[test]
+fn array_all_empty_rows_from_fixture() -> TestResult {
+    let buf = load("./testdata/array_lc_string_empty.native")?;
+    let (_, block) = parse_single(&buf)?;
+
+    let reader: Array<LcStr> = Array::try_from(&block.markers[1])?;
+
+    for row in 0..block.num_rows {
+        let count = reader.try_read(row)?.count();
+        assert_eq!(count, 0, "expected empty array at row {row}");
+    }
+
+    Ok(())
+}
+
+#[test]
+fn array_empty_values_plain_inner() -> TestResult {
+    let offsets = [0_u8; 24];
+    let mark = crate::mark::Mark::Array(crate::mark::Array {
+        offsets: crate::slice::ByteView::try_from(offsets.as_slice())?,
+        values: Box::new(crate::mark::Mark::Empty),
+    });
+
+    let reader: Array<Str> = Array::try_from(&mark)?;
+
+    for row in 0..3 {
+        let count = reader.try_read(row)?.count();
+        assert_eq!(count, 0, "expected empty array at row {row}");
+    }
+
+    Ok(())
+}
+
+#[test]
 fn derive_from_block_with_names() -> TestResult {
     const ID_COL: &str = "id";
 

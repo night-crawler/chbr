@@ -34,14 +34,17 @@ pub use reader::{FromBlock, FromVariant};
 pub type Result<T> = std::result::Result<T, Error>;
 
 fn mark_by_name<'a, T>(col_names: &[&str], columns: &'a [T], name: &str) -> Result<&'a T> {
-    col_names
+    let column = col_names
         .iter()
         .zip(columns)
-        .find_map(|(column_name, column)| (*column_name == name).then_some(column))
-        .ok_or_else(|| {
+        .find_map(|(column_name, column)| (*column_name == name).then_some(column));
+    match column {
+        Some(column) => Ok(column),
+        None => {
             cold_path();
-            Error::ColumnNotFound(name.to_owned())
-        })
+            Err(Error::ColumnNotFound(name.to_owned()))
+        }
+    }
 }
 
 pub(crate) trait ByteExt {
@@ -85,23 +88,31 @@ impl TryFrom<Range<usize>> for TinyRange {
 
     #[inline(always)]
     fn try_from(value: Range<usize>) -> std::result::Result<Self, Self::Error> {
-        let start = u32::try_from(value.start).map_err(|_| {
+        let Ok(start) = u32::try_from(value.start) else {
             cold_path();
-            Error::ValueOutOfRange("usize", "u32", value.start.to_string())
-        })?;
+            return Err(Error::ValueOutOfRange(
+                "usize",
+                "u32",
+                value.start.to_string(),
+            ));
+        };
 
-        let raw_length = value.end.checked_sub(value.start).ok_or_else(|| {
+        let Some(raw_length) = value.end.checked_sub(value.start) else {
             cold_path();
-            Error::ValueOutOfRange(
+            return Err(Error::ValueOutOfRange(
                 "Range<usize>",
                 "TinyRange",
                 format!("{}..{}", value.start, value.end),
-            )
-        })?;
-        let length = u32::try_from(raw_length).map_err(|_| {
+            ));
+        };
+        let Ok(length) = u32::try_from(raw_length) else {
             cold_path();
-            Error::ValueOutOfRange("usize", "u32", raw_length.to_string())
-        })?;
+            return Err(Error::ValueOutOfRange(
+                "usize",
+                "u32",
+                raw_length.to_string(),
+            ));
+        };
 
         Ok(TinyRange { start, length })
     }
@@ -204,12 +215,13 @@ impl Decimal128Data {
     #[inline(always)]
     pub fn with_precision(&self, precision: u8) -> Result<rust_decimal::Decimal> {
         let value = self.0.get();
-        let value = rust_decimal::Decimal::try_from_i128_with_scale(value, u32::from(precision))
-            .map_err(|_| {
+        match rust_decimal::Decimal::try_from_i128_with_scale(value, u32::from(precision)) {
+            Ok(value) => Ok(value),
+            Err(_) => {
                 cold_path();
-                Error::Overflow(value.to_string())
-            })?;
-        Ok(value)
+                Err(Error::Overflow(value.to_string()))
+            }
+        }
     }
 }
 

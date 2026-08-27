@@ -19,12 +19,24 @@ fn parse_num<T>(input: &[u8]) -> Result<T, nom::error::Error<&[u8]>>
 where
     T: FromStr,
 {
-    let s = from_utf8(input)
-        .map_err(|e| nom::error::Error::from_external_error(input, ErrorKind::Fail, e))?;
-    let parsed = s
-        .parse::<T>()
-        .map_err(|e| nom::error::Error::from_external_error(input, ErrorKind::Fail, e))?;
-    Ok(parsed)
+    let s = match from_utf8(input) {
+        Ok(s) => s,
+        Err(e) => {
+            return Err(nom::error::Error::from_external_error(
+                input,
+                ErrorKind::Fail,
+                e,
+            ));
+        }
+    };
+    match s.parse::<T>() {
+        Ok(parsed) => Ok(parsed),
+        Err(e) => Err(nom::error::Error::from_external_error(
+            input,
+            ErrorKind::Fail,
+            e,
+        )),
+    }
 }
 
 fn ws<'a, O, E, F>(inner: F) -> impl Parser<&'a [u8], Output = O, Error = E>
@@ -140,8 +152,12 @@ fn parse_datetime64(input: &[u8]) -> IResult<&[u8], Type<'_>> {
 
     let tz = unsafe { std::str::from_utf8_unchecked(tz) };
 
-    let tz = Tz::from_str(tz)
-        .map_err(|_| nom::Err::Error(nom::error::Error::new(input, ErrorKind::Fail)))?;
+    let Ok(tz) = Tz::from_str(tz) else {
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            ErrorKind::Fail,
+        )));
+    };
     Ok((input, Type::DateTime64(precision, tz)))
 }
 
@@ -245,11 +261,10 @@ fn parse_json(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     )
     .parse(input)?;
 
-    let mut typed_paths = arguments
-        .unwrap_or_default()
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
+    let mut typed_paths = match arguments {
+        Some(arguments) => arguments.into_iter().flatten().collect::<Vec<_>>(),
+        None => Vec::new(),
+    };
     typed_paths.sort_unstable_by_key(|field| field.name);
     Ok((input, Type::Json(typed_paths)))
 }
