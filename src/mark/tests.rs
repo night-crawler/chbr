@@ -1,7 +1,9 @@
 use std::{collections::HashMap, str::FromStr as _};
 
-use super::{LcIndices, LowCardinality, Mark, StringView, Tuple};
+use super::{Mark, StringView, Tuple};
+use crate::mark;
 
+use crate::zc;
 use crate::{
     Bf16Data,
     common::load,
@@ -14,7 +16,6 @@ use crate::{
         TupleSliceIterator, Value, VariantSliceIterator,
     },
 };
-use chbr::zc;
 use half::bf16;
 use pretty_assertions::assert_eq;
 use testresult::TestResult;
@@ -1720,14 +1721,14 @@ fn mark_accessors_return_errors() -> TestResult {
     ));
 
     assert!(matches!(
-        LcIndices::try_from(Mark::String(StringView { data: Vec::new() })),
+        mark::lc::Indices::try_from(Mark::String(StringView { data: Vec::new() })),
         Err(crate::Error::CorruptedData(_))
     ));
 
     let indices = [0_u8];
-    let invalid_dictionary = Mark::LowCardinality(LowCardinality {
+    let invalid_dictionary = Mark::LowCardinality(mark::lc::LowCardinality {
         is_nullable: false,
-        indices: LcIndices::U8(&indices),
+        indices: mark::lc::Indices::U8(&indices),
         global_dictionary: None,
         additional_keys: Some(Box::new(Mark::String(StringView { data: Vec::new() }))),
     });

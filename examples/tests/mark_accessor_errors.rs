@@ -2,7 +2,7 @@ mod common;
 
 use chbr::FromBlock;
 use chbr::error::Error;
-use chbr::mark::{LcIndices, LowCardinality, Mark, StringView, Tuple};
+use chbr::mark::{self, Mark, StringView, Tuple};
 use chbr::parse::block::parse_single;
 use chbr::reader::I64;
 use chbr::slice::ByteView;
@@ -29,14 +29,14 @@ fn reports_mark_accessor_errors() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     assert!(matches!(
-        LcIndices::try_from(Mark::String(StringView { data: Vec::new() })),
+        mark::lc::Indices::try_from(Mark::String(StringView { data: Vec::new() })),
         Err(Error::CorruptedData(_))
     ));
 
     let indices = [0_u8];
-    let invalid_dictionary = Mark::LowCardinality(LowCardinality {
+    let invalid_dictionary = Mark::LowCardinality(mark::lc::LowCardinality {
         is_nullable: false,
-        indices: LcIndices::U8(&indices),
+        indices: mark::lc::Indices::U8(&indices),
         global_dictionary: None,
         additional_keys: Some(Box::new(Mark::String(StringView { data: Vec::new() }))),
     });

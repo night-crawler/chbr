@@ -3,22 +3,21 @@ use std::{hint::cold_path, ops::Range};
 use super::{Readable, TryRead};
 #[cfg(feature = "serde1")]
 use crate::types::OffsetIndexPair as _;
-use crate::{
-    Error,
-    mark::{Json as JsonMark, Mark},
-    value::Value,
-};
+use crate::{Error, mark, value::Value};
+
+#[cfg(feature = "serde1")]
+use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 
 #[derive(Clone, Copy)]
-pub struct Json<'a>(&'a JsonMark<'a>);
+pub struct Json<'a>(&'a mark::Json<'a>);
 
-impl<'a> TryFrom<&'a Mark<'a>> for Json<'a> {
+impl<'a> TryFrom<&'a mark::Mark<'a>> for Json<'a> {
     type Error = Error;
 
     #[inline]
-    fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
+    fn try_from(value: &'a mark::Mark<'a>) -> Result<Self, Self::Error> {
         match value {
-            Mark::Json(mark) => Ok(Self(mark)),
+            mark::Mark::Json(mark) => Ok(Self(mark)),
             other => {
                 cold_path();
                 Err(Error::MismatchedType(other.as_str(), "Json"))
@@ -42,7 +41,7 @@ impl<'a> TryRead<'a> for Json<'a> {
 
 #[derive(Clone, Copy, Debug)]
 pub struct JsonValue<'a> {
-    mark: &'a JsonMark<'a>,
+    mark: &'a mark::Json<'a>,
     row: usize,
 }
 
@@ -89,7 +88,7 @@ impl<'a> TryFrom<Value<'a>> for JsonValue<'a> {
 }
 
 pub struct JsonIterator<'a> {
-    mark: &'a JsonMark<'a>,
+    mark: &'a mark::Json<'a>,
     row: usize,
     path_index: usize,
 }
@@ -135,7 +134,7 @@ impl<'a> Iterator for JsonIterator<'a> {
 }
 
 pub struct JsonSliceIterator<'a> {
-    mark: &'a JsonMark<'a>,
+    mark: &'a mark::Json<'a>,
     range: Range<usize>,
 }
 
@@ -201,19 +200,16 @@ impl From<Error> for JsonDeserializeError {
 }
 
 #[cfg(feature = "serde1")]
-impl serde::de::Error for JsonDeserializeError {
+impl de::Error for JsonDeserializeError {
     fn custom<T: std::fmt::Display>(message: T) -> Self {
         Self::Message(message.to_string())
     }
 }
 
 #[cfg(feature = "serde1")]
-use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
-
-#[cfg(feature = "serde1")]
 #[derive(Clone, Copy)]
 struct NodeDeserializer<'de> {
-    mark: &'de JsonMark<'de>,
+    mark: &'de mark::Json<'de>,
     row: usize,
     node: usize,
 }
@@ -279,7 +275,7 @@ impl<'de> NodeDeserializer<'de> {
 
 #[cfg(feature = "serde1")]
 fn subtree_is_active(
-    mark: &JsonMark<'_>,
+    mark: &mark::Json<'_>,
     row: usize,
     node_index: usize,
 ) -> Result<bool, JsonDeserializeError> {
@@ -323,6 +319,20 @@ impl<'de> de::Deserializer<'de> for NodeDeserializer<'de> {
         }
     }
 
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        self.leaf()?.deserialize_bytes(visitor)
+    }
+
+    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        self.leaf()?.deserialize_byte_buf(visitor)
+    }
+
     fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
@@ -353,20 +363,6 @@ impl<'de> de::Deserializer<'de> for NodeDeserializer<'de> {
         self.leaf()?.deserialize_enum(name, variants, visitor)
     }
 
-    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.leaf()?.deserialize_bytes(visitor)
-    }
-
-    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.leaf()?.deserialize_byte_buf(visitor)
-    }
-
     serde::forward_to_deserialize_any! {
         bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
         unit unit_struct seq tuple tuple_struct map struct identifier ignored_any
@@ -379,7 +375,7 @@ impl<'de> de::Deserializer<'de> for NodeDeserializer<'de> {
 
 #[cfg(feature = "serde1")]
 struct PathMapAccess<'de> {
-    mark: &'de JsonMark<'de>,
+    mark: &'de mark::Json<'de>,
     row: usize,
     next_child: Option<usize>,
     pending: Option<usize>,
@@ -535,7 +531,7 @@ fn format_wide_number(mut magnitude: [u8; 32], signed: bool, scale: u8) -> WideN
 #[cfg(feature = "serde1")]
 #[derive(Clone, Copy)]
 struct CellDeserializer<'de> {
-    mark: &'de Mark<'de>,
+    mark: &'de mark::Mark<'de>,
     row: usize,
 }
 
@@ -553,15 +549,15 @@ impl<'de> CellDeserializer<'de> {
         let mut cell = self;
         loop {
             match cell.mark {
-                Mark::Empty => return Ok(CellState::Missing),
-                Mark::Nullable(nullable) => match nullable.mask.get(cell.row) {
+                mark::Mark::Empty => return Ok(CellState::Missing),
+                mark::Mark::Nullable(nullable) => match nullable.mask.get(cell.row) {
                     Some(1) => return Ok(CellState::Null),
                     Some(_) => {
                         cell.mark = &nullable.data;
                     }
                     None => return Ok(CellState::Missing),
                 },
-                Mark::LowCardinality(low_cardinality) => {
+                mark::Mark::LowCardinality(low_cardinality) => {
                     let Some(index) = low_cardinality.indices.get(cell.row)? else {
                         return Ok(CellState::Missing);
                     };
@@ -576,11 +572,11 @@ impl<'de> CellDeserializer<'de> {
                         row: index,
                     };
                 }
-                Mark::Variant(variant) => {
+                mark::Mark::Variant(variant) => {
                     let Some(&discriminator) = variant.discriminators.get(cell.row) else {
                         return Ok(CellState::Missing);
                     };
-                    if discriminator == crate::mark::Variant::NULL_DISCRIMINATOR {
+                    if discriminator == mark::Variant::NULL_DISCRIMINATOR {
                         return Ok(CellState::Missing);
                     }
                     let Some(&row) = variant.offsets.get(cell.row) else {
@@ -591,7 +587,7 @@ impl<'de> CellDeserializer<'de> {
                     };
                     cell = Self { mark, row };
                 }
-                Mark::Dynamic(dynamic) => {
+                mark::Mark::Dynamic(dynamic) => {
                     let Some(&discriminator) = dynamic.discriminators.get(cell.row) else {
                         return Ok(CellState::Missing);
                     };
@@ -623,10 +619,10 @@ impl<'de> CellDeserializer<'de> {
             return Ok(None);
         };
         let value = match cell.mark {
-            Mark::String(strings) => strings.get(cell.row),
-            Mark::FixedString(fixed) => fixed.get_str(cell.row),
-            Mark::Enum8(enumeration) => enum8_name(enumeration, cell.row),
-            Mark::Enum16(enumeration) => enum16_name(enumeration, cell.row),
+            mark::Mark::String(strings) => strings.get(cell.row),
+            mark::Mark::FixedString(fixed) => fixed.get_str(cell.row),
+            mark::Mark::Enum8(enumeration) => enum8_name(enumeration, cell.row),
+            mark::Mark::Enum16(enumeration) => enum16_name(enumeration, cell.row),
             _ => None,
         };
         Ok(value)
@@ -634,7 +630,7 @@ impl<'de> CellDeserializer<'de> {
 }
 
 #[cfg(feature = "serde1")]
-fn enum8_name<'a>(mark: &'a crate::mark::Enum8<'a>, row: usize) -> Option<&'a str> {
+fn enum8_name<'a>(mark: &'a mark::Enum8<'a>, row: usize) -> Option<&'a str> {
     if row >= mark.data.len() {
         return None;
     }
@@ -646,7 +642,7 @@ fn enum8_name<'a>(mark: &'a crate::mark::Enum8<'a>, row: usize) -> Option<&'a st
 }
 
 #[cfg(feature = "serde1")]
-fn enum16_name<'a>(mark: &'a crate::mark::Enum16<'a>, row: usize) -> Option<&'a str> {
+fn enum16_name<'a>(mark: &'a mark::Enum16<'a>, row: usize) -> Option<&'a str> {
     if row >= mark.data.len() {
         return None;
     }
@@ -658,48 +654,51 @@ fn enum16_name<'a>(mark: &'a crate::mark::Enum16<'a>, row: usize) -> Option<&'a 
 }
 
 #[cfg(feature = "serde1")]
-fn base_contains(mark: &Mark<'_>, row: usize) -> Result<bool, JsonDeserializeError> {
+fn base_contains(mark: &mark::Mark<'_>, row: usize) -> Result<bool, JsonDeserializeError> {
     let present = match mark {
-        Mark::Empty => false,
-        Mark::Bool(value) => value.get(row).is_some(),
-        Mark::Int8(value) => value.get(row).is_some(),
-        Mark::Int16(value) => value.get(row).is_some(),
-        Mark::Int32(value) => value.get(row).is_some(),
-        Mark::Int64(value) => value.get(row).is_some(),
-        Mark::Int128(value) => value.get(row).is_some(),
-        Mark::Int256(value) => value.get(row).is_some(),
-        Mark::UInt8(value) => value.get(row).is_some(),
-        Mark::UInt16(value) => value.get(row).is_some(),
-        Mark::UInt32(value) => value.get(row).is_some(),
-        Mark::UInt64(value) => value.get(row).is_some(),
-        Mark::UInt128(value) => value.get(row).is_some(),
-        Mark::UInt256(value) => value.get(row).is_some(),
-        Mark::Float32(value) => value.get(row).is_some(),
-        Mark::Float64(value) => value.get(row).is_some(),
-        Mark::BFloat16(value) => value.get(row).is_some(),
-        Mark::Decimal32(value) => value.data.get(row).is_some(),
-        Mark::Decimal64(value) => value.data.get(row).is_some(),
-        Mark::Decimal128(value) => value.data.get(row).is_some(),
-        Mark::Decimal256(value) => value.data.get(row).is_some(),
-        Mark::String(value) => value.get(row).is_some(),
-        Mark::FixedString(value) => value.get_str(row).is_some(),
-        Mark::Uuid(value) => value.get(row).is_some(),
-        Mark::Date(value) => value.get(row).is_some(),
-        Mark::Date32(value) => value.get(row).is_some(),
-        Mark::DateTime(value) => value.data.get(row).is_some(),
-        Mark::DateTime64(value) => value.data.get(row).is_some(),
-        Mark::Ipv4(value) => value.get(row).is_some(),
-        Mark::Ipv6(value) => value.get(row).is_some(),
-        Mark::Enum8(value) => enum8_name(value, row).is_some(),
-        Mark::Enum16(value) => enum16_name(value, row).is_some(),
-        Mark::Array(value) => value.offsets.offset_indices(row)?.is_some(),
-        Mark::Tuple(_) | Mark::Map(_) | Mark::NamedTuple(_) => true,
-        Mark::Nested(value) => match value.array_of_tuples.as_ref() {
-            Mark::Array(array) => array.offsets.offset_indices(row)?.is_some(),
+        mark::Mark::Empty => false,
+        mark::Mark::Bool(value) => value.get(row).is_some(),
+        mark::Mark::Int8(value) => value.get(row).is_some(),
+        mark::Mark::Int16(value) => value.get(row).is_some(),
+        mark::Mark::Int32(value) => value.get(row).is_some(),
+        mark::Mark::Int64(value) => value.get(row).is_some(),
+        mark::Mark::Int128(value) => value.get(row).is_some(),
+        mark::Mark::Int256(value) => value.get(row).is_some(),
+        mark::Mark::UInt8(value) => value.get(row).is_some(),
+        mark::Mark::UInt16(value) => value.get(row).is_some(),
+        mark::Mark::UInt32(value) => value.get(row).is_some(),
+        mark::Mark::UInt64(value) => value.get(row).is_some(),
+        mark::Mark::UInt128(value) => value.get(row).is_some(),
+        mark::Mark::UInt256(value) => value.get(row).is_some(),
+        mark::Mark::Float32(value) => value.get(row).is_some(),
+        mark::Mark::Float64(value) => value.get(row).is_some(),
+        mark::Mark::BFloat16(value) => value.get(row).is_some(),
+        mark::Mark::Decimal32(value) => value.data.get(row).is_some(),
+        mark::Mark::Decimal64(value) => value.data.get(row).is_some(),
+        mark::Mark::Decimal128(value) => value.data.get(row).is_some(),
+        mark::Mark::Decimal256(value) => value.data.get(row).is_some(),
+        mark::Mark::String(value) => value.get(row).is_some(),
+        mark::Mark::FixedString(value) => value.get_str(row).is_some(),
+        mark::Mark::Uuid(value) => value.get(row).is_some(),
+        mark::Mark::Date(value) => value.get(row).is_some(),
+        mark::Mark::Date32(value) => value.get(row).is_some(),
+        mark::Mark::DateTime(value) => value.data.get(row).is_some(),
+        mark::Mark::DateTime64(value) => value.data.get(row).is_some(),
+        mark::Mark::Ipv4(value) => value.get(row).is_some(),
+        mark::Mark::Ipv6(value) => value.get(row).is_some(),
+        mark::Mark::Enum8(value) => enum8_name(value, row).is_some(),
+        mark::Mark::Enum16(value) => enum16_name(value, row).is_some(),
+        mark::Mark::Array(value) => value.offsets.offset_indices(row)?.is_some(),
+        mark::Mark::Tuple(_) | mark::Mark::Map(_) | mark::Mark::NamedTuple(_) => true,
+        mark::Mark::Nested(value) => match value.array_of_tuples.as_ref() {
+            mark::Mark::Array(array) => array.offsets.offset_indices(row)?.is_some(),
             _ => false,
         },
-        Mark::Json(value) => value.contains_row(row),
-        Mark::Nullable(_) | Mark::LowCardinality(_) | Mark::Variant(_) | Mark::Dynamic(_) => {
+        mark::Mark::Json(value) => value.contains_row(row),
+        mark::Mark::Nullable(_)
+        | mark::Mark::LowCardinality(_)
+        | mark::Mark::Variant(_)
+        | mark::Mark::Dynamic(_) => {
             unreachable!("wrapper marks are resolved before the presence check")
         }
     };
@@ -732,71 +731,73 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
         }
 
         match cell.mark {
-            Mark::Empty => unreachable!("empty marks are resolved as missing"),
-            Mark::Bool(value) => visitor.visit_bool(at!(value.get(cell.row))),
-            Mark::Int8(value) => visitor.visit_i8(*at!(value.get(cell.row))),
-            Mark::Int16(value) => visitor.visit_i16(at!(value.get(cell.row)).get()),
-            Mark::Int32(value) => visitor.visit_i32(at!(value.get(cell.row)).get()),
-            Mark::Int64(value) => visitor.visit_i64(at!(value.get(cell.row)).get()),
-            Mark::Int128(value) => visitor.visit_i128(at!(value.get(cell.row)).get()),
-            Mark::Int256(value) => {
+            mark::Mark::Empty => unreachable!("empty marks are resolved as missing"),
+            mark::Mark::Bool(value) => visitor.visit_bool(at!(value.get(cell.row))),
+            mark::Mark::Int8(value) => visitor.visit_i8(*at!(value.get(cell.row))),
+            mark::Mark::Int16(value) => visitor.visit_i16(at!(value.get(cell.row)).get()),
+            mark::Mark::Int32(value) => visitor.visit_i32(at!(value.get(cell.row)).get()),
+            mark::Mark::Int64(value) => visitor.visit_i64(at!(value.get(cell.row)).get()),
+            mark::Mark::Int128(value) => visitor.visit_i128(at!(value.get(cell.row)).get()),
+            mark::Mark::Int256(value) => {
                 let formatted = format_wide_number(at!(value.get(cell.row)).0, true, 0);
                 visitor.visit_str(formatted.as_str())
             }
-            Mark::UInt8(value) => visitor.visit_u8(*at!(value.get(cell.row))),
-            Mark::UInt16(value) => visitor.visit_u16(at!(value.get(cell.row)).get()),
-            Mark::UInt32(value) => visitor.visit_u32(at!(value.get(cell.row)).get()),
-            Mark::UInt64(value) => visitor.visit_u64(at!(value.get(cell.row)).get()),
-            Mark::UInt128(value) => visitor.visit_u128(at!(value.get(cell.row)).get()),
-            Mark::UInt256(value) => {
+            mark::Mark::UInt8(value) => visitor.visit_u8(*at!(value.get(cell.row))),
+            mark::Mark::UInt16(value) => visitor.visit_u16(at!(value.get(cell.row)).get()),
+            mark::Mark::UInt32(value) => visitor.visit_u32(at!(value.get(cell.row)).get()),
+            mark::Mark::UInt64(value) => visitor.visit_u64(at!(value.get(cell.row)).get()),
+            mark::Mark::UInt128(value) => visitor.visit_u128(at!(value.get(cell.row)).get()),
+            mark::Mark::UInt256(value) => {
                 let formatted = format_wide_number(at!(value.get(cell.row)).0, false, 0);
                 visitor.visit_str(formatted.as_str())
             }
-            Mark::Float32(value) => visitor.visit_f32(at!(value.get(cell.row)).get()),
-            Mark::Float64(value) => visitor.visit_f64(at!(value.get(cell.row)).get()),
-            Mark::BFloat16(value) => {
+            mark::Mark::Float32(value) => visitor.visit_f32(at!(value.get(cell.row)).get()),
+            mark::Mark::Float64(value) => visitor.visit_f64(at!(value.get(cell.row)).get()),
+            mark::Mark::BFloat16(value) => {
                 let value = half::bf16::from(*at!(value.get(cell.row)));
                 visitor.visit_f32(value.into())
             }
-            Mark::Decimal32(value) => visitor.visit_string(
+            mark::Mark::Decimal32(value) => visitor.visit_string(
                 at!(value.data.get(cell.row))
                     .with_precision(value.precision)
                     .to_string(),
             ),
-            Mark::Decimal64(value) => visitor.visit_string(
+            mark::Mark::Decimal64(value) => visitor.visit_string(
                 at!(value.data.get(cell.row))
                     .with_precision(value.precision)
                     .to_string(),
             ),
-            Mark::Decimal128(value) => visitor.visit_string(
+            mark::Mark::Decimal128(value) => visitor.visit_string(
                 at!(value.data.get(cell.row))
                     .with_precision(value.precision)?
                     .to_string(),
             ),
-            Mark::Decimal256(value) => {
+            mark::Mark::Decimal256(value) => {
                 let formatted =
                     format_wide_number(at!(value.data.get(cell.row)).0.0, true, value.precision);
                 visitor.visit_str(formatted.as_str())
             }
-            Mark::String(value) => visitor.visit_borrowed_str(at!(value.get(cell.row))),
-            Mark::FixedString(value) => visitor.visit_borrowed_str(at!(value.get_str(cell.row))),
-            Mark::Uuid(value) => {
+            mark::Mark::String(value) => visitor.visit_borrowed_str(at!(value.get(cell.row))),
+            mark::Mark::FixedString(value) => {
+                visitor.visit_borrowed_str(at!(value.get_str(cell.row)))
+            }
+            mark::Mark::Uuid(value) => {
                 let value = uuid::Uuid::from(*at!(value.get(cell.row)));
                 visitor.visit_string(value.to_string())
             }
-            Mark::Date(value) => {
+            mark::Mark::Date(value) => {
                 let value = chrono::NaiveDate::from(*at!(value.get(cell.row)));
                 visitor.visit_string(value.to_string())
             }
-            Mark::Date32(value) => {
+            mark::Mark::Date32(value) => {
                 let value = chrono::NaiveDate::from(*at!(value.get(cell.row)));
                 visitor.visit_string(value.to_string())
             }
-            Mark::DateTime(value) => {
+            mark::Mark::DateTime(value) => {
                 let value = at!(value.data.get(cell.row)).with_tz(value.tz);
                 visitor.visit_string(value.to_rfc3339())
             }
-            Mark::DateTime64(value) => {
+            mark::Mark::DateTime64(value) => {
                 let Some(value) =
                     at!(value.data.get(cell.row)).with_tz_and_precision(value.tz, value.precision)
                 else {
@@ -804,21 +805,21 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
                 };
                 visitor.visit_string(value.to_rfc3339())
             }
-            Mark::Ipv4(value) => {
+            mark::Mark::Ipv4(value) => {
                 let value = std::net::Ipv4Addr::from(*at!(value.get(cell.row)));
                 visitor.visit_string(value.to_string())
             }
-            Mark::Ipv6(value) => {
+            mark::Mark::Ipv6(value) => {
                 let value = std::net::Ipv6Addr::from(*at!(value.get(cell.row)));
                 visitor.visit_string(value.to_string())
             }
-            Mark::Enum8(_) | Mark::Enum16(_) => {
+            mark::Mark::Enum8(_) | mark::Mark::Enum16(_) => {
                 let Some(value) = self.borrowed_str()? else {
                     return Err(Error::IndexOutOfBounds(cell.row, cell.mark.as_str()).into());
                 };
                 visitor.visit_borrowed_str(value)
             }
-            Mark::Array(array) => {
+            mark::Mark::Array(array) => {
                 let Some((start, end)) = array.offsets.offset_indices(cell.row)? else {
                     return Err(Error::IndexOutOfBounds(cell.row, "Array").into());
                 };
@@ -827,19 +828,19 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
                     range: start..end,
                 })
             }
-            Mark::Tuple(tuple) => visitor.visit_seq(TupleSeqAccess {
+            mark::Mark::Tuple(tuple) => visitor.visit_seq(TupleSeqAccess {
                 tuple,
                 row: cell.row,
                 next: 0,
             }),
-            Mark::Map(map) => visitor.visit_map(ColumnMapAccess::new(map, cell.row)?),
-            Mark::Nested(nested) => {
-                let Mark::Array(array) = nested.array_of_tuples.as_ref() else {
+            mark::Mark::Map(map) => visitor.visit_map(ColumnMapAccess::new(map, cell.row)?),
+            mark::Mark::Nested(nested) => {
+                let mark::Mark::Array(array) = nested.array_of_tuples.as_ref() else {
                     return Err(
                         Error::MismatchedType(nested.array_of_tuples.as_str(), "Array").into(),
                     );
                 };
-                let Mark::Tuple(tuple) = array.values.as_ref() else {
+                let mark::Mark::Tuple(tuple) = array.values.as_ref() else {
                     return Err(Error::MismatchedType(array.values.as_str(), "Tuple").into());
                 };
                 let Some((start, end)) = array.offsets.offset_indices(cell.row)? else {
@@ -851,8 +852,8 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
                     range: start..end,
                 })
             }
-            Mark::NamedTuple(named) => {
-                let Mark::Tuple(tuple) = named.tuple.as_ref() else {
+            mark::Mark::NamedTuple(named) => {
+                let mark::Mark::Tuple(tuple) = named.tuple.as_ref() else {
                     return Err(Error::MismatchedType(named.tuple.as_str(), "Tuple").into());
                 };
                 visitor.visit_map(NamedMapAccess {
@@ -863,15 +864,38 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
                     pending: None,
                 })
             }
-            Mark::Json(json) => NodeDeserializer {
+            mark::Mark::Json(json) => NodeDeserializer {
                 mark: json,
                 row: cell.row,
                 node: json.root(),
             }
             .deserialize_any(visitor),
-            Mark::Nullable(_) | Mark::LowCardinality(_) | Mark::Variant(_) | Mark::Dynamic(_) => {
+            mark::Mark::Nullable(_)
+            | mark::Mark::LowCardinality(_)
+            | mark::Mark::Variant(_)
+            | mark::Mark::Dynamic(_) => {
                 unreachable!("wrapper marks are resolved before deserialization")
             }
+        }
+    }
+
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self.borrowed_str()? {
+            Some(value) => visitor.visit_borrowed_bytes(value.as_bytes()),
+            None => self.deserialize_any(visitor),
+        }
+    }
+
+    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        match self.borrowed_str()? {
+            Some(value) => visitor.visit_byte_buf(value.as_bytes().to_vec()),
+            None => self.deserialize_any(visitor),
         }
     }
 
@@ -915,26 +939,6 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
         visitor.visit_enum(de::value::BorrowedStrDeserializer::<JsonDeserializeError>::new(value))
     }
 
-    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self.borrowed_str()? {
-            Some(value) => visitor.visit_borrowed_bytes(value.as_bytes()),
-            None => self.deserialize_any(visitor),
-        }
-    }
-
-    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        match self.borrowed_str()? {
-            Some(value) => visitor.visit_byte_buf(value.as_bytes().to_vec()),
-            None => self.deserialize_any(visitor),
-        }
-    }
-
     serde::forward_to_deserialize_any! {
         bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
         unit unit_struct seq tuple tuple_struct map struct identifier ignored_any
@@ -947,7 +951,7 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
 
 #[cfg(feature = "serde1")]
 struct ColumnSeqAccess<'de> {
-    mark: &'de Mark<'de>,
+    mark: &'de mark::Mark<'de>,
     range: Range<usize>,
 }
 
@@ -978,7 +982,7 @@ impl<'de> SeqAccess<'de> for ColumnSeqAccess<'de> {
 
 #[cfg(feature = "serde1")]
 struct TupleSeqAccess<'de> {
-    tuple: &'de crate::mark::Tuple<'de>,
+    tuple: &'de mark::Tuple<'de>,
     row: usize,
     next: usize,
 }
@@ -1011,15 +1015,15 @@ impl<'de> SeqAccess<'de> for TupleSeqAccess<'de> {
 
 #[cfg(feature = "serde1")]
 struct ColumnMapAccess<'de> {
-    keys: &'de Mark<'de>,
-    values: &'de Mark<'de>,
+    keys: &'de mark::Mark<'de>,
+    values: &'de mark::Mark<'de>,
     range: Range<usize>,
     pending: Option<usize>,
 }
 
 #[cfg(feature = "serde1")]
 impl<'de> ColumnMapAccess<'de> {
-    fn new(mark: &'de crate::mark::Map<'de>, row: usize) -> Result<Self, JsonDeserializeError> {
+    fn new(mark: &'de mark::Map<'de>, row: usize) -> Result<Self, JsonDeserializeError> {
         let Some((start, end)) = mark.offsets.offset_indices(row)? else {
             return Err(Error::IndexOutOfBounds(row, "Map").into());
         };
@@ -1076,7 +1080,7 @@ impl<'de> MapAccess<'de> for ColumnMapAccess<'de> {
 #[cfg(feature = "serde1")]
 struct NamedMapAccess<'de> {
     names: &'de [&'de str],
-    tuple: &'de crate::mark::Tuple<'de>,
+    tuple: &'de mark::Tuple<'de>,
     row: usize,
     next: usize,
     pending: Option<usize>,
@@ -1129,7 +1133,7 @@ impl<'de> MapAccess<'de> for NamedMapAccess<'de> {
 #[cfg(feature = "serde1")]
 struct NamedRowsSeqAccess<'de> {
     names: &'de [&'de str],
-    tuple: &'de crate::mark::Tuple<'de>,
+    tuple: &'de mark::Tuple<'de>,
     range: Range<usize>,
 }
 
@@ -1163,7 +1167,7 @@ impl<'de> SeqAccess<'de> for NamedRowsSeqAccess<'de> {
 #[derive(Clone, Copy)]
 struct NamedRowDeserializer<'de> {
     names: &'de [&'de str],
-    tuple: &'de crate::mark::Tuple<'de>,
+    tuple: &'de mark::Tuple<'de>,
     row: usize,
 }
 
@@ -1222,20 +1226,14 @@ mod serde_tests {
 
     use super::{Json, JsonDeserializeError, format_wide_number};
     use crate::{
-        DateTime32Data, Ipv4Data,
-        mark::{
-            Array as ArrayMark, DateTime, Decimal64, Decimal256, Dynamic as DynamicMark,
-            Json as JsonMark, LcIndices, LowCardinality, Map as MapMark, Mark,
-            NamedTuple as NamedTupleMark, Nested as NestedMark, Nullable as NullableMark,
-            StringView, Tuple as TupleMark, Variant as VariantMark,
-        },
+        DateTime32Data, Ipv4Data, mark,
         parse::block::parse_single,
         reader::TryRead as _,
         slice::ByteView,
         types::{JsonColumnHeader, Type},
     };
 
-    fn header<'a>(typ: Type<'a>, mark: Mark<'a>) -> JsonColumnHeader<'a> {
+    fn header<'a>(typ: Type<'a>, mark: mark::Mark<'a>) -> JsonColumnHeader<'a> {
         JsonColumnHeader {
             path_version: 0,
             max_types: 0,
@@ -1378,21 +1376,33 @@ mod serde_tests {
 
     #[test]
     fn rejects_duplicate_and_active_conflicting_paths() -> TestResult {
-        let duplicate = JsonMark::new(
+        let duplicate = mark::Json::new(
             vec!["a", "a"],
             vec![
-                header(Type::String, Mark::String(StringView { data: vec!["x"] })),
-                header(Type::String, Mark::String(StringView { data: vec!["y"] })),
+                header(
+                    Type::String,
+                    mark::Mark::String(mark::StringView { data: vec!["x"] }),
+                ),
+                header(
+                    Type::String,
+                    mark::Mark::String(mark::StringView { data: vec!["y"] }),
+                ),
             ],
             1,
         );
         assert!(matches!(duplicate, Err(crate::Error::CorruptedData(_))));
 
-        let mark = Mark::Json(JsonMark::new(
+        let mark = mark::Mark::Json(mark::Json::new(
             vec!["a", "a.b"],
             vec![
-                header(Type::String, Mark::String(StringView { data: vec!["x"] })),
-                header(Type::String, Mark::String(StringView { data: vec!["y"] })),
+                header(
+                    Type::String,
+                    mark::Mark::String(mark::StringView { data: vec!["x"] }),
+                ),
+                header(
+                    Type::String,
+                    mark::Mark::String(mark::StringView { data: vec!["y"] }),
+                ),
             ],
             1,
         )?);
@@ -1406,13 +1416,16 @@ mod serde_tests {
 
     #[test]
     fn splits_paths_before_decoding_escaped_dots() -> TestResult {
-        let mark = Mark::Json(JsonMark::new(
+        let mark = mark::Mark::Json(mark::Json::new(
             vec!["a%2Eb", "nested.value"],
             vec![
-                header(Type::String, Mark::String(StringView { data: vec!["dot"] })),
                 header(
                     Type::String,
-                    Mark::String(StringView {
+                    mark::Mark::String(mark::StringView { data: vec!["dot"] }),
+                ),
+                header(
+                    Type::String,
+                    mark::Mark::String(mark::StringView {
                         data: vec!["nested"],
                     }),
                 ),
@@ -1437,27 +1450,27 @@ mod serde_tests {
             items: Vec<Vec<Child<'a>>>,
         }
 
-        let nested_json = JsonMark::new(
+        let nested_json = mark::Json::new(
             vec!["name"],
             vec![header(
                 Type::String,
-                Mark::String(StringView {
+                mark::Mark::String(mark::StringView {
                     data: vec!["one", "two", "three"],
                 }),
             )],
             3,
         )?;
         let inner_offsets = [1_u64.to_le_bytes(), 3_u64.to_le_bytes()].concat();
-        let inner = Mark::Array(ArrayMark {
+        let inner = mark::Mark::Array(mark::Array {
             offsets: ByteView::try_from(inner_offsets.as_slice())?,
-            values: Box::new(Mark::Json(nested_json)),
+            values: Box::new(mark::Mark::Json(nested_json)),
         });
         let outer_offsets = 2_u64.to_le_bytes();
-        let outer = Mark::Array(ArrayMark {
+        let outer = mark::Mark::Array(mark::Array {
             offsets: ByteView::try_from(outer_offsets.as_slice())?,
             values: Box::new(inner),
         });
-        let mark = Mark::Json(JsonMark::new(
+        let mark = mark::Mark::Json(mark::Json::new(
             vec!["items"],
             vec![header(Type::Array(Box::new(Type::Json(vec![]))), outer)],
             1,
@@ -1486,16 +1499,16 @@ mod serde_tests {
 
         let signed = i64::MIN.to_le_bytes();
         let unsigned = u64::MAX.to_le_bytes();
-        let mark = Mark::Json(JsonMark::new(
+        let mark = mark::Mark::Json(mark::Json::new(
             vec!["signed", "unsigned"],
             vec![
                 header(
                     Type::Int64,
-                    Mark::Int64(ByteView::try_from(signed.as_slice())?),
+                    mark::Mark::Int64(ByteView::try_from(signed.as_slice())?),
                 ),
                 header(
                     Type::UInt64,
-                    Mark::UInt64(ByteView::try_from(unsigned.as_slice())?),
+                    mark::Mark::UInt64(ByteView::try_from(unsigned.as_slice())?),
                 ),
             ],
             1,
@@ -1520,31 +1533,31 @@ mod serde_tests {
         let uuid_bytes = [hi.to_le_bytes(), lo.to_le_bytes()].concat();
         let decimal_bytes = 12_345_i64.to_le_bytes();
         let datetime_bytes = 0_u32.to_le_bytes();
-        let formatted = Mark::Json(JsonMark::new(
+        let formatted = mark::Mark::Json(mark::Json::new(
             vec!["date", "ip", "uuid", "decimal", "datetime"],
             vec![
                 header(
                     Type::Date,
-                    Mark::Date(ByteView::try_from(date_days.as_slice())?),
+                    mark::Mark::Date(ByteView::try_from(date_days.as_slice())?),
                 ),
                 header(
                     Type::Ipv4,
-                    Mark::Ipv4(ByteView::<Ipv4Data>::try_from(address_bytes.as_slice())?),
+                    mark::Mark::Ipv4(ByteView::<Ipv4Data>::try_from(address_bytes.as_slice())?),
                 ),
                 header(
                     Type::Uuid,
-                    Mark::Uuid(ByteView::try_from(uuid_bytes.as_slice())?),
+                    mark::Mark::Uuid(ByteView::try_from(uuid_bytes.as_slice())?),
                 ),
                 header(
                     Type::Decimal64(2),
-                    Mark::Decimal64(Decimal64 {
+                    mark::Mark::Decimal64(mark::Decimal64 {
                         precision: 2,
                         data: ByteView::try_from(decimal_bytes.as_slice())?,
                     }),
                 ),
                 header(
                     Type::DateTime(chrono_tz::UTC),
-                    Mark::DateTime(DateTime {
+                    mark::Mark::DateTime(mark::DateTime {
                         tz: chrono_tz::UTC,
                         data: ByteView::<DateTime32Data>::try_from(datetime_bytes.as_slice())?,
                     }),
@@ -1589,20 +1602,20 @@ mod serde_tests {
         assert_eq!(format_wide_number(minus_one, true, 3).as_str(), "-0.001");
         assert_eq!(format_wide_number([0_u8; 32], true, 76).as_str(), "0");
 
-        let mark = Mark::Json(JsonMark::new(
+        let mark = mark::Mark::Json(mark::Json::new(
             vec!["i", "u", "d"],
             vec![
                 header(
                     Type::Int256,
-                    Mark::Int256(ByteView::try_from(i256_min.as_slice())?),
+                    mark::Mark::Int256(ByteView::try_from(i256_min.as_slice())?),
                 ),
                 header(
                     Type::UInt256,
-                    Mark::UInt256(ByteView::try_from(u256_max.as_slice())?),
+                    mark::Mark::UInt256(ByteView::try_from(u256_max.as_slice())?),
                 ),
                 header(
                     Type::Decimal256(4),
-                    Mark::Decimal256(Decimal256 {
+                    mark::Mark::Decimal256(mark::Decimal256 {
                         precision: 4,
                         data: ByteView::try_from(decimal.as_slice())?,
                     }),
@@ -1619,28 +1632,32 @@ mod serde_tests {
         assert_eq!(actual, expected);
 
         let array_offsets = 1_u64.to_le_bytes();
-        let array_mark = Mark::Json(JsonMark::new(
+        let array_mark = mark::Mark::Json(mark::Json::new(
             vec!["i_array", "u_array", "d_array"],
             vec![
                 header(
                     Type::Array(Box::new(Type::Int256)),
-                    Mark::Array(ArrayMark {
+                    mark::Mark::Array(mark::Array {
                         offsets: ByteView::try_from(array_offsets.as_slice())?,
-                        values: Box::new(Mark::Int256(ByteView::try_from(i256_min.as_slice())?)),
+                        values: Box::new(mark::Mark::Int256(ByteView::try_from(
+                            i256_min.as_slice(),
+                        )?)),
                     }),
                 ),
                 header(
                     Type::Array(Box::new(Type::UInt256)),
-                    Mark::Array(ArrayMark {
+                    mark::Mark::Array(mark::Array {
                         offsets: ByteView::try_from(array_offsets.as_slice())?,
-                        values: Box::new(Mark::UInt256(ByteView::try_from(u256_max.as_slice())?)),
+                        values: Box::new(mark::Mark::UInt256(ByteView::try_from(
+                            u256_max.as_slice(),
+                        )?)),
                     }),
                 ),
                 header(
                     Type::Array(Box::new(Type::Decimal256(4))),
-                    Mark::Array(ArrayMark {
+                    mark::Mark::Array(mark::Array {
                         offsets: ByteView::try_from(array_offsets.as_slice())?,
-                        values: Box::new(Mark::Decimal256(Decimal256 {
+                        values: Box::new(mark::Mark::Decimal256(mark::Decimal256 {
                             precision: 4,
                             data: ByteView::try_from(decimal.as_slice())?,
                         })),
@@ -1671,65 +1688,69 @@ mod serde_tests {
         let marks = vec![
             header(
                 Type::String,
-                Mark::Nullable(NullableMark {
+                mark::Mark::Nullable(mark::Nullable {
                     mask: &mask_present,
-                    data: Box::new(Mark::String(StringView { data: vec!["some"] })),
+                    data: Box::new(mark::Mark::String(mark::StringView { data: vec!["some"] })),
                 }),
             ),
             header(
                 Type::String,
-                Mark::Nullable(NullableMark {
+                mark::Mark::Nullable(mark::Nullable {
                     mask: &mask_null,
-                    data: Box::new(Mark::String(StringView {
+                    data: Box::new(mark::Mark::String(mark::StringView {
                         data: vec!["unused"],
                     })),
                 }),
             ),
             header(
                 Type::String,
-                Mark::LowCardinality(LowCardinality {
+                mark::Mark::LowCardinality(mark::lc::LowCardinality {
                     is_nullable: false,
-                    indices: LcIndices::U8(&low_cardinality_indices),
+                    indices: mark::lc::Indices::U8(&low_cardinality_indices),
                     global_dictionary: None,
-                    additional_keys: Some(Box::new(Mark::String(StringView {
+                    additional_keys: Some(Box::new(mark::Mark::String(mark::StringView {
                         data: vec!["dict"],
                     }))),
                 }),
             ),
             header(
                 Type::String,
-                Mark::Map(MapMark {
+                mark::Mark::Map(mark::Map {
                     offsets: ByteView::try_from(map_offsets.as_slice())?,
-                    keys: Box::new(Mark::String(StringView { data: vec!["k"] })),
-                    values: Box::new(Mark::UInt64(ByteView::try_from(map_value.as_slice())?)),
+                    keys: Box::new(mark::Mark::String(mark::StringView { data: vec!["k"] })),
+                    values: Box::new(mark::Mark::UInt64(ByteView::try_from(
+                        map_value.as_slice(),
+                    )?)),
                 }),
             ),
             header(
                 Type::String,
-                Mark::Tuple(TupleMark {
+                mark::Mark::Tuple(mark::Tuple {
                     values: vec![
-                        Mark::UInt64(ByteView::try_from(tuple_value.as_slice())?),
-                        Mark::String(StringView { data: vec!["two"] }),
+                        mark::Mark::UInt64(ByteView::try_from(tuple_value.as_slice())?),
+                        mark::Mark::String(mark::StringView { data: vec!["two"] }),
                     ],
                 }),
             ),
             header(
                 Type::String,
-                Mark::NamedTuple(NamedTupleMark {
+                mark::Mark::NamedTuple(mark::NamedTuple {
                     col_names: vec!["x"],
-                    tuple: Box::new(Mark::Tuple(TupleMark {
-                        values: vec![Mark::UInt64(ByteView::try_from(named_value.as_slice())?)],
+                    tuple: Box::new(mark::Mark::Tuple(mark::Tuple {
+                        values: vec![mark::Mark::UInt64(ByteView::try_from(
+                            named_value.as_slice(),
+                        )?)],
                     })),
                 }),
             ),
             header(
                 Type::String,
-                Mark::Nested(NestedMark {
+                mark::Mark::Nested(mark::Nested {
                     col_names: vec!["name"],
-                    array_of_tuples: Box::new(Mark::Array(ArrayMark {
+                    array_of_tuples: Box::new(mark::Mark::Array(mark::Array {
                         offsets: ByteView::try_from(nested_offsets.as_slice())?,
-                        values: Box::new(Mark::Tuple(TupleMark {
-                            values: vec![Mark::String(StringView {
+                        values: Box::new(mark::Mark::Tuple(mark::Tuple {
+                            values: vec![mark::Mark::String(mark::StringView {
                                 data: vec!["a", "b"],
                             })],
                         })),
@@ -1738,26 +1759,26 @@ mod serde_tests {
             ),
             header(
                 Type::String,
-                Mark::Variant(VariantMark {
+                mark::Mark::Variant(mark::Variant {
                     offsets: vec![0],
                     discriminators: &variant_discriminators,
-                    types: vec![Mark::String(StringView {
+                    types: vec![mark::Mark::String(mark::StringView {
                         data: vec!["variant"],
                     })],
                 }),
             ),
             header(
                 Type::String,
-                Mark::Dynamic(DynamicMark {
+                mark::Mark::Dynamic(mark::Dynamic {
                     offsets: vec![0],
                     discriminators: vec![0],
-                    columns: vec![Mark::String(StringView {
+                    columns: vec![mark::Mark::String(mark::StringView {
                         data: vec!["dynamic"],
                     })],
                 }),
             ),
         ];
-        let mark = Mark::Json(JsonMark::new(
+        let mark = mark::Mark::Json(mark::Json::new(
             vec![
                 "nullable", "null", "lc", "map", "tuple", "named", "nested", "variant", "dynamic",
             ],

@@ -6,10 +6,7 @@ use crate::mark::StringView;
 use crate::{
     error::Error,
     macros::{bt, t},
-    mark::{
-        Array, Dynamic, Json, LcIndices, LowCardinality, Map, Mark, NamedTuple, Nested, Nullable,
-        Tuple, Variant,
-    },
+    mark::{self, Array, Dynamic, Json, Map, Mark, NamedTuple, Nested, Nullable, Tuple, Variant},
     parse::{
         IResult,
         block::ParseContext,
@@ -288,9 +285,9 @@ fn lc<'a>(inner: &Type<'a>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a
     if ctx.num_rows == 0 {
         return Ok((
             ctx.input,
-            Mark::LowCardinality(LowCardinality {
+            Mark::LowCardinality(mark::lc::LowCardinality {
                 is_nullable: inner.is_nullable(),
-                indices: LcIndices::Empty,
+                indices: mark::lc::Indices::Empty,
                 global_dictionary: None,
                 additional_keys: Some(Box::new(Mark::Empty)),
             }),
@@ -359,7 +356,7 @@ fn lc<'a>(inner: &Type<'a>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a
     }
 
     let (input, indices_marker) = index_type.decode(ctx.fork(input), TypeHeader::Empty)?;
-    let marker = Mark::LowCardinality(LowCardinality {
+    let marker = Mark::LowCardinality(mark::lc::LowCardinality {
         is_nullable: inner.is_nullable(),
         indices: indices_marker.try_into()?,
         global_dictionary,

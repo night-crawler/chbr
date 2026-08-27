@@ -1,6 +1,7 @@
 use super::{FromVariant, ReadSlice, Readable, Str, TryRead};
 use crate::error::Error;
-use crate::mark::{LcIndices, Mark, Variant as VariantMark};
+use crate::mark;
+use crate::mark::{Mark, Variant as VariantMark};
 use crate::types::{OffsetIndexPair as _, Offsets};
 use std::hint::cold_path;
 use std::ops::Range;
@@ -50,7 +51,7 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for Nullable<'a, Inner> {
 
 #[derive(Clone, Copy)]
 pub struct Lc<'a, Inner> {
-    indices: LcIndices<'a>,
+    indices: mark::lc::Indices<'a>,
     dict: Option<Inner>,
 }
 
@@ -112,7 +113,7 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for Lc<'a, Inner> {
 
 #[derive(Clone, Copy)]
 pub struct LcNullable<'a, Inner> {
-    indices: LcIndices<'a>,
+    indices: mark::lc::Indices<'a>,
     dict: Option<Inner>,
 }
 
