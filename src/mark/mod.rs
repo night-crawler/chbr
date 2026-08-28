@@ -1,11 +1,13 @@
 mod json;
 pub mod lc;
+mod string;
 
 pub use json::Json;
+pub use string::{FixedString, StringView};
 
 use crate::{
-    Bf16Data, ByteExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data,
-    Decimal64Data, Decimal128Data, Decimal256Data, Error, I256, Ipv4Data, Ipv6Data, U256, UuidData,
+    Bf16Data, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
+    Decimal128Data, Decimal256Data, Error, I256, Ipv4Data, Ipv6Data, U256, UuidData,
     macros::{define_int_getters, define_ip_getters, define_opt_getters, define_slice_fns},
     slice::ByteView,
     types::{OffsetIndexPair as _, Offsets},
@@ -16,12 +18,7 @@ use bstr::BStr;
 use chrono::{DateTime as ChronoDateTime, TimeZone};
 use chrono_tz::Tz;
 use core::fmt;
-use std::{
-    fmt::Debug,
-    hint::cold_path,
-    marker::PhantomData,
-    ops::{Deref, Range},
-};
+use std::{fmt::Debug, hint::cold_path, marker::PhantomData, ops::Range};
 use uuid::Uuid;
 
 pub enum Mark<'a> {
@@ -510,11 +507,11 @@ impl<'a> Mark<'a> {
         };
 
         if matches!(array.values.as_ref(), Mark::Empty) {
-            return Ok(Some(ArrayLcStrIter { inner: None }));
+            return Ok(Some(lc::ArrayLcStrIter { inner: None }));
         }
 
         let it = array.values.slice_lc_strs(start..end)?;
-        Ok(Some(ArrayLcStrIter { inner: Some(it) }))
+        Ok(Some(lc::ArrayLcStrIter { inner: Some(it) }))
     }
 
     #[inline]
@@ -789,26 +786,6 @@ pub struct Decimal256<'a> {
 }
 
 #[derive(Debug)]
-pub struct FixedString<'a> {
-    pub size: usize,
-    pub data: &'a [u8],
-}
-
-impl<'a> FixedString<'a> {
-    #[inline]
-    pub(crate) fn get_bstr(&self, index: usize) -> Option<&'a BStr> {
-        let offset = self.size.checked_mul(index)?;
-        let end = offset.checked_add(self.size)?;
-        Some(BStr::new(self.data.get(offset..end)?.rtrim_zeros()))
-    }
-
-    #[inline]
-    pub fn get(&self, index: usize) -> Option<Value<'a>> {
-        self.get_bstr(index).map(Value::String)
-    }
-}
-
-#[derive(Debug)]
 pub struct DateTime<'a> {
     pub tz: Tz,
     pub data: ByteView<'a, DateTime32Data>,
@@ -906,26 +883,6 @@ pub struct Tuple<'a> {
 }
 
 #[derive(Debug)]
-pub struct StringView<'a> {
-    pub data: Vec<&'a BStr>,
-}
-
-impl<'a> Deref for StringView<'a> {
-    type Target = [&'a BStr];
-
-    fn deref(&self) -> &Self::Target {
-        &self.data
-    }
-}
-
-impl<'a> StringView<'a> {
-    #[inline(always)]
-    pub fn get(&self, index: usize) -> Option<&'a BStr> {
-        self.data.get(index).copied()
-    }
-}
-
-#[derive(Debug)]
 pub struct BoolView<'a> {
     pub data: &'a [u8],
 }
@@ -936,29 +893,6 @@ impl BoolView<'_> {
         self.data.get(index).map(|&val| val == 1)
     }
 }
-
-struct ArrayLcStrIter<'a> {
-    inner: Option<lc::StrIter<'a>>,
-}
-
-impl<'a> Iterator for ArrayLcStrIter<'a> {
-    type Item = crate::Result<&'a BStr>;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.as_mut()?.next()
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        match &self.inner {
-            Some(it) => it.size_hint(),
-            None => (0, Some(0)),
-        }
-    }
-}
-
-impl ExactSizeIterator for ArrayLcStrIter<'_> {}
 
 impl Debug for Mark<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
