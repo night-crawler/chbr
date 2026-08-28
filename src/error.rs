@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, ops::Range};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -40,6 +40,9 @@ pub enum Error {
 
     #[error("Index {0} out of bounds for {1}")]
     IndexOutOfBounds(usize, &'static str),
+
+    #[error("Range {0:?} out of bounds for {1}")]
+    RangeOutOfBounds(Range<usize>, &'static str),
 
     #[error("Corrupted data: {0}")]
     CorruptedData(String),

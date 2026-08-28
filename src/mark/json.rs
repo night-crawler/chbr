@@ -103,9 +103,9 @@ impl<'a> Json<'a> {
     }
 
     pub(crate) fn slice(&'a self, range: Range<usize>) -> crate::Result<Value<'a>> {
-        if range.end > self.rows {
+        if range.start > range.end || range.end > self.rows {
             cold_path();
-            return Err(Error::IndexOutOfBounds(range.end, "Json"));
+            return Err(Error::RangeOutOfBounds(range, "Json"));
         }
         Ok(Value::JsonSlice {
             mark: self,
@@ -215,11 +215,14 @@ fn decode_key(key: &str) -> Cow<'_, str> {
     Cow::Owned(decoded)
 }
 
-#[cfg(all(test, feature = "serde1"))]
+#[cfg(test)]
 mod tests {
+    #[cfg(feature = "serde1")]
     use super::decode_key;
+    #[cfg(feature = "serde1")]
     use std::borrow::Cow;
 
+    #[cfg(feature = "serde1")]
     #[test]
     fn decodes_only_escaped_dots() {
         assert!(matches!(decode_key("plain"), Cow::Borrowed("plain")));

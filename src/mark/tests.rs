@@ -1731,12 +1731,12 @@ fn mark_accessors_return_errors() -> TestResult {
 
     assert!(matches!(
         Mark::Empty.slice(0..1),
-        Err(crate::Error::IndexOutOfBounds(1, "Empty"))
+        Err(crate::Error::RangeOutOfBounds(range, "Empty")) if range == (0..1)
     ));
 
     assert!(matches!(
         mark.slice(1..3),
-        Err(crate::Error::IndexOutOfBounds(3, "UInt8"))
+        Err(crate::Error::RangeOutOfBounds(range, "UInt8")) if range == (1..3)
     ));
 
     assert!(matches!(

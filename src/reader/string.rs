@@ -42,10 +42,9 @@ impl<'a> ReadSlice<'a> for Bytes<'a> {
     type Elem = &'a BStr;
 
     fn try_read_slice(&self, range: Range<usize>) -> crate::Result<&'a [Self::Elem]> {
-        let end = range.end;
-        let Some(slice) = self.0.data.get(range) else {
+        let Some(slice) = self.0.data.get(range.clone()) else {
             cold_path();
-            return Err(Error::IndexOutOfBounds(end, "String"));
+            return Err(Error::RangeOutOfBounds(range, "String"));
         };
         Ok(slice)
     }

@@ -118,9 +118,9 @@ impl<'a> Indices<'a> {
     pub fn slice(self, range: Range<usize>) -> crate::Result<Value<'a>> {
         match self {
             Self::Empty => {
-                if !range.is_empty() {
+                if range.start != 0 || range.end != 0 {
                     cold_path();
-                    return Err(Error::IndexOutOfBounds(range.end, "Empty"));
+                    return Err(Error::RangeOutOfBounds(range, "Empty"));
                 }
                 Ok(Value::Empty)
             }
@@ -135,8 +135,8 @@ impl<'a> Indices<'a> {
     pub(crate) fn iter(self, range: Range<usize>) -> crate::Result<IndexIter<'a>> {
         match self {
             Self::Empty => {
-                if !range.is_empty() {
-                    return Err(Error::IndexOutOfBounds(range.end, "Empty"));
+                if range.start != 0 || range.end != 0 {
+                    return Err(Error::RangeOutOfBounds(range, "Empty"));
                 }
                 Ok(IndexIter::U8([].iter()))
             }
