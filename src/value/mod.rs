@@ -1,27 +1,22 @@
 use core::{convert::TryFrom, hint::cold_path, marker::PhantomData};
-use std::{
-    hint::unreachable_unchecked,
-    net::{Ipv4Addr, Ipv6Addr},
-    ops::Range,
-};
+use std::{net::Ipv4Addr, ops::Range};
 
 use crate::zc;
 use crate::{
-    Bf16Data, ByteExt as _, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data,
-    Decimal64Data, Decimal128Data, Decimal256Data, I256, Ipv4Data, Ipv6Data, TinyRange, U256,
-    UuidData,
+    Bf16Data, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
+    Decimal128Data, Decimal256Data, I256, Ipv4Data, Ipv6Data, TinyRange, U256, UuidData,
     error::Error,
-    mark::{
-        self, Array, DateTime, DateTime64, Decimal32, Decimal64, Decimal128, Decimal256, Dynamic,
-        Enum8, Enum16, FixedString, Json, Map, Mark, NamedTuple, Nested, Nullable, Tuple, Variant,
-    },
+    mark,
     types::{OffsetIndexPair as _, Offsets},
 };
 use bstr::BStr;
 use chrono_tz::Tz;
 use half::bf16;
-use rust_decimal::Decimal;
-use uuid::Uuid;
+mod scalar;
+mod string;
+
+pub use scalar::*;
+pub use string::*;
 
 #[derive(Debug, Clone)]
 pub enum Value<'a> {
@@ -42,16 +37,16 @@ pub enum Value<'a> {
     Float32(f32),
     Float64(f64),
     BFloat16(bf16),
-    Decimal32(usize, &'a Decimal32<'a>),
-    Decimal64(usize, &'a Decimal64<'a>),
-    Decimal128(usize, &'a Decimal128<'a>),
-    Decimal256(usize, &'a Decimal256<'a>),
+    Decimal32(usize, &'a mark::Decimal32<'a>),
+    Decimal64(usize, &'a mark::Decimal64<'a>),
+    Decimal128(usize, &'a mark::Decimal128<'a>),
+    Decimal256(usize, &'a mark::Decimal256<'a>),
     String(&'a BStr),
     Uuid(&'a UuidData),
     Date(chrono::NaiveDate),
     Date32(chrono::NaiveDate),
-    DateTime(usize, &'a DateTime<'a>),
-    DateTime64(usize, &'a DateTime64<'a>),
+    DateTime(usize, &'a mark::DateTime<'a>),
+    DateTime64(usize, &'a mark::DateTime64<'a>),
     Ipv4(Ipv4Addr),
     Ipv6(&'a Ipv6Data),
 
@@ -112,72 +107,72 @@ pub enum Value<'a> {
     },
 
     ArraySlice {
-        mark: &'a Array<'a>,
+        mark: &'a mark::Array<'a>,
         range: TinyRange,
     },
 
     Tuple {
         index: usize,
-        mark: &'a Tuple<'a>,
+        mark: &'a mark::Tuple<'a>,
     },
     Map {
-        mark: &'a Map<'a>,
+        mark: &'a mark::Map<'a>,
         index: usize,
     },
     MapSlice {
-        mark: &'a Map<'a>,
+        mark: &'a mark::Map<'a>,
         range: TinyRange,
     },
     TupleSlice {
-        mark: &'a Tuple<'a>,
+        mark: &'a mark::Tuple<'a>,
         range: TinyRange,
     },
     NullableSlice {
-        mark: &'a Nullable<'a>,
+        mark: &'a mark::Nullable<'a>,
         range: TinyRange,
     },
     Nested {
-        mark: &'a Nested<'a>,
+        mark: &'a mark::Nested<'a>,
         index: usize,
     },
     NestedSlice {
-        mark: &'a Nested<'a>,
+        mark: &'a mark::Nested<'a>,
         range: TinyRange,
     },
     NamedTuple {
-        mark: &'a NamedTuple<'a>,
+        mark: &'a mark::NamedTuple<'a>,
         index: usize,
     },
     NamedTupleSlice {
-        mark: &'a NamedTuple<'a>,
+        mark: &'a mark::NamedTuple<'a>,
         range: TinyRange,
     },
     FixedStringSlice {
-        mark: &'a FixedString<'a>,
+        mark: &'a mark::FixedString<'a>,
         range: TinyRange,
     },
     Enum8Slice {
-        mark: &'a Enum8<'a>,
+        mark: &'a mark::Enum8<'a>,
         range: TinyRange,
     },
     Enum16Slice {
-        mark: &'a Enum16<'a>,
+        mark: &'a mark::Enum16<'a>,
         range: TinyRange,
     },
     Json {
-        mark: &'a Json<'a>,
+        mark: &'a mark::Json<'a>,
         index: usize,
     },
     JsonSlice {
-        mark: &'a Json<'a>,
+        mark: &'a mark::Json<'a>,
         range: TinyRange,
     },
     VariantSlice {
-        mark: &'a Variant<'a>,
+        mark: &'a mark::Variant<'a>,
         range: TinyRange,
     },
     DynamicSlice {
-        mark: &'a Dynamic<'a>,
+        mark: &'a mark::Dynamic<'a>,
         range: TinyRange,
     },
 }
@@ -264,346 +259,9 @@ impl Value<'_> {
     }
 }
 
-macro_rules! impl_try_from_value_slice {
-    ($variant:ident, $ty:ty) => {
-        impl<'a> TryFrom<Value<'a>> for $ty {
-            type Error = Error;
-
-            fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-                match value {
-                    Value::$variant(v) => Ok(v),
-                    Value::Empty => Ok(&[]),
-                    other => {
-                        cold_path();
-                        Err(Error::MismatchedType(other.as_str(), stringify!($ty)))
-                    }
-                }
-            }
-        }
-    };
-}
-
-macro_rules! impl_try_from_value {
-    ($variant:ident, $ty:ty) => {
-        impl<'a> TryFrom<Value<'a>> for $ty {
-            type Error = Error;
-
-            fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-                match value {
-                    Value::$variant(v) => Ok(v),
-                    other => {
-                        cold_path();
-                        Err(Error::MismatchedType(other.as_str(), stringify!($ty)))
-                    }
-                }
-            }
-        }
-    };
-}
-
-impl_try_from_value!(String, &'a BStr);
-impl_try_from_value_slice!(StringSlice, &'a [&'a BStr]);
-
-impl<'a> TryFrom<Value<'a>> for &'a str {
-    type Error = Error;
-
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::String(value) => crate::error::decode_utf8(value),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "&str"))
-            }
-        }
-    }
-}
-
-impl_try_from_value_slice!(Int8Slice, &'a [i8]);
-impl_try_from_value_slice!(Int16Slice, &'a [zc::I16]);
-impl_try_from_value_slice!(Int32Slice, &'a [zc::I32]);
-impl_try_from_value_slice!(Int64Slice, &'a [zc::I64]);
-impl_try_from_value_slice!(Int128Slice, &'a [zc::I128]);
-
-impl_try_from_value_slice!(UInt8Slice, &'a [u8]);
-impl_try_from_value_slice!(UInt16Slice, &'a [zc::U16]);
-impl_try_from_value_slice!(UInt32Slice, &'a [zc::U32]);
-impl_try_from_value_slice!(UInt64Slice, &'a [zc::U64]);
-impl_try_from_value_slice!(UInt128Slice, &'a [zc::U128]);
-
-impl_try_from_value_slice!(Float32Slice, &'a [zc::F32]);
-impl_try_from_value_slice!(Float64Slice, &'a [zc::F64]);
-
-impl_try_from_value_slice!(UuidSlice, &'a [UuidData]);
-impl_try_from_value_slice!(Date16Slice, &'a [Date16Data]);
-impl_try_from_value_slice!(Date32Slice, &'a [Date32Data]);
-impl_try_from_value_slice!(Ipv4Slice, &'a [Ipv4Data]);
-impl_try_from_value_slice!(Ipv6Slice, &'a [Ipv6Data]);
-
-impl_try_from_value!(Bool, bool);
-impl_try_from_value!(Int256, &'a I256);
-
-impl_try_from_value!(UInt256, &'a U256);
-
-impl_try_from_value!(Float64, f64);
-impl_try_from_value!(Float32, f32);
-impl_try_from_value!(BFloat16, bf16);
-impl_try_from_value_slice!(BFloat16Slice, &'a [Bf16Data]);
-
-impl_try_from_value!(Ipv4, Ipv4Addr);
-
-impl<'a> TryFrom<Value<'a>> for Ipv6Addr {
-    type Error = Error;
-
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::Ipv6(v) => Ok(Ipv6Addr::from(*v)),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Ipv6Addr"))
-            }
-        }
-    }
-}
-
-impl<'a> TryFrom<Value<'a>> for Uuid {
-    type Error = Error;
-
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::Uuid(uuid_data) => {
-                let [hi, lo] = uuid_data.0;
-                Ok(Uuid::from_u64_pair(hi.get(), lo.get()))
-            }
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Uuid"))
-            }
-        }
-    }
-}
-
-impl TryFrom<Value<'_>> for chrono::DateTime<Tz> {
-    type Error = Error;
-
-    fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
-        match value {
-            Value::DateTime(index, d) => {
-                let value = d
-                    .data
-                    .get(index)
-                    .expect("bug: we checked the boundary before creating the Value")
-                    .with_tz(d.tz);
-                Ok(value)
-            }
-            Value::DateTime64(index, d) => {
-                let value = d
-                    .data
-                    .get(index)
-                    .expect("bug: we checked the boundary before creating the Value")
-                    .with_tz_and_precision(d.tz, d.precision);
-                let Some(value) = value else {
-                    cold_path();
-                    return Err(Error::Overflow("DateTime64 value out of range".to_owned()));
-                };
-
-                Ok(value)
-            }
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "DateTime"))
-            }
-        }
-    }
-}
-
-impl TryFrom<Value<'_>> for chrono::NaiveDate {
-    type Error = Error;
-
-    fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
-        match value {
-            Value::Date32(dt) | Value::Date(dt) => Ok(dt),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Date/Date64"))
-            }
-        }
-    }
-}
-
-macro_rules! impl_try_from_integer_value {
-    ($($target:ty),+ $(,)?) => {
-        $(
-            impl<'a> core::convert::TryFrom<Value<'a>> for $target {
-                type Error = Error;
-
-
-                fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-
-                    match value {
-                        Value::Int8(v) => match <$target>::try_from(v) {
-                            Ok(value) => Ok(value),
-                            Err(_) => {
-                                cold_path();
-                                Err(Error::ValueOutOfRange("i8", stringify!($target), v.to_string()))
-                            }
-                        },
-                        Value::Int16(v) => match <$target>::try_from(v) {
-                            Ok(value) => Ok(value),
-                            Err(_) => {
-                                cold_path();
-                                Err(Error::ValueOutOfRange("i16", stringify!($target), v.to_string()))
-                            }
-                        },
-                        Value::Int32(v) => match <$target>::try_from(v) {
-                            Ok(value) => Ok(value),
-                            Err(_) => {
-                                cold_path();
-                                Err(Error::ValueOutOfRange("i32", stringify!($target), v.to_string()))
-                            }
-                        },
-                        Value::Int64(v) => match <$target>::try_from(v) {
-                            Ok(value) => Ok(value),
-                            Err(_) => {
-                                cold_path();
-                                Err(Error::ValueOutOfRange("i64", stringify!($target), v.to_string()))
-                            }
-                        },
-                        Value::Int128(v) => match <$target>::try_from(v.get()) {
-                            Ok(value) => Ok(value),
-                            Err(_) => {
-                                cold_path();
-                                Err(Error::ValueOutOfRange("i128", stringify!($target), v.to_string()))
-                            }
-                        },
-
-                        Value::UInt8(v) => match <$target>::try_from(v) {
-                            Ok(value) => Ok(value),
-                            Err(_) => {
-                                cold_path();
-                                Err(Error::ValueOutOfRange("u8", stringify!($target), v.to_string()))
-                            }
-                        },
-                        Value::UInt16(v) => match <$target>::try_from(v) {
-                            Ok(value) => Ok(value),
-                            Err(_) => {
-                                cold_path();
-                                Err(Error::ValueOutOfRange("u16", stringify!($target), v.to_string()))
-                            }
-                        },
-                        Value::UInt32(v) => match <$target>::try_from(v) {
-                            Ok(value) => Ok(value),
-                            Err(_) => {
-                                cold_path();
-                                Err(Error::ValueOutOfRange("u32", stringify!($target), v.to_string()))
-                            }
-                        },
-                        Value::UInt64(v) => match <$target>::try_from(v) {
-                            Ok(value) => Ok(value),
-                            Err(_) => {
-                                cold_path();
-                                Err(Error::ValueOutOfRange("u64", stringify!($target), v.to_string()))
-                            }
-                        },
-                        Value::UInt128(v) => match <$target>::try_from(v.get()) {
-                            Ok(value) => Ok(value),
-                            Err(_) => {
-                                cold_path();
-                                Err(Error::ValueOutOfRange("u128", stringify!($target), v.to_string()))
-                            }
-                        },
-
-                        other => {
-                            cold_path();
-                            Err(Error::MismatchedType(other.as_str(), stringify!($target)))
-                        },
-                    }
-                }
-            }
-        )+
-    };
-}
-
-impl_try_from_integer_value!(
-    u8, u16, u32, u64, usize, i8, i16, i32, i64, isize, i128, u128
-);
-
-// TODO: also isize iterator?
-pub struct SliceUsizeIterator<'a> {
-    value: Value<'a>,
-    index: usize,
-    len: usize,
-}
-
-impl<'a> TryFrom<Value<'a>> for SliceUsizeIterator<'a> {
-    type Error = Error;
-
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::UInt8Slice(x) => Ok(Self {
-                value,
-                index: 0,
-                len: x.len(),
-            }),
-            Value::UInt16Slice(x) => Ok(Self {
-                value,
-                index: 0,
-                len: x.len(),
-            }),
-            Value::UInt32Slice(x) => Ok(Self {
-                value,
-                index: 0,
-                len: x.len(),
-            }),
-            Value::UInt64Slice(x) => Ok(Self {
-                value,
-                index: 0,
-                len: x.len(),
-            }),
-            _ => {
-                cold_path();
-                Err(Error::MismatchedType(value.as_str(), "SliceUsizeIterator"))
-            }
-        }
-    }
-}
-
-impl Iterator for SliceUsizeIterator<'_> {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.len {
-            return None;
-        }
-
-        let result = match &self.value {
-            Value::UInt8Slice(bv) => bv.get(self.index).copied().map(usize::from),
-            Value::UInt16Slice(bv) => bv.get(self.index).map(|v| v.get() as usize),
-            Value::UInt32Slice(bv) => bv.get(self.index).map(|v| v.get() as usize),
-            Value::UInt64Slice(bv) => {
-                if let Some(value) = bv.get(self.index).map(|v| v.get()) {
-                    usize::try_from(value).ok()
-                } else {
-                    None
-                }
-            }
-            _ => unsafe { unreachable_unchecked() },
-        };
-
-        self.index += 1;
-        result
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.len - self.index;
-        (remaining, Some(remaining))
-    }
-}
-
-impl ExactSizeIterator for SliceUsizeIterator<'_> {}
-
 pub struct LowCardinalitySliceIterator<'a> {
     pub indices: SliceUsizeIterator<'a>,
-    pub additional_keys: &'a Mark<'a>,
+    pub additional_keys: &'a mark::Mark<'a>,
 }
 
 impl<'a> TryFrom<Value<'a>> for LowCardinalitySliceIterator<'a> {
@@ -639,7 +297,7 @@ impl<'a> Iterator for LowCardinalitySliceIterator<'a> {
 impl ExactSizeIterator for LowCardinalitySliceIterator<'_> {}
 
 pub struct ArraySliceIterator<'a, T> {
-    mark: Option<&'a Array<'a>>,
+    mark: Option<&'a mark::Array<'a>>,
     range: Range<usize>,
     _phantom: PhantomData<T>,
 }
@@ -728,7 +386,7 @@ macro_rules! impl_try_from_tuple {
                 let (index, tuple_mark) = match value {
                     Value::Tuple { index, mark } => (index, mark),
                     Value::NamedTuple { index, mark } => {
-                        let Mark::Tuple(tuple) = mark.tuple.as_ref() else {
+                        let mark::Mark::Tuple(tuple) = mark.tuple.as_ref() else {
                             cold_path();
                             return Err(Error::MismatchedType("non-Tuple", concat!("Tuple", stringify!($len))));
                         };
@@ -783,8 +441,8 @@ impl_try_from_tuple!(9, 0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 
 impl_try_from_tuple!(10, 0 => A, 1 => B, 2 => C, 3 => D, 4 => E, 5 => F, 6 => G, 7 => H, 8 => I, 9 => J);
 
 pub struct MapIterator<'a, K, V> {
-    pub(crate) keys: &'a Mark<'a>,
-    pub(crate) values: &'a Mark<'a>,
+    pub(crate) keys: &'a mark::Mark<'a>,
+    pub(crate) values: &'a mark::Mark<'a>,
     pub(crate) range: Range<usize>,
     pub(crate) _marker: PhantomData<(K, V)>,
 }
@@ -871,8 +529,8 @@ where
 
 pub struct MapSliceIterator<'a, K, V> {
     pub(crate) offsets: &'a Offsets<'a>,
-    pub(crate) keys: &'a Mark<'a>,
-    pub(crate) values: &'a Mark<'a>,
+    pub(crate) keys: &'a mark::Mark<'a>,
+    pub(crate) values: &'a mark::Mark<'a>,
     pub(crate) range: Range<usize>,
     pub(crate) _marker: PhantomData<(K, V)>,
 }
@@ -937,7 +595,7 @@ where
 }
 
 pub struct TupleSliceIterator<'a> {
-    mark: &'a Tuple<'a>,
+    mark: &'a mark::Tuple<'a>,
     range: Range<usize>,
 }
 
@@ -976,148 +634,8 @@ impl<'a> Iterator for TupleSliceIterator<'a> {
 
 impl ExactSizeIterator for TupleSliceIterator<'_> {}
 
-impl<'a> TryFrom<Value<'a>> for Decimal {
-    type Error = Error;
-
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::Decimal32(index, mark) => Ok(mark.data[index].with_precision(mark.precision)),
-            Value::Decimal64(index, mark) => Ok(mark.data[index].with_precision(mark.precision)),
-            Value::Decimal128(index, mark) => mark.data[index].with_precision(mark.precision),
-            Value::Decimal256(_, _) => {
-                cold_path();
-                Err(Error::NotImplemented(
-                    "Decimal256 is not yet supported".to_owned(),
-                ))
-            }
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Decimal"))
-            }
-        }
-    }
-}
-
-pub struct BoolSliceIterator<'a> {
-    data: std::slice::Iter<'a, u8>,
-}
-
-impl<'a> TryFrom<Value<'a>> for BoolSliceIterator<'a> {
-    type Error = Error;
-
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::BoolSlice(data) => Ok(BoolSliceIterator { data: data.iter() }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "BoolSliceIterator"))
-            }
-        }
-    }
-}
-
-impl Iterator for BoolSliceIterator<'_> {
-    type Item = bool;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.data.next().map(|&byte| byte != 0)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.data.size_hint()
-    }
-}
-
-impl ExactSizeIterator for BoolSliceIterator<'_> {}
-
-pub struct DateTime32SliceIterator<'a> {
-    tz: Tz,
-    slice: std::slice::Iter<'a, DateTime32Data>,
-}
-
-impl<'a> TryFrom<Value<'a>> for DateTime32SliceIterator<'a> {
-    type Error = Error;
-
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::DateTime32Slice { tz, slice } => Ok(Self {
-                tz,
-                slice: slice.iter(),
-            }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(
-                    other.as_str(),
-                    "DateTime32SliceIterator",
-                ))
-            }
-        }
-    }
-}
-
-impl Iterator for DateTime32SliceIterator<'_> {
-    type Item = chrono::DateTime<Tz>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.slice.next().map(|dt| dt.with_tz(self.tz))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.slice.size_hint()
-    }
-}
-
-impl ExactSizeIterator for DateTime32SliceIterator<'_> {}
-
-pub struct DateTime64SliceIterator<'a> {
-    tz: Tz,
-    precision: u8,
-    slice: std::slice::Iter<'a, DateTime64Data>,
-}
-
-impl<'a> TryFrom<Value<'a>> for DateTime64SliceIterator<'a> {
-    type Error = Error;
-
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::DateTime64Slice {
-                tz,
-                precision,
-                slice,
-            } => Ok(Self {
-                tz,
-                precision,
-                slice: slice.iter(),
-            }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(
-                    other.as_str(),
-                    "DateTime64SliceIterator",
-                ))
-            }
-        }
-    }
-}
-
-impl Iterator for DateTime64SliceIterator<'_> {
-    type Item = Option<chrono::DateTime<Tz>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.slice
-            .next()
-            .map(|dt| dt.with_tz_and_precision(self.tz, self.precision))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.slice.size_hint()
-    }
-}
-
-impl ExactSizeIterator for DateTime64SliceIterator<'_> {}
-
 pub struct NullableSliceIterator<'a> {
-    mark: Option<&'a Nullable<'a>>,
+    mark: Option<&'a mark::Nullable<'a>>,
     range: Range<usize>,
 }
 
@@ -1166,123 +684,6 @@ impl<'a> Iterator for NullableSliceIterator<'a> {
 }
 
 impl ExactSizeIterator for NullableSliceIterator<'_> {}
-
-pub struct Decimal32SliceIterator<'a> {
-    precision: u8,
-    slice: std::slice::Iter<'a, Decimal32Data>,
-}
-
-impl<'a> TryFrom<Value<'a>> for Decimal32SliceIterator<'a> {
-    type Error = Error;
-
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::Decimal32Slice { precision, slice } => Ok(Self {
-                precision,
-                slice: slice.iter(),
-            }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(
-                    other.as_str(),
-                    "Decimal32SliceIterator",
-                ))
-            }
-        }
-    }
-}
-
-impl Iterator for Decimal32SliceIterator<'_> {
-    type Item = Decimal;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.slice.next().map(|v| v.with_precision(self.precision))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.slice.size_hint()
-    }
-}
-
-impl ExactSizeIterator for Decimal32SliceIterator<'_> {}
-
-pub struct Decimal64SliceIterator<'a> {
-    precision: u8,
-    slice: std::slice::Iter<'a, Decimal64Data>,
-}
-
-impl<'a> TryFrom<Value<'a>> for Decimal64SliceIterator<'a> {
-    type Error = Error;
-
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::Decimal64Slice { precision, slice } => Ok(Self {
-                precision,
-                slice: slice.iter(),
-            }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(
-                    other.as_str(),
-                    "Decimal64SliceIterator",
-                ))
-            }
-        }
-    }
-}
-
-impl Iterator for Decimal64SliceIterator<'_> {
-    type Item = Decimal;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.slice.next().map(|v| v.with_precision(self.precision))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.slice.size_hint()
-    }
-}
-
-impl ExactSizeIterator for Decimal64SliceIterator<'_> {}
-
-pub struct Decimal128SliceIterator<'a> {
-    precision: u8,
-    slice: std::slice::Iter<'a, Decimal128Data>,
-}
-
-impl<'a> TryFrom<Value<'a>> for Decimal128SliceIterator<'a> {
-    type Error = Error;
-
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::Decimal128Slice { precision, slice } => Ok(Self {
-                precision,
-                slice: slice.iter(),
-            }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(
-                    other.as_str(),
-                    "Decimal128SliceIterator",
-                ))
-            }
-        }
-    }
-}
-
-impl Iterator for Decimal128SliceIterator<'_> {
-    type Item = crate::Result<Decimal>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.slice.next().map(|v| v.with_precision(self.precision))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.slice.size_hint()
-    }
-}
-
-impl ExactSizeIterator for Decimal128SliceIterator<'_> {}
 
 pub struct NestedIterator<'a> {
     col_names: &'a [&'a str],
@@ -1338,7 +739,7 @@ impl<'a> Iterator for NestedIterator<'a> {
 impl ExactSizeIterator for NestedIterator<'_> {}
 
 pub struct NestedItemsIterator<'a> {
-    mark_ter: std::iter::Zip<std::slice::Iter<'a, Mark<'a>>, std::slice::Iter<'a, &'a str>>,
+    mark_ter: std::iter::Zip<std::slice::Iter<'a, mark::Mark<'a>>, std::slice::Iter<'a, &'a str>>,
     row: usize,
 }
 
@@ -1361,7 +762,7 @@ impl ExactSizeIterator for NestedItemsIterator<'_> {}
 
 pub struct NamedTupleIterator<'a> {
     col_names: &'a [&'a str],
-    mark: &'a Tuple<'a>,
+    mark: &'a mark::Tuple<'a>,
     row: usize,
 }
 
@@ -1371,7 +772,7 @@ impl<'a> TryFrom<Value<'a>> for NamedTupleIterator<'a> {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::NamedTuple { mark, index } => {
-                let Mark::Tuple(tuple) = mark.tuple.as_ref() else {
+                let mark::Mark::Tuple(tuple) = mark.tuple.as_ref() else {
                     cold_path();
                     return Err(Error::MismatchedType("non-Tuple", "NamedTupleIterator"));
                 };
@@ -1412,7 +813,7 @@ impl<'a> Iterator for NamedTupleIterator<'a> {
 impl ExactSizeIterator for NamedTupleIterator<'_> {}
 
 pub struct NamedTupleSliceIterator<'a> {
-    mark: &'a NamedTuple<'a>,
+    mark: &'a mark::NamedTuple<'a>,
     range: Range<usize>,
 }
 
@@ -1441,7 +842,7 @@ impl<'a> Iterator for NamedTupleSliceIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.range.next()?;
-        let Mark::Tuple(tuple) = self.mark.tuple.as_ref() else {
+        let mark::Mark::Tuple(tuple) = self.mark.tuple.as_ref() else {
             cold_path();
             return Some(Err(Error::MismatchedType(
                 "non-Tuple",
@@ -1464,7 +865,7 @@ impl ExactSizeIterator for NamedTupleSliceIterator<'_> {}
 
 pub struct NestedSliceIterator<'a> {
     col_names: &'a [&'a str],
-    array_of_tuples: &'a Mark<'a>,
+    array_of_tuples: &'a mark::Mark<'a>,
     range: Range<usize>,
 }
 
@@ -1521,145 +922,8 @@ impl<'a> Iterator for NestedSliceIterator<'a> {
 
 impl ExactSizeIterator for NestedSliceIterator<'_> {}
 
-pub struct FixedStringSliceIterator<'a> {
-    mark: &'a FixedString<'a>,
-    range: Range<usize>,
-}
-
-impl<'a> TryFrom<Value<'a>> for FixedStringSliceIterator<'a> {
-    type Error = Error;
-
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::FixedStringSlice { mark, range } => Ok(Self {
-                mark,
-                range: range.into(),
-            }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(
-                    other.as_str(),
-                    "FixedStringSliceIterator",
-                ))
-            }
-        }
-    }
-}
-
-impl<'a> Iterator for FixedStringSliceIterator<'a> {
-    type Item = &'a BStr;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let slice_idx = self.range.next()?;
-        let start = slice_idx * self.mark.size;
-        let end = start + self.mark.size;
-
-        if end > self.mark.data.len() {
-            return None;
-        }
-
-        Some(BStr::new(self.mark.data[start..end].rtrim_zeros()))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.range.size_hint()
-    }
-}
-
-impl ExactSizeIterator for FixedStringSliceIterator<'_> {}
-
-pub struct Enum8SliceIterator<'a> {
-    variants: &'a [(&'a str, i8)],
-    data: std::slice::Iter<'a, i8>,
-}
-
-impl<'a> TryFrom<Value<'a>> for Enum8SliceIterator<'a> {
-    type Error = Error;
-
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::Enum8Slice { mark, range } => {
-                let range: Range<usize> = range.into();
-                let data = &mark.data[range];
-                Ok(Self {
-                    variants: &mark.variants,
-                    data: data.iter(),
-                })
-            }
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Enum8Iterator"))
-            }
-        }
-    }
-}
-
-impl<'a> Iterator for Enum8SliceIterator<'a> {
-    type Item = &'a str;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let value = self.data.next()?;
-        if let Ok(index) = self.variants.binary_search_by_key(value, |(_, id)| *id) {
-            return Some(self.variants[index].0);
-        }
-
-        None
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.data.size_hint()
-    }
-}
-
-impl ExactSizeIterator for Enum8SliceIterator<'_> {}
-
-pub struct Enum16SliceIterator<'a> {
-    variants: &'a [(&'a str, i16)],
-    data: std::slice::Iter<'a, zc::I16>,
-}
-
-impl<'a> TryFrom<Value<'a>> for Enum16SliceIterator<'a> {
-    type Error = Error;
-
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::Enum16Slice { mark, range } => {
-                let range: Range<usize> = range.into();
-                let data = &mark.data[range];
-                Ok(Self {
-                    variants: &mark.variants,
-                    data: data.iter(),
-                })
-            }
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Enum16Iterator"))
-            }
-        }
-    }
-}
-
-impl<'a> Iterator for Enum16SliceIterator<'a> {
-    type Item = &'a str;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let value = self.data.next()?.get();
-        if let Ok(index) = self.variants.binary_search_by_key(&value, |(_, id)| *id) {
-            return Some(self.variants[index].0);
-        }
-
-        None
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.data.size_hint()
-    }
-}
-
-impl ExactSizeIterator for Enum16SliceIterator<'_> {}
-
 pub struct VariantSliceIterator<'a> {
-    mark: &'a Variant<'a>,
+    mark: &'a mark::Variant<'a>,
     range: Range<usize>,
 }
 
@@ -1699,7 +963,7 @@ impl<'a> Iterator for VariantSliceIterator<'a> {
 impl ExactSizeIterator for VariantSliceIterator<'_> {}
 
 pub struct DynamicSliceIterator<'a> {
-    mark: &'a Dynamic<'a>,
+    mark: &'a mark::Dynamic<'a>,
     range: Range<usize>,
 }
 
