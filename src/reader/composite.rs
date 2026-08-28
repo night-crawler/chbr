@@ -1,4 +1,4 @@
-use super::{FromVariant, ReadSlice, Readable, Str, TryRead};
+use super::{Bytes, FromVariant, ReadSlice, Readable, Str, TrustedStr, TryRead};
 use crate::error::Error;
 use crate::mark;
 use crate::mark::{Mark, Variant as VariantMark};
@@ -56,6 +56,8 @@ pub struct Lc<'a, Inner> {
 }
 
 pub type LcStr<'a> = Lc<'a, Str<'a>>;
+pub type LcBytes<'a> = Lc<'a, Bytes<'a>>;
+pub type LcTrustedStr<'a> = Lc<'a, TrustedStr<'a>>;
 
 impl<'a, Inner> TryFrom<&'a Mark<'a>> for Lc<'a, Inner>
 where
@@ -118,6 +120,8 @@ pub struct LcNullable<'a, Inner> {
 }
 
 pub type LcNullableStr<'a> = LcNullable<'a, Str<'a>>;
+pub type LcNullableBytes<'a> = LcNullable<'a, Bytes<'a>>;
+pub type LcNullableTrustedStr<'a> = LcNullable<'a, TrustedStr<'a>>;
 
 impl<'a, Inner> TryFrom<&'a Mark<'a>> for LcNullable<'a, Inner>
 where

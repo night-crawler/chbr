@@ -672,3 +672,101 @@ fn nullable_low_cardinality_reader_allows_missing_unused_dictionary() -> TestRes
     assert_eq!(reader.try_read(0)?, None);
     Ok(())
 }
+
+#[test]
+fn string_readers_separate_bytes_checked_and_trusted_utf8() -> TestResult {
+    let valid = bstr::BStr::new(b"valid");
+    let invalid = bstr::BStr::new(b"\xff");
+    let mark = mark::Mark::String(mark::StringView {
+        data: vec![valid, invalid],
+    });
+
+    assert_eq!(mark.get_str(1)?.expect("valid row"), invalid);
+
+    let nullable_mask = [0_u8];
+    let nullable = mark::Mark::Nullable(mark::Nullable {
+        mask: &nullable_mask,
+        data: Box::new(mark::Mark::String(mark::StringView {
+            data: vec![invalid],
+        })),
+    });
+    assert_eq!(nullable.get_opt_str(0)?.expect("valid row"), Some(invalid));
+
+    let lc_indices = [0_u8];
+    let low_cardinality = mark::Mark::LowCardinality(mark::lc::LowCardinality {
+        is_nullable: false,
+        indices: mark::lc::Indices::U8(&lc_indices),
+        global_dictionary: None,
+        additional_keys: Some(Box::new(mark::Mark::String(mark::StringView {
+            data: vec![invalid],
+        }))),
+    });
+    assert_eq!(low_cardinality.get_str(0)?.expect("valid row"), invalid);
+
+    let offsets = 1_u64.to_le_bytes();
+    let array = mark::Mark::Array(mark::Array {
+        offsets: crate::slice::ByteView::try_from(offsets.as_slice())?,
+        values: Box::new(low_cardinality),
+    });
+    let raw_array = array
+        .get_array_lc_strs(0)?
+        .expect("valid row")
+        .collect::<crate::Result<Vec<_>>>()?;
+    assert_eq!(raw_array, [invalid]);
+
+    let bytes = Bytes::try_from(&mark)?;
+    assert_eq!(bytes.try_read(0)?, b"valid");
+    assert_eq!(bytes.try_read(1)?, b"\xff");
+
+    assert!(matches!(Str::try_from(&mark), Err(Error::Utf8Decode(_, _))));
+
+    let valid_mark = mark::Mark::String(mark::StringView { data: vec![valid] });
+    let checked = Str::try_from(&valid_mark)?;
+    assert_eq!(checked.try_read(0)?, "valid");
+
+    // Trusted readers never validate: construction succeeds despite row 1,
+    // and reading the valid row is fine.
+    let trusted = TrustedStr::try_from(&mark)?;
+    assert_eq!(trusted.try_read(0)?, "valid");
+
+    let value = mark.get(1)?.expect("valid row");
+    let raw: &bstr::BStr = value.clone().try_into()?;
+    assert_eq!(raw, b"\xff");
+    let checked_value: crate::Result<&str> = value.try_into();
+    assert!(matches!(checked_value, Err(Error::Utf8Decode(_, _))));
+
+    Ok(())
+}
+
+#[test]
+fn fixed_string_readers_separate_bytes_checked_and_trusted_utf8() -> TestResult {
+    let data = [b'o', b'k', 0, 0xff, 0, 0];
+    let mark = mark::Mark::FixedString(mark::FixedString {
+        size: 3,
+        data: &data,
+    });
+
+    let bytes = FixedBytes::try_from(&mark)?;
+    assert_eq!(bytes.try_read(0)?, b"ok");
+    assert_eq!(bytes.try_read(1)?, b"\xff");
+
+    assert!(matches!(
+        FixedStr::try_from(&mark),
+        Err(Error::Utf8Decode(_, _))
+    ));
+
+    let valid_data = [b'o', b'k', 0];
+    let valid_mark = mark::Mark::FixedString(mark::FixedString {
+        size: 3,
+        data: &valid_data,
+    });
+    let checked = FixedStr::try_from(&valid_mark)?;
+    assert_eq!(checked.try_read(0)?, "ok");
+
+    // Trusted readers never validate: construction succeeds despite row 1,
+    // and reading the valid row is fine.
+    let trusted = TrustedFixedStr::try_from(&mark)?;
+    assert_eq!(trusted.try_read(0)?, "ok");
+
+    Ok(())
+}

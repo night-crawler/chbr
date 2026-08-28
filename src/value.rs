@@ -17,6 +17,7 @@ use crate::{
     },
     types::{OffsetIndexPair as _, Offsets},
 };
+use bstr::BStr;
 use chrono_tz::Tz;
 use half::bf16;
 use rust_decimal::Decimal;
@@ -45,7 +46,7 @@ pub enum Value<'a> {
     Decimal64(usize, &'a Decimal64<'a>),
     Decimal128(usize, &'a Decimal128<'a>),
     Decimal256(usize, &'a Decimal256<'a>),
-    String(&'a str),
+    String(&'a BStr),
     Uuid(&'a UuidData),
     Date(chrono::NaiveDate),
     Date32(chrono::NaiveDate),
@@ -54,7 +55,7 @@ pub enum Value<'a> {
     Ipv4(Ipv4Addr),
     Ipv6(&'a Ipv6Data),
 
-    StringSlice(&'a [&'a str]),
+    StringSlice(&'a [&'a BStr]),
     BoolSlice(&'a [u8]),
     Int8Slice(&'a [i8]),
     Int16Slice(&'a [zc::I16]),
@@ -302,8 +303,23 @@ macro_rules! impl_try_from_value {
     };
 }
 
-impl_try_from_value!(String, &'a str);
-impl_try_from_value_slice!(StringSlice, &'a [&'a str]);
+impl_try_from_value!(String, &'a BStr);
+impl_try_from_value_slice!(StringSlice, &'a [&'a BStr]);
+
+impl<'a> TryFrom<Value<'a>> for &'a str {
+    type Error = Error;
+
+    #[inline(always)]
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::String(value) => crate::error::decode_utf8(value),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "&str"))
+            }
+        }
+    }
+}
 
 impl_try_from_value_slice!(Int8Slice, &'a [i8]);
 impl_try_from_value_slice!(Int16Slice, &'a [zc::I16]);
@@ -1591,7 +1607,7 @@ impl<'a> TryFrom<Value<'a>> for FixedStringSliceIterator<'a> {
 }
 
 impl<'a> Iterator for FixedStringSliceIterator<'a> {
-    type Item = &'a str;
+    type Item = &'a BStr;
 
     fn next(&mut self) -> Option<Self::Item> {
         let slice_idx = self.range.next()?;
@@ -1602,8 +1618,7 @@ impl<'a> Iterator for FixedStringSliceIterator<'a> {
             return None;
         }
 
-        let slice = &self.mark.data[start..end].rtrim_zeros();
-        Some(unsafe { std::str::from_utf8_unchecked(slice) })
+        Some(BStr::new(self.mark.data[start..end].rtrim_zeros()))
     }
 
     #[inline(always)]

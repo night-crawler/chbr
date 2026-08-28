@@ -1,3 +1,4 @@
+use bstr::BStr;
 use log::debug;
 
 use std::hint::cold_path;
@@ -487,7 +488,7 @@ pub(super) fn string<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> 
     for _ in 0..ctx.num_rows {
         let s;
         (input, s) = parse_var_str_bytes(input)?;
-        strings.push(unsafe { std::str::from_utf8_unchecked(s) });
+        strings.push(BStr::new(s));
     }
 
     Ok((input, Mark::String(StringView { data: strings })))

@@ -1,7 +1,8 @@
 use std::{fs, hint::black_box, net::Ipv6Addr, time::Duration};
 
 use chbr::reader::{
-    Array, Bool, DateTime, F64, Ipv6, LcNullableStr, LcStr, Nullable, U32, U64, U128, Uuid,
+    Array, Bool, DateTime, F64, Ipv6, LcNullableTrustedStr, LcTrustedStr, Nullable, U32, U64, U128,
+    Uuid,
 };
 use chbr::{BlockRow, BlocksIterator, FromBlock, parse::block::parse_many};
 use chrono::Utc;
@@ -49,6 +50,12 @@ pub struct BenchmarkSample<'a> {
     pub nested_some_other_id: Vec<u64>,
 }
 
+#[inline(always)]
+fn trusted_str(bytes: &chbr::BStr) -> &str {
+    // SAFETY: the benchmark fixture contains UTF-8 string columns.
+    unsafe { std::str::from_utf8_unchecked(bytes) }
+}
+
 impl<'a> TryFrom<BlockRow<'a>> for BenchmarkSample<'a> {
     type Error = chbr::error::Error;
 
@@ -85,10 +92,12 @@ impl<'a> TryFrom<BlockRow<'a>> for BenchmarkSample<'a> {
         let tags = lc_tags
             .get_array_lc_strs(i)?
             .unwrap()
+            .map(|value| value.map(trusted_str))
             .collect::<Result<Vec<_>, _>>()?;
         let nested_strs = nested_field_lc_string_cd10
             .get_array_lc_strs(i)?
             .unwrap()
+            .map(|value| value.map(trusted_str))
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut nested_some_id = Vec::with_capacity(nested_strs.len());
@@ -103,21 +112,48 @@ impl<'a> TryFrom<BlockRow<'a>> for BenchmarkSample<'a> {
 
         let row = Self {
             id: id.get_uuid(i)?.unwrap(),
-            lc_string_cd10: lc_string_cd10.get_str(i)?.unwrap(),
+            lc_string_cd10: trusted_str(lc_string_cd10.get_str(i)?.unwrap()),
             timestamp: timestamp.get_datetime(i, Utc)?.unwrap(),
             count: count.get_f64(i)?.unwrap(),
             some_number: some_number.get_u32(i)?.unwrap(),
-            lc_nullable_string_cd1000: lc_nullable_string_cd1000.get_opt_str(i)?.unwrap(),
-            lc_nullable_string_cd5000: lc_nullable_string_cd5000.get_opt_str(i)?.unwrap(),
-            lc_nullable_string_cd3000: lc_nullable_string_cd3000.get_opt_str(i)?.unwrap(),
-            lc_nullable_string_cd4000: lc_nullable_string_cd4000.get_opt_str(i)?.unwrap(),
-            lc_nullable_string_cd50000: lc_nullable_string_cd50000.get_opt_str(i)?.unwrap(),
-            lc_nullable_string_cd100: lc_nullable_string_cd100.get_opt_str(i)?.unwrap(),
-            lc_nullable_string_cd500: lc_nullable_string_cd500.get_opt_str(i)?.unwrap(),
+            lc_nullable_string_cd1000: lc_nullable_string_cd1000
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
+            lc_nullable_string_cd5000: lc_nullable_string_cd5000
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
+            lc_nullable_string_cd3000: lc_nullable_string_cd3000
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
+            lc_nullable_string_cd4000: lc_nullable_string_cd4000
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
+            lc_nullable_string_cd50000: lc_nullable_string_cd50000
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
+            lc_nullable_string_cd100: lc_nullable_string_cd100
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
+            lc_nullable_string_cd500: lc_nullable_string_cd500
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
             some_ip_address: some_ip_address.get_opt_ipv6(i)?.unwrap(),
-            lc_nullable_string8: lc_nullable_string8.get_opt_str(i)?.unwrap(),
+            lc_nullable_string8: lc_nullable_string8
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
             lc_tags: tags,
-            lc_nullable_string_cd_00000: lc_nullable_string_cd_00000.get_opt_str(i)?.unwrap(),
+            lc_nullable_string_cd_00000: lc_nullable_string_cd_00000
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
             nested_lc_string_cd10: nested_strs,
             nested_flag: nested_field_flag.get_arr_bool_iter(i)?.unwrap().collect(),
             nested_some_id,
@@ -175,27 +211,27 @@ fn native_read(input: &[u8]) -> TestResult<()> {
 #[derive(FromBlock)]
 pub struct BenchmarkCols<'a> {
     id: Uuid<'a>,
-    lc_string_cd10: LcStr<'a>,
+    lc_string_cd10: LcTrustedStr<'a>,
     timestamp: DateTime<'a>,
     count: F64<'a>,
     some_number: U32<'a>,
 
-    lc_nullable_string_cd1000: LcNullableStr<'a>,
-    lc_nullable_string_cd5000: LcNullableStr<'a>,
-    lc_nullable_string_cd3000: LcNullableStr<'a>,
-    lc_nullable_string_cd4000: LcNullableStr<'a>,
-    lc_nullable_string_cd50000: LcNullableStr<'a>,
-    lc_nullable_string_cd100: LcNullableStr<'a>,
-    lc_nullable_string_cd500: LcNullableStr<'a>,
+    lc_nullable_string_cd1000: LcNullableTrustedStr<'a>,
+    lc_nullable_string_cd5000: LcNullableTrustedStr<'a>,
+    lc_nullable_string_cd3000: LcNullableTrustedStr<'a>,
+    lc_nullable_string_cd4000: LcNullableTrustedStr<'a>,
+    lc_nullable_string_cd50000: LcNullableTrustedStr<'a>,
+    lc_nullable_string_cd100: LcNullableTrustedStr<'a>,
+    lc_nullable_string_cd500: LcNullableTrustedStr<'a>,
 
     some_ip_address: Nullable<'a, Ipv6<'a>>,
 
-    lc_nullable_string8: LcNullableStr<'a>,
-    lc_tags: Array<'a, LcStr<'a>>,
-    lc_nullable_string_cd_00000: LcNullableStr<'a>,
+    lc_nullable_string8: LcNullableTrustedStr<'a>,
+    lc_tags: Array<'a, LcTrustedStr<'a>>,
+    lc_nullable_string_cd_00000: LcNullableTrustedStr<'a>,
 
     #[col(name = "nested_field.lc_string_cd10")]
-    nested_lc_string_cd10: Array<'a, LcStr<'a>>,
+    nested_lc_string_cd10: Array<'a, LcTrustedStr<'a>>,
 
     #[col(name = "nested_field.flag")]
     nested_flag: Array<'a, Bool<'a>>,

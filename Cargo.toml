@@ -21,6 +21,7 @@ uuid = { version = "1.16", features = ["v4"] }
 half = { version = "2.6", features = ["zerocopy"] }
 paste = "1"
 serde = { version = "1", optional = true }
+bstr = "1"
 
 [dependencies.chbr_derive]
 path = "./chbr_derive"

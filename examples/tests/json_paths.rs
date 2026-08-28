@@ -74,7 +74,10 @@ fn reads_typed_and_dynamic_json_values() -> Result<(), Box<dyn std::error::Error
                 let value = match value {
                     JsonValue::Bool(value) => value.to_string(),
                     JsonValue::UInt64(value) => value.to_string(),
-                    JsonValue::String(value) => value.to_owned(),
+                    JsonValue::String(value) => {
+                        let value: &str = JsonValue::String(value).try_into()?;
+                        value.to_owned()
+                    }
                     other => panic!("unexpected JSON value: {other:?}"),
                 };
                 Ok((path, value))

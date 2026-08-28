@@ -17,7 +17,11 @@ fn basic() -> Result<(), Box<dyn std::error::Error>> {
         let i = row.row_index();
 
         let id = id.get_u32(i)?.expect("valid row index");
-        let tags: &[&str] = tags.get(i)?.expect("valid row index").try_into()?;
+        let tags: &[&chbr::BStr] = tags.get(i)?.expect("valid row index").try_into()?;
+        let tags = tags
+            .iter()
+            .map(|value| std::str::from_utf8(value))
+            .collect::<Result<Vec<_>, _>>()?;
 
         let mut attrs_vec = Vec::new();
         if let Some(map) = attrs.get_map::<&str, &str>(i)? {
