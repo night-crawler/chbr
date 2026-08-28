@@ -177,6 +177,16 @@ impl<'a> Mark<'a> {
         }
     }
 
+    #[inline(always)]
+    fn checked_slice<T>(&self, data: &'a [T], range: Range<usize>) -> crate::Result<&'a [T]> {
+        let end = range.end;
+        let Some(slice) = data.get(range) else {
+            cold_path();
+            return Err(Error::IndexOutOfBounds(end, self.as_str()));
+        };
+        Ok(slice)
+    }
+
     pub fn get(&'a self, index: usize) -> crate::Result<Option<Value<'a>>> {
         match self {
             Mark::Empty => Ok(None),
@@ -229,116 +239,52 @@ impl<'a> Mark<'a> {
             Mark::Empty => {
                 if !idx.is_empty() {
                     cold_path();
-                    return Err(Error::IndexOutOfBounds(idx.end, "Empty"));
+                    return Err(Error::IndexOutOfBounds(idx.end, self.as_str()));
                 }
                 Ok(Value::Empty)
             }
-            Mark::Bool(bv) => Ok(Value::BoolSlice(checked_slice(bv.data, idx, "Bool")?)),
-            Mark::Int8(bv) => Ok(Value::Int8Slice(checked_slice(bv.as_slice(), idx, "Int8")?)),
-            Mark::Int16(bv) => Ok(Value::Int16Slice(checked_slice(
-                bv.as_slice(),
-                idx,
-                "Int16",
-            )?)),
-            Mark::Int32(bv) => Ok(Value::Int32Slice(checked_slice(
-                bv.as_slice(),
-                idx,
-                "Int32",
-            )?)),
-            Mark::Int64(bv) => Ok(Value::Int64Slice(checked_slice(
-                bv.as_slice(),
-                idx,
-                "Int64",
-            )?)),
-            Mark::Int128(bv) => Ok(Value::Int128Slice(checked_slice(
-                bv.as_slice(),
-                idx,
-                "Int128",
-            )?)),
-            Mark::Int256(bv) => Ok(Value::Int256Slice(checked_slice(
-                bv.as_slice(),
-                idx,
-                "Int256",
-            )?)),
-            Mark::UInt8(bv) => Ok(Value::UInt8Slice(checked_slice(
-                bv.as_slice(),
-                idx,
-                "UInt8",
-            )?)),
-            Mark::UInt16(bv) => Ok(Value::UInt16Slice(checked_slice(
-                bv.as_slice(),
-                idx,
-                "UInt16",
-            )?)),
-            Mark::UInt32(bv) => Ok(Value::UInt32Slice(checked_slice(
-                bv.as_slice(),
-                idx,
-                "UInt32",
-            )?)),
-            Mark::UInt64(bv) => Ok(Value::UInt64Slice(checked_slice(
-                bv.as_slice(),
-                idx,
-                "UInt64",
-            )?)),
-            Mark::UInt128(bv) => Ok(Value::UInt128Slice(checked_slice(
-                bv.as_slice(),
-                idx,
-                "UInt128",
-            )?)),
-            Mark::UInt256(bv) => Ok(Value::UInt256Slice(checked_slice(
-                bv.as_slice(),
-                idx,
-                "UInt256",
-            )?)),
-            Mark::Float32(bv) => Ok(Value::Float32Slice(checked_slice(
-                bv.as_slice(),
-                idx,
-                "Float32",
-            )?)),
-            Mark::Float64(bv) => Ok(Value::Float64Slice(checked_slice(
-                bv.as_slice(),
-                idx,
-                "Float64",
-            )?)),
-            Mark::BFloat16(bv) => Ok(Value::BFloat16Slice(checked_slice(
-                bv.as_slice(),
-                idx,
-                "BFloat16",
-            )?)),
-            Mark::Uuid(bv) => Ok(Value::UuidSlice(checked_slice(bv.as_slice(), idx, "Uuid")?)),
-            Mark::Date(bv) => Ok(Value::Date16Slice(checked_slice(
-                bv.as_slice(),
-                idx,
-                "Date",
-            )?)),
-            Mark::Date32(bv) => Ok(Value::Date32Slice(checked_slice(
-                bv.as_slice(),
-                idx,
-                "Date32",
-            )?)),
-            Mark::Ipv4(bv) => Ok(Value::Ipv4Slice(checked_slice(bv.as_slice(), idx, "Ipv4")?)),
-            Mark::Ipv6(bv) => Ok(Value::Ipv6Slice(checked_slice(bv.as_slice(), idx, "Ipv6")?)),
-            Mark::String(sv) => Ok(Value::StringSlice(checked_slice(
-                sv.data.as_slice(),
-                idx,
-                "String",
-            )?)),
+            Mark::Bool(bv) => Ok(Value::BoolSlice(self.checked_slice(bv.data, idx)?)),
+            Mark::Int8(bv) => Ok(Value::Int8Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::Int16(bv) => Ok(Value::Int16Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::Int32(bv) => Ok(Value::Int32Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::Int64(bv) => Ok(Value::Int64Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::Int128(bv) => Ok(Value::Int128Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::Int256(bv) => Ok(Value::Int256Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::UInt8(bv) => Ok(Value::UInt8Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::UInt16(bv) => Ok(Value::UInt16Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::UInt32(bv) => Ok(Value::UInt32Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::UInt64(bv) => Ok(Value::UInt64Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::UInt128(bv) => Ok(Value::UInt128Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::UInt256(bv) => Ok(Value::UInt256Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::Float32(bv) => Ok(Value::Float32Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::Float64(bv) => Ok(Value::Float64Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::BFloat16(bv) => Ok(Value::BFloat16Slice(
+                self.checked_slice(bv.as_slice(), idx)?,
+            )),
+            Mark::Uuid(bv) => Ok(Value::UuidSlice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::Date(bv) => Ok(Value::Date16Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::Date32(bv) => Ok(Value::Date32Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::Ipv4(bv) => Ok(Value::Ipv4Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::Ipv6(bv) => Ok(Value::Ipv6Slice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::String(sv) => Ok(Value::StringSlice(
+                self.checked_slice(sv.data.as_slice(), idx)?,
+            )),
 
             Mark::Decimal32(d) => Ok(Value::Decimal32Slice {
                 precision: d.precision,
-                slice: checked_slice(d.data.as_slice(), idx, "Decimal32")?,
+                slice: self.checked_slice(d.data.as_slice(), idx)?,
             }),
             Mark::Decimal64(d) => Ok(Value::Decimal64Slice {
                 precision: d.precision,
-                slice: checked_slice(d.data.as_slice(), idx, "Decimal64")?,
+                slice: self.checked_slice(d.data.as_slice(), idx)?,
             }),
             Mark::Decimal128(d) => Ok(Value::Decimal128Slice {
                 precision: d.precision,
-                slice: checked_slice(d.data.as_slice(), idx, "Decimal128")?,
+                slice: self.checked_slice(d.data.as_slice(), idx)?,
             }),
             Mark::Decimal256(d) => Ok(Value::Decimal256Slice {
                 precision: d.precision,
-                slice: checked_slice(d.data.as_slice(), idx, "Decimal256")?,
+                slice: self.checked_slice(d.data.as_slice(), idx)?,
             }),
             Mark::FixedString(mark) => Ok(Value::FixedStringSlice {
                 mark,
@@ -347,12 +293,12 @@ impl<'a> Mark<'a> {
 
             Mark::DateTime(d) => Ok(Value::DateTime32Slice {
                 tz: d.tz,
-                slice: checked_slice(d.data.as_slice(), idx, "DateTime")?,
+                slice: self.checked_slice(d.data.as_slice(), idx)?,
             }),
             Mark::DateTime64(d) => Ok(Value::DateTime64Slice {
                 precision: d.precision,
                 tz: d.tz,
-                slice: checked_slice(d.data.as_slice(), idx, "DateTime64")?,
+                slice: self.checked_slice(d.data.as_slice(), idx)?,
             }),
             Mark::Enum8(mark) => Ok(Value::Enum8Slice {
                 mark,

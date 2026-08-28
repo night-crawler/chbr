@@ -1723,6 +1723,16 @@ fn dynamic_arr() -> TestResult {
 fn mark_accessors_return_errors() -> TestResult {
     let bytes = [1_u8, 2];
     let mark = Mark::UInt8(crate::slice::ByteView::try_from(bytes.as_slice())?);
+    let Value::UInt8Slice(slice) = mark.slice(0..bytes.len())? else {
+        unreachable!("UInt8 mark returned a non-UInt8 slice");
+    };
+    assert_eq!(slice, bytes.as_slice());
+
+    assert!(matches!(
+        Mark::Empty.slice(0..1),
+        Err(crate::Error::IndexOutOfBounds(1, "Empty"))
+    ));
+
     assert!(matches!(
         mark.slice(1..3),
         Err(crate::Error::IndexOutOfBounds(3, "UInt8"))
