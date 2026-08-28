@@ -56,6 +56,10 @@ name = "refs"
 harness = false
 
 [[bench]]
+name = "throughput"
+harness = false
+
+[[bench]]
 name = "json"
 harness = false
 required-features = ["serde1"]
