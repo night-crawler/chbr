@@ -1,14 +1,14 @@
 use std::{fs, hint::black_box, net::Ipv6Addr, time::Duration};
 
-use chbr::reader::{
-    Array, Bool, DateTime, F64, Ipv6, LcNullableTrustedStr, LcTrustedStr, Nullable, U32, U64, U128,
-    Uuid,
-};
-use chbr::{BlockRow, BlocksIterator, FromBlock, parse::block::parse_many};
+mod common;
+
+use chbr::{BlockRow, BlocksIterator, FromBlock as _, parse::block::parse_many};
 use chrono::Utc;
 use clickhouse::rowbinary::de::deserialize_from;
 use criterion::{Criterion, criterion_group, criterion_main};
 use testresult::TestResult;
+
+use crate::common::BenchmarkCols;
 
 #[derive(clickhouse::Row, serde::Deserialize, Debug)]
 pub struct BenchmarkSample<'a> {
@@ -206,41 +206,6 @@ fn native_read(input: &[u8]) -> TestResult<()> {
     }
 
     Ok(())
-}
-
-#[derive(FromBlock)]
-pub struct BenchmarkCols<'a> {
-    id: Uuid<'a>,
-    lc_string_cd10: LcTrustedStr<'a>,
-    timestamp: DateTime<'a>,
-    count: F64<'a>,
-    some_number: U32<'a>,
-
-    lc_nullable_string_cd1000: LcNullableTrustedStr<'a>,
-    lc_nullable_string_cd5000: LcNullableTrustedStr<'a>,
-    lc_nullable_string_cd3000: LcNullableTrustedStr<'a>,
-    lc_nullable_string_cd4000: LcNullableTrustedStr<'a>,
-    lc_nullable_string_cd50000: LcNullableTrustedStr<'a>,
-    lc_nullable_string_cd100: LcNullableTrustedStr<'a>,
-    lc_nullable_string_cd500: LcNullableTrustedStr<'a>,
-
-    some_ip_address: Nullable<'a, Ipv6<'a>>,
-
-    lc_nullable_string8: LcNullableTrustedStr<'a>,
-    lc_tags: Array<'a, LcTrustedStr<'a>>,
-    lc_nullable_string_cd_00000: LcNullableTrustedStr<'a>,
-
-    #[col(name = "nested_field.lc_string_cd10")]
-    nested_lc_string_cd10: Array<'a, LcTrustedStr<'a>>,
-
-    #[col(name = "nested_field.flag")]
-    nested_flag: Array<'a, Bool<'a>>,
-
-    #[col(name = "nested_field.some_id")]
-    nested_some_id: Array<'a, U128<'a>>,
-
-    #[col(name = "nested_field.some_other_id")]
-    nested_some_other_id: Array<'a, U64<'a>>,
 }
 
 // Both derived benchmarks parse the same Native input and construct the same
