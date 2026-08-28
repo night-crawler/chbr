@@ -60,10 +60,9 @@ macro_rules! col_view {
                     &self,
                     range: Range<usize>,
                 ) -> crate::Result<&'a [Self::Elem]> {
-                    let end = range.end;
-                    let Some(slice) = self.0.as_slice().get(range) else {
+                    let Some(slice) = self.0.as_slice().get(range.clone()) else {
                         cold_path();
-                        return Err(Error::IndexOutOfBounds(end, stringify!($variant)));
+                        return Err(Error::RangeOutOfBounds(range, stringify!($variant)));
                     };
                     Ok(slice)
                 }
@@ -174,10 +173,9 @@ impl<'a> ReadSlice<'a> for Bool<'a> {
 
     #[inline(always)]
     fn try_read_slice(&self, range: Range<usize>) -> crate::Result<&'a [Self::Elem]> {
-        let end = range.end;
-        let Some(slice) = self.0.data.get(range) else {
+        let Some(slice) = self.0.data.get(range.clone()) else {
             cold_path();
-            return Err(Error::IndexOutOfBounds(end, "Bool"));
+            return Err(Error::RangeOutOfBounds(range, "Bool"));
         };
         Ok(slice)
     }

@@ -179,10 +179,9 @@ impl<'a> Mark<'a> {
 
     #[inline(always)]
     fn checked_slice<T>(&self, data: &'a [T], range: Range<usize>) -> crate::Result<&'a [T]> {
-        let end = range.end;
-        let Some(slice) = data.get(range) else {
+        let Some(slice) = data.get(range.clone()) else {
             cold_path();
-            return Err(Error::IndexOutOfBounds(end, self.as_str()));
+            return Err(Error::RangeOutOfBounds(range, self.as_str()));
         };
         Ok(slice)
     }
@@ -237,9 +236,9 @@ impl<'a> Mark<'a> {
     pub fn slice(&'a self, idx: Range<usize>) -> crate::Result<Value<'a>> {
         match self {
             Mark::Empty => {
-                if !idx.is_empty() {
+                if idx.start != 0 || idx.end != 0 {
                     cold_path();
-                    return Err(Error::IndexOutOfBounds(idx.end, self.as_str()));
+                    return Err(Error::RangeOutOfBounds(idx, self.as_str()));
                 }
                 Ok(Value::Empty)
             }
@@ -584,10 +583,9 @@ fn checked_slice<'a, T>(
     range: Range<usize>,
     kind: &'static str,
 ) -> crate::Result<&'a [T]> {
-    let end = range.end;
-    let Some(slice) = data.get(range) else {
+    let Some(slice) = data.get(range.clone()) else {
         cold_path();
-        return Err(Error::IndexOutOfBounds(end, kind));
+        return Err(Error::RangeOutOfBounds(range, kind));
     };
     Ok(slice)
 }
