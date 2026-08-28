@@ -269,7 +269,6 @@ macro_rules! impl_try_from_value_slice {
         impl<'a> TryFrom<Value<'a>> for $ty {
             type Error = Error;
 
-            #[inline(always)]
             fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
                 match value {
                     Value::$variant(v) => Ok(v),
@@ -289,7 +288,6 @@ macro_rules! impl_try_from_value {
         impl<'a> TryFrom<Value<'a>> for $ty {
             type Error = Error;
 
-            #[inline(always)]
             fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
                 match value {
                     Value::$variant(v) => Ok(v),
@@ -309,7 +307,6 @@ impl_try_from_value_slice!(StringSlice, &'a [&'a BStr]);
 impl<'a> TryFrom<Value<'a>> for &'a str {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::String(value) => crate::error::decode_utf8(value),
@@ -357,7 +354,6 @@ impl_try_from_value!(Ipv4, Ipv4Addr);
 impl<'a> TryFrom<Value<'a>> for Ipv6Addr {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Ipv6(v) => Ok(Ipv6Addr::from(*v)),
@@ -372,7 +368,6 @@ impl<'a> TryFrom<Value<'a>> for Ipv6Addr {
 impl<'a> TryFrom<Value<'a>> for Uuid {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Uuid(uuid_data) => {
@@ -390,7 +385,6 @@ impl<'a> TryFrom<Value<'a>> for Uuid {
 impl TryFrom<Value<'_>> for chrono::DateTime<Tz> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
         match value {
             Value::DateTime(index, d) => {
@@ -425,7 +419,6 @@ impl TryFrom<Value<'_>> for chrono::DateTime<Tz> {
 impl TryFrom<Value<'_>> for chrono::NaiveDate {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
         match value {
             Value::Date32(dt) | Value::Date(dt) => Ok(dt),
@@ -443,7 +436,7 @@ macro_rules! impl_try_from_integer_value {
             impl<'a> core::convert::TryFrom<Value<'a>> for $target {
                 type Error = Error;
 
-                #[inline(always)]
+
                 fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
 
                     match value {
@@ -544,7 +537,6 @@ pub struct SliceUsizeIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for SliceUsizeIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::UInt8Slice(x) => Ok(Self {
@@ -578,7 +570,6 @@ impl<'a> TryFrom<Value<'a>> for SliceUsizeIterator<'a> {
 impl Iterator for SliceUsizeIterator<'_> {
     type Item = usize;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         if self.index >= self.len {
             return None;
@@ -602,7 +593,6 @@ impl Iterator for SliceUsizeIterator<'_> {
         result
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = self.len - self.index;
         (remaining, Some(remaining))
@@ -619,7 +609,6 @@ pub struct LowCardinalitySliceIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for LowCardinalitySliceIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::LowCardinalitySlice { range, mark } => mark.slice(range.into()),
@@ -637,13 +626,11 @@ impl<'a> TryFrom<Value<'a>> for LowCardinalitySliceIterator<'a> {
 impl<'a> Iterator for LowCardinalitySliceIterator<'a> {
     type Item = Result<Value<'a>, Error>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.indices.next()?;
         self.additional_keys.get(index).transpose()
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.indices.size_hint()
     }
@@ -660,7 +647,6 @@ pub struct ArraySliceIterator<'a, T> {
 impl<'a, T> TryFrom<Value<'a>> for ArraySliceIterator<'a, T> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::ArraySlice { mark, range } => Ok(Self {
@@ -687,7 +673,6 @@ where
 {
     type Item = Result<T, Error>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let slice_idx = self.range.next()?;
 
@@ -706,7 +691,6 @@ where
         Some(T::try_from(value))
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.range.size_hint()
     }
@@ -723,7 +707,6 @@ where
 {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Empty => Ok(None),
@@ -740,7 +723,7 @@ macro_rules! impl_try_from_tuple {
         {
             type Error = Error;
 
-            #[inline(always)]
+
             fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
                 let (index, tuple_mark) = match value {
                     Value::Tuple { index, mark } => (index, mark),
@@ -813,7 +796,6 @@ where
 {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Map { mark, index } => {
@@ -875,7 +857,6 @@ where
         Some(Ok((key, value)))
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.range.size_hint()
     }
@@ -903,7 +884,6 @@ where
 {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::MapSlice { mark, range } => Ok(Self {
@@ -928,7 +908,6 @@ where
 {
     type Item = Result<MapIterator<'a, K, V>, Error>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let slice_idx = self.range.next()?;
         let (start, end) = match self.offsets.offset_indices(slice_idx) {
@@ -945,7 +924,6 @@ where
         }))
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.range.size_hint()
     }
@@ -966,7 +944,6 @@ pub struct TupleSliceIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for TupleSliceIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::TupleSlice { mark, range } => Ok(Self {
@@ -984,7 +961,6 @@ impl<'a> TryFrom<Value<'a>> for TupleSliceIterator<'a> {
 impl<'a> Iterator for TupleSliceIterator<'a> {
     type Item = Value<'a>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let row_idx = self.range.next()?;
         Some(Value::Tuple {
@@ -993,7 +969,6 @@ impl<'a> Iterator for TupleSliceIterator<'a> {
         })
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.range.size_hint()
     }
@@ -1004,7 +979,6 @@ impl ExactSizeIterator for TupleSliceIterator<'_> {}
 impl<'a> TryFrom<Value<'a>> for Decimal {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Decimal32(index, mark) => Ok(mark.data[index].with_precision(mark.precision)),
@@ -1031,7 +1005,6 @@ pub struct BoolSliceIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for BoolSliceIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::BoolSlice(data) => Ok(BoolSliceIterator { data: data.iter() }),
@@ -1046,12 +1019,10 @@ impl<'a> TryFrom<Value<'a>> for BoolSliceIterator<'a> {
 impl Iterator for BoolSliceIterator<'_> {
     type Item = bool;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         self.data.next().map(|&byte| byte != 0)
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.data.size_hint()
     }
@@ -1067,7 +1038,6 @@ pub struct DateTime32SliceIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for DateTime32SliceIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::DateTime32Slice { tz, slice } => Ok(Self {
@@ -1088,12 +1058,10 @@ impl<'a> TryFrom<Value<'a>> for DateTime32SliceIterator<'a> {
 impl Iterator for DateTime32SliceIterator<'_> {
     type Item = chrono::DateTime<Tz>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         self.slice.next().map(|dt| dt.with_tz(self.tz))
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.slice.size_hint()
     }
@@ -1110,7 +1078,6 @@ pub struct DateTime64SliceIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for DateTime64SliceIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::DateTime64Slice {
@@ -1136,14 +1103,12 @@ impl<'a> TryFrom<Value<'a>> for DateTime64SliceIterator<'a> {
 impl Iterator for DateTime64SliceIterator<'_> {
     type Item = Option<chrono::DateTime<Tz>>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         self.slice
             .next()
             .map(|dt| dt.with_tz_and_precision(self.tz, self.precision))
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.slice.size_hint()
     }
@@ -1159,7 +1124,6 @@ pub struct NullableSliceIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for NullableSliceIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::NullableSlice { mark, range } => Ok(Self {
@@ -1184,7 +1148,6 @@ impl<'a> TryFrom<Value<'a>> for NullableSliceIterator<'a> {
 impl<'a> Iterator for NullableSliceIterator<'a> {
     type Item = Result<Value<'a>, Error>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.range.next()?;
 
@@ -1197,7 +1160,6 @@ impl<'a> Iterator for NullableSliceIterator<'a> {
         mark.data.get(index).transpose()
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.range.size_hint()
     }
@@ -1213,7 +1175,6 @@ pub struct Decimal32SliceIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for Decimal32SliceIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Decimal32Slice { precision, slice } => Ok(Self {
@@ -1234,12 +1195,10 @@ impl<'a> TryFrom<Value<'a>> for Decimal32SliceIterator<'a> {
 impl Iterator for Decimal32SliceIterator<'_> {
     type Item = Decimal;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         self.slice.next().map(|v| v.with_precision(self.precision))
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.slice.size_hint()
     }
@@ -1255,7 +1214,6 @@ pub struct Decimal64SliceIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for Decimal64SliceIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Decimal64Slice { precision, slice } => Ok(Self {
@@ -1276,12 +1234,10 @@ impl<'a> TryFrom<Value<'a>> for Decimal64SliceIterator<'a> {
 impl Iterator for Decimal64SliceIterator<'_> {
     type Item = Decimal;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         self.slice.next().map(|v| v.with_precision(self.precision))
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.slice.size_hint()
     }
@@ -1297,7 +1253,6 @@ pub struct Decimal128SliceIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for Decimal128SliceIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Decimal128Slice { precision, slice } => Ok(Self {
@@ -1318,12 +1273,10 @@ impl<'a> TryFrom<Value<'a>> for Decimal128SliceIterator<'a> {
 impl Iterator for Decimal128SliceIterator<'_> {
     type Item = crate::Result<Decimal>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         self.slice.next().map(|v| v.with_precision(self.precision))
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.slice.size_hint()
     }
@@ -1339,7 +1292,6 @@ pub struct NestedIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for NestedIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Nested { mark, index } => {
@@ -1364,7 +1316,6 @@ impl<'a> TryFrom<Value<'a>> for NestedIterator<'a> {
 impl<'a> Iterator for NestedIterator<'a> {
     type Item = NestedItemsIterator<'a>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let value = self.tuple_slice.next()?;
         let Value::Tuple { index: row, mark } = value else {
@@ -1379,7 +1330,6 @@ impl<'a> Iterator for NestedIterator<'a> {
         })
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.tuple_slice.size_hint()
     }
@@ -1395,7 +1345,6 @@ pub struct NestedItemsIterator<'a> {
 impl<'a> Iterator for NestedItemsIterator<'a> {
     type Item = Result<(&'a str, Value<'a>), Error>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let (mark, col_name) = self.mark_ter.next()?;
         mark.get(self.row)
@@ -1403,7 +1352,6 @@ impl<'a> Iterator for NestedItemsIterator<'a> {
             .map(|result| result.map(|value| (*col_name, value)))
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.mark_ter.size_hint()
     }
@@ -1420,7 +1368,6 @@ pub struct NamedTupleIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for NamedTupleIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::NamedTuple { mark, index } => {
@@ -1445,7 +1392,6 @@ impl<'a> TryFrom<Value<'a>> for NamedTupleIterator<'a> {
 impl<'a> Iterator for NamedTupleIterator<'a> {
     type Item = Result<(&'a str, Value<'a>), Error>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let (col_name, values) = self.col_names.split_first()?;
         self.col_names = values;
@@ -1458,7 +1404,6 @@ impl<'a> Iterator for NamedTupleIterator<'a> {
             .map(|result| result.map(|value| (*col_name, value)))
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         (self.col_names.len(), Some(self.col_names.len()))
     }
@@ -1474,7 +1419,6 @@ pub struct NamedTupleSliceIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for NamedTupleSliceIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::NamedTupleSlice { mark, range } => Ok(Self {
@@ -1511,7 +1455,6 @@ impl<'a> Iterator for NamedTupleSliceIterator<'a> {
         }))
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.range.size_hint()
     }
@@ -1528,7 +1471,6 @@ pub struct NestedSliceIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for NestedSliceIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::NestedSlice { mark, range } => Ok(Self {
@@ -1572,7 +1514,6 @@ impl<'a> Iterator for NestedSliceIterator<'a> {
         }))
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.range.size_hint()
     }
@@ -1588,7 +1529,6 @@ pub struct FixedStringSliceIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for FixedStringSliceIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::FixedStringSlice { mark, range } => Ok(Self {
@@ -1621,7 +1561,6 @@ impl<'a> Iterator for FixedStringSliceIterator<'a> {
         Some(BStr::new(self.mark.data[start..end].rtrim_zeros()))
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.range.size_hint()
     }
@@ -1637,7 +1576,6 @@ pub struct Enum8SliceIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for Enum8SliceIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Enum8Slice { mark, range } => {
@@ -1668,7 +1606,6 @@ impl<'a> Iterator for Enum8SliceIterator<'a> {
         None
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.data.size_hint()
     }
@@ -1684,7 +1621,6 @@ pub struct Enum16SliceIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for Enum16SliceIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Enum16Slice { mark, range } => {
@@ -1715,7 +1651,6 @@ impl<'a> Iterator for Enum16SliceIterator<'a> {
         None
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.data.size_hint()
     }
@@ -1731,7 +1666,6 @@ pub struct VariantSliceIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for VariantSliceIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::VariantSlice { mark, range } => Ok(Self {
@@ -1752,13 +1686,11 @@ impl<'a> TryFrom<Value<'a>> for VariantSliceIterator<'a> {
 impl<'a> Iterator for VariantSliceIterator<'a> {
     type Item = Result<Value<'a>, Error>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.range.next()?;
         self.mark.get(index).transpose()
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.range.size_hint()
     }
@@ -1774,7 +1706,6 @@ pub struct DynamicSliceIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for DynamicSliceIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::DynamicSlice { mark, range } => Ok(Self {
@@ -1795,13 +1726,11 @@ impl<'a> TryFrom<Value<'a>> for DynamicSliceIterator<'a> {
 impl<'a> Iterator for DynamicSliceIterator<'a> {
     type Item = Result<Value<'a>, Error>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.range.next()?;
         self.mark.get(index).transpose()
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.range.size_hint()
     }

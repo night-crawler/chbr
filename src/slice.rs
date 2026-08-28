@@ -35,7 +35,6 @@ impl<'a, T: zc::Unaligned + zc::FromBytes + Copy> ByteView<'a, T> {
         self.bytes.len() / size_of::<T>()
     }
 
-    #[inline]
     pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -45,12 +44,10 @@ impl<'a, T: zc::Unaligned + zc::FromBytes + Copy> ByteView<'a, T> {
         self.as_slice().get(index)
     }
 
-    #[inline]
     pub const fn last(&self) -> Option<&T> {
         self.as_slice().last()
     }
 
-    #[inline(always)]
     pub const fn as_bytes(&self) -> &'a [u8] {
         self.bytes
     }
@@ -97,7 +94,6 @@ macro_rules! impl_slice_index {
         {
             type Output = [T];
 
-            #[inline]
             fn index(&self, idx: $range) -> &Self::Output {
                 &self.as_slice()[idx]
             }

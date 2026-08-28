@@ -15,7 +15,6 @@ pub struct Bytes<'a>(pub &'a StringView<'a>);
 impl<'a> TryFrom<&'a Mark<'a>> for Bytes<'a> {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::String(strings) => Ok(Self(strings)),
@@ -30,7 +29,6 @@ impl<'a> TryFrom<&'a Mark<'a>> for Bytes<'a> {
 impl<'a> TryRead<'a> for Bytes<'a> {
     type Item = &'a BStr;
 
-    #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(value) = self.0.get(idx) else {
             cold_path();
@@ -43,7 +41,6 @@ impl<'a> TryRead<'a> for Bytes<'a> {
 impl<'a> ReadSlice<'a> for Bytes<'a> {
     type Elem = &'a BStr;
 
-    #[inline(always)]
     fn try_read_slice(&self, range: Range<usize>) -> crate::Result<&'a [Self::Elem]> {
         let end = range.end;
         let Some(slice) = self.0.data.get(range) else {
@@ -63,7 +60,6 @@ pub struct Str<'a>(&'a StringView<'a>);
 impl<'a> TryFrom<&'a Mark<'a>> for Str<'a> {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         let reader = Bytes::try_from(value)?;
         for value in &reader.0.data {
@@ -76,7 +72,6 @@ impl<'a> TryFrom<&'a Mark<'a>> for Str<'a> {
 impl<'a> TryRead<'a> for Str<'a> {
     type Item = &'a str;
 
-    #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(value) = self.0.get(idx) else {
             cold_path();
@@ -95,7 +90,6 @@ pub struct TrustedStr<'a>(&'a StringView<'a>);
 impl<'a> TryFrom<&'a Mark<'a>> for TrustedStr<'a> {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         let reader = Bytes::try_from(value)?;
         Ok(Self(reader.0))
@@ -126,7 +120,6 @@ pub struct FixedBytes<'a>(pub &'a FixedStringMark<'a>);
 impl<'a> TryFrom<&'a Mark<'a>> for FixedBytes<'a> {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::FixedString(fixed) => Ok(Self(fixed)),
@@ -141,7 +134,6 @@ impl<'a> TryFrom<&'a Mark<'a>> for FixedBytes<'a> {
 impl<'a> TryRead<'a> for FixedBytes<'a> {
     type Item = &'a BStr;
 
-    #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(value) = self.0.get_bstr(idx) else {
             cold_path();
@@ -160,7 +152,6 @@ pub struct FixedStr<'a>(&'a FixedStringMark<'a>);
 impl<'a> TryFrom<&'a Mark<'a>> for FixedStr<'a> {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         let reader = FixedBytes::try_from(value)?;
         if reader.0.size != 0 {
@@ -175,7 +166,6 @@ impl<'a> TryFrom<&'a Mark<'a>> for FixedStr<'a> {
 impl<'a> TryRead<'a> for FixedStr<'a> {
     type Item = &'a str;
 
-    #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(value) = self.0.get_bstr(idx) else {
             cold_path();
@@ -194,7 +184,6 @@ pub struct TrustedFixedStr<'a>(&'a FixedStringMark<'a>);
 impl<'a> TryFrom<&'a Mark<'a>> for TrustedFixedStr<'a> {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         FixedBytes::try_from(value).map(|reader| Self(reader.0))
     }
@@ -203,7 +192,6 @@ impl<'a> TryFrom<&'a Mark<'a>> for TrustedFixedStr<'a> {
 impl<'a> TryRead<'a> for TrustedFixedStr<'a> {
     type Item = &'a str;
 
-    #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(value) = self.0.get_bstr(idx) else {
             cold_path();

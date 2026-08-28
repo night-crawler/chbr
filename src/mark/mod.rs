@@ -402,7 +402,7 @@ impl<'a> Mark<'a> {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn get_str(&'a self, index: usize) -> crate::Result<Option<&'a BStr>> {
         match self {
             Mark::String(strings) => Ok(strings.get(index)),
@@ -415,7 +415,7 @@ impl<'a> Mark<'a> {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn get_opt_str(&'a self, index: usize) -> crate::Result<Option<Option<&'a BStr>>> {
         let Mark::Nullable(Nullable { mask, data }) = self else {
             // convenience wrapper
@@ -431,7 +431,7 @@ impl<'a> Mark<'a> {
     }
 
     #[expect(clippy::needless_pass_by_value)]
-    #[inline]
+    #[inline(always)]
     pub fn get_datetime<T: TimeZone>(
         &'a self,
         index: usize,
@@ -463,7 +463,7 @@ impl<'a> Mark<'a> {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn slice_lc_strs(&'a self, idx: Range<usize>) -> crate::Result<lc::StrIter<'a>> {
         let Mark::LowCardinality(lc) = self else {
             cold_path();
@@ -487,7 +487,7 @@ impl<'a> Mark<'a> {
         Ok(lc::StrIter { indices, keys })
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn get_array_lc_strs(
         &'a self,
         index: usize,
@@ -514,7 +514,6 @@ impl<'a> Mark<'a> {
         Ok(Some(lc::ArrayLcStrIter { inner: Some(it) }))
     }
 
-    #[inline]
     pub fn get_map<K, V>(&'a self, index: usize) -> crate::Result<Option<MapIterator<'a, K, V>>> {
         let Mark::Map(map) = self else {
             cold_path();
@@ -559,7 +558,7 @@ impl<'a> Mark<'a> {
 
         Ok(Some(slice.iter().copied().map(|b| b != 0)))
     }
-    #[inline]
+
     pub fn get_bool(&'a self, index: usize) -> crate::Result<Option<bool>> {
         match self {
             Mark::Bool(bv) => {
@@ -634,7 +633,6 @@ impl<'a> Mark<'a> {
     );
 }
 
-#[inline]
 fn checked_slice<'a, T>(
     data: &'a [T],
     range: Range<usize>,
@@ -651,7 +649,6 @@ fn checked_slice<'a, T>(
 macro_rules! impl_get {
     ($ty:ident, $variant:ident) => {
         impl<'a> $ty<'a> {
-            #[inline]
             pub const fn get(&'a self, index: usize) -> Option<Value<'a>> {
                 if self.data.len() <= index {
                     cold_path();
@@ -688,7 +685,6 @@ impl Variant<'_> {
     /// Discriminator byte marking a NULL row.
     pub const NULL_DISCRIMINATOR: u8 = 255;
 
-    #[inline]
     pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         let Some(&discriminator) = self.discriminators.get(index) else {
             return Ok(None);
@@ -710,7 +706,6 @@ pub struct Nested<'a> {
 }
 
 impl Nested<'_> {
-    #[inline]
     pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         // verify the index is present
         if self.array_of_tuples.get(index)?.is_none() {
@@ -727,7 +722,6 @@ pub struct NamedTuple<'a> {
 }
 
 impl<'a> NamedTuple<'a> {
-    #[inline]
     pub fn mark(&self, name: &str) -> crate::Result<&Mark<'a>> {
         let Mark::Tuple(tuple) = self.tuple.as_ref() else {
             cold_path();
@@ -736,7 +730,6 @@ impl<'a> NamedTuple<'a> {
         crate::mark_by_name(&self.col_names, &tuple.values, name)
     }
 
-    #[inline]
     pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         if self.tuple.get(index)?.is_none() {
             return Ok(None);
@@ -752,7 +745,6 @@ pub struct Array<'a> {
 }
 
 impl Array<'_> {
-    #[inline]
     pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         let Some((start, end)) = self.offsets.offset_indices(index)? else {
             return Ok(None);
@@ -809,7 +801,6 @@ pub struct Enum8<'a> {
 }
 
 impl Enum8<'_> {
-    #[inline]
     pub fn get(&self, index: usize) -> Option<Value<'_>> {
         let variant = *self.data.get(index)?;
         if let Ok(index) = self.variants.binary_search_by_key(&variant, |(_, id)| *id) {
@@ -827,7 +818,6 @@ pub struct Enum16<'a> {
 }
 
 impl Enum16<'_> {
-    #[inline]
     pub fn get(&self, index: usize) -> Option<Value<'_>> {
         let variant = self.data.get(index)?.get();
         if let Ok(index) = self.variants.binary_search_by_key(&variant, |(_, id)| *id) {
@@ -845,7 +835,6 @@ pub struct Dynamic<'a> {
 }
 
 impl Dynamic<'_> {
-    #[inline]
     pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         let Some(&discriminator) = self.discriminators.get(index) else {
             return Ok(None);
@@ -867,7 +856,6 @@ pub struct Nullable<'a> {
 }
 
 impl Nullable<'_> {
-    #[inline]
     pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         if self.mask.get(index) == Some(&1) {
             return Ok(Some(Value::Empty));
@@ -888,7 +876,6 @@ pub struct BoolView<'a> {
 }
 
 impl BoolView<'_> {
-    #[inline(always)]
     pub fn get(&self, index: usize) -> Option<bool> {
         self.data.get(index).map(|&val| val == 1)
     }

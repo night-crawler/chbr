@@ -63,41 +63,34 @@ impl<'a> Json<'a> {
     }
 
     #[cfg(feature = "serde1")]
-    #[inline]
     pub(crate) const fn root(&self) -> usize {
         0
     }
 
     #[cfg(feature = "serde1")]
-    #[inline]
     pub(crate) fn node_key(&'a self, node: usize) -> &'a str {
         self.nodes[node].key.as_ref()
     }
 
     #[cfg(feature = "serde1")]
-    #[inline]
     pub(crate) fn node_leaf(&self, node: usize) -> Option<usize> {
         self.nodes[node].leaf
     }
 
     #[cfg(feature = "serde1")]
-    #[inline]
     pub(crate) fn first_child(&self, node: usize) -> Option<usize> {
         self.nodes[node].first_child
     }
 
     #[cfg(feature = "serde1")]
-    #[inline]
     pub(crate) fn next_sibling(&self, node: usize) -> Option<usize> {
         self.nodes[node].next_sibling
     }
 
-    #[inline]
     pub(crate) const fn contains_row(&self, row: usize) -> bool {
         row < self.rows
     }
 
-    #[inline]
     pub(crate) const fn get(&'a self, row: usize) -> Option<Value<'a>> {
         if row < self.rows {
             Some(Value::Json {
@@ -109,7 +102,6 @@ impl<'a> Json<'a> {
         }
     }
 
-    #[inline]
     pub(crate) fn slice(&'a self, range: Range<usize>) -> crate::Result<Value<'a>> {
         if range.end > self.rows {
             cold_path();
@@ -121,7 +113,6 @@ impl<'a> Json<'a> {
         })
     }
 
-    #[inline]
     pub(crate) fn value(
         &'a self,
         path_index: usize,

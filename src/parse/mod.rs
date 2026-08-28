@@ -10,7 +10,6 @@ pub mod typ;
 
 pub type IResult<I, O, E = Error> = Result<(I, O), E>;
 
-#[inline]
 fn parse_varuint<T>(input: &[u8]) -> IResult<&[u8], T>
 where
     T: TryFrom<u64>,
@@ -25,7 +24,6 @@ where
     Ok((rest, value))
 }
 
-#[inline(always)]
 fn get_unsigned_leb128(input: &[u8]) -> Result<(u64, &[u8]), Error> {
     const DATA: u8 = 0x7F;
     const CONT: u8 = 0x80;
@@ -77,7 +75,6 @@ fn get_unsigned_leb128(input: &[u8]) -> Result<(u64, &[u8]), Error> {
     Ok((acc, &input[10..]))
 }
 
-#[inline]
 fn parse_u64<T>(input: &[u8]) -> IResult<&[u8], T>
 where
     T: TryFrom<u64>,
@@ -97,7 +94,6 @@ where
     Ok((rest, value))
 }
 
-#[inline]
 fn parse_var_str_bytes(input: &[u8]) -> IResult<&[u8], &[u8]> {
     let (input, len) = parse_varuint(input)?;
     if input.len() < len {
@@ -128,7 +124,6 @@ pub(crate) fn parse_var_str(input: &[u8]) -> IResult<&[u8], &str> {
     Ok((remainder, str_value))
 }
 
-#[inline]
 fn take_elements<'a>(
     input: &'a [u8],
     left: usize,

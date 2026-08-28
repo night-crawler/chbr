@@ -54,7 +54,6 @@ pub enum Error {
     ColumnNotFound(String),
 }
 
-#[inline]
 pub(crate) fn decode_utf8(bytes: &[u8]) -> crate::Result<&str> {
     match std::str::from_utf8(bytes) {
         Ok(s) => Ok(s),

@@ -40,6 +40,7 @@ impl OffsetIndexPair for Offsets<'_> {
         Ok(Some((start, end)))
     }
 
+    #[inline]
     fn get_cast<T>(&self, index: usize) -> crate::Result<Option<T>>
     where
         T: TryFrom<u64>,
@@ -103,7 +104,6 @@ pub enum TypeHeader<'a> {
 }
 
 impl<'a> TypeHeader<'a> {
-    #[inline]
     pub(crate) fn into_array(self) -> TypeHeader<'a> {
         match self {
             TypeHeader::Array(inner) => *inner,
@@ -111,7 +111,6 @@ impl<'a> TypeHeader<'a> {
         }
     }
 
-    #[inline]
     pub(crate) fn into_tuple(self) -> Vec<TypeHeader<'a>> {
         match self {
             TypeHeader::Tuple(t) => t,
@@ -119,7 +118,6 @@ impl<'a> TypeHeader<'a> {
         }
     }
 
-    #[inline]
     pub(crate) fn into_map(self) -> MapHeader<'a> {
         match self {
             TypeHeader::Map(map) => *map,
@@ -127,7 +125,6 @@ impl<'a> TypeHeader<'a> {
         }
     }
 
-    #[inline]
     pub(crate) fn into_variant(self) -> Vec<TypeHeader<'a>> {
         match self {
             TypeHeader::Variant(variants) => variants,
@@ -135,7 +132,6 @@ impl<'a> TypeHeader<'a> {
         }
     }
 
-    #[inline]
     pub(crate) fn into_json(self) -> JsonHeader<'a> {
         match self {
             TypeHeader::Json(json) => *json,
@@ -143,7 +139,6 @@ impl<'a> TypeHeader<'a> {
         }
     }
 
-    #[inline]
     pub(crate) fn into_dynamic(self) -> DynamicHeader<'a> {
         match self {
             TypeHeader::Dynamic(d) => *d,
@@ -151,7 +146,6 @@ impl<'a> TypeHeader<'a> {
         }
     }
 
-    #[inline]
     pub(crate) fn into_nested(self) -> Vec<TypeHeader<'a>> {
         match self {
             TypeHeader::Nested(n) => n,
@@ -159,7 +153,6 @@ impl<'a> TypeHeader<'a> {
         }
     }
 
-    #[inline]
     pub(crate) fn into_nullable(self) -> TypeHeader<'a> {
         match self {
             TypeHeader::Nullable(inner) => *inner,
@@ -337,7 +330,6 @@ impl<'a> Type<'a> {
         }
     }
 
-    #[inline]
     pub fn from_bytes(s: &[u8]) -> Result<Type<'_>, crate::Error> {
         let (remainder, typ) = match parse_type(s) {
             Ok(parsed) => parsed,
