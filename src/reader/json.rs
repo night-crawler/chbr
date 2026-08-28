@@ -619,13 +619,34 @@ impl<'de> CellDeserializer<'de> {
             return Ok(None);
         };
         let value = match cell.mark {
-            mark::Mark::String(strings) => strings.get(cell.row),
-            mark::Mark::FixedString(fixed) => fixed.get_str(cell.row),
+            mark::Mark::String(strings) => strings
+                .get(cell.row)
+                .map(|value| crate::error::decode_utf8(value))
+                .transpose()?,
+            mark::Mark::FixedString(fixed) => fixed
+                .get_bstr(cell.row)
+                .map(|value| crate::error::decode_utf8(value))
+                .transpose()?,
             mark::Mark::Enum8(enumeration) => enum8_name(enumeration, cell.row),
             mark::Mark::Enum16(enumeration) => enum16_name(enumeration, cell.row),
             _ => None,
         };
         Ok(value)
+    }
+
+    fn borrowed_bytes(self) -> Result<Option<&'de [u8]>, JsonDeserializeError> {
+        let CellState::Present(cell) = self.state()? else {
+            return Ok(None);
+        };
+        Ok(match cell.mark {
+            mark::Mark::String(strings) => strings.get(cell.row).map(AsRef::as_ref),
+            mark::Mark::FixedString(fixed) => fixed.get_bstr(cell.row).map(AsRef::as_ref),
+            mark::Mark::Enum8(enumeration) => enum8_name(enumeration, cell.row).map(str::as_bytes),
+            mark::Mark::Enum16(enumeration) => {
+                enum16_name(enumeration, cell.row).map(str::as_bytes)
+            }
+            _ => None,
+        })
     }
 }
 
@@ -678,7 +699,7 @@ fn base_contains(mark: &mark::Mark<'_>, row: usize) -> Result<bool, JsonDeserial
         mark::Mark::Decimal128(value) => value.data.get(row).is_some(),
         mark::Mark::Decimal256(value) => value.data.get(row).is_some(),
         mark::Mark::String(value) => value.get(row).is_some(),
-        mark::Mark::FixedString(value) => value.get_str(row).is_some(),
+        mark::Mark::FixedString(value) => value.get_bstr(row).is_some(),
         mark::Mark::Uuid(value) => value.get(row).is_some(),
         mark::Mark::Date(value) => value.get(row).is_some(),
         mark::Mark::Date32(value) => value.get(row).is_some(),
@@ -777,9 +798,19 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
                     format_wide_number(at!(value.data.get(cell.row)).0.0, true, value.precision);
                 visitor.visit_str(formatted.as_str())
             }
-            mark::Mark::String(value) => visitor.visit_borrowed_str(at!(value.get(cell.row))),
+            mark::Mark::String(value) => {
+                let value = at!(value.get(cell.row));
+                match crate::error::decode_utf8(value) {
+                    Ok(value) => visitor.visit_borrowed_str(value),
+                    Err(_) => visitor.visit_borrowed_bytes(value),
+                }
+            }
             mark::Mark::FixedString(value) => {
-                visitor.visit_borrowed_str(at!(value.get_str(cell.row)))
+                let value = at!(value.get_bstr(cell.row));
+                match crate::error::decode_utf8(value) {
+                    Ok(value) => visitor.visit_borrowed_str(value),
+                    Err(_) => visitor.visit_borrowed_bytes(value),
+                }
             }
             mark::Mark::Uuid(value) => {
                 let value = uuid::Uuid::from(*at!(value.get(cell.row)));
@@ -883,8 +914,8 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        match self.borrowed_str()? {
-            Some(value) => visitor.visit_borrowed_bytes(value.as_bytes()),
+        match self.borrowed_bytes()? {
+            Some(value) => visitor.visit_borrowed_bytes(value),
             None => self.deserialize_any(visitor),
         }
     }
@@ -893,8 +924,8 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        match self.borrowed_str()? {
-            Some(value) => visitor.visit_byte_buf(value.as_bytes().to_vec()),
+        match self.borrowed_bytes()? {
+            Some(value) => visitor.visit_byte_buf(value.to_vec()),
             None => self.deserialize_any(visitor),
         }
     }
@@ -1218,6 +1249,7 @@ impl<'de> de::Deserializer<'de> for NamedRowDeserializer<'de> {
 
 #[cfg(all(test, feature = "serde1"))]
 mod serde_tests {
+    use bstr::BStr;
     use std::{collections::BTreeMap, net::Ipv4Addr};
 
     use serde::Deserialize;
@@ -1243,6 +1275,12 @@ mod serde_tests {
             is_typed: true,
             type_headers: vec![],
             mark,
+        }
+    }
+
+    fn string_view(data: Vec<&str>) -> mark::StringView<'_> {
+        mark::StringView {
+            data: data.into_iter().map(BStr::new).collect(),
         }
     }
 
@@ -1379,14 +1417,8 @@ mod serde_tests {
         let duplicate = mark::Json::new(
             vec!["a", "a"],
             vec![
-                header(
-                    Type::String,
-                    mark::Mark::String(mark::StringView { data: vec!["x"] }),
-                ),
-                header(
-                    Type::String,
-                    mark::Mark::String(mark::StringView { data: vec!["y"] }),
-                ),
+                header(Type::String, mark::Mark::String(string_view(vec!["x"]))),
+                header(Type::String, mark::Mark::String(string_view(vec!["y"]))),
             ],
             1,
         );
@@ -1395,14 +1427,8 @@ mod serde_tests {
         let mark = mark::Mark::Json(mark::Json::new(
             vec!["a", "a.b"],
             vec![
-                header(
-                    Type::String,
-                    mark::Mark::String(mark::StringView { data: vec!["x"] }),
-                ),
-                header(
-                    Type::String,
-                    mark::Mark::String(mark::StringView { data: vec!["y"] }),
-                ),
+                header(Type::String, mark::Mark::String(string_view(vec!["x"]))),
+                header(Type::String, mark::Mark::String(string_view(vec!["y"]))),
             ],
             1,
         )?);
@@ -1419,15 +1445,10 @@ mod serde_tests {
         let mark = mark::Mark::Json(mark::Json::new(
             vec!["a%2Eb", "nested.value"],
             vec![
+                header(Type::String, mark::Mark::String(string_view(vec!["dot"]))),
                 header(
                     Type::String,
-                    mark::Mark::String(mark::StringView { data: vec!["dot"] }),
-                ),
-                header(
-                    Type::String,
-                    mark::Mark::String(mark::StringView {
-                        data: vec!["nested"],
-                    }),
+                    mark::Mark::String(string_view(vec!["nested"])),
                 ),
             ],
             1,
@@ -1454,9 +1475,7 @@ mod serde_tests {
             vec!["name"],
             vec![header(
                 Type::String,
-                mark::Mark::String(mark::StringView {
-                    data: vec!["one", "two", "three"],
-                }),
+                mark::Mark::String(string_view(vec!["one", "two", "three"])),
             )],
             3,
         )?;
@@ -1690,16 +1709,14 @@ mod serde_tests {
                 Type::String,
                 mark::Mark::Nullable(mark::Nullable {
                     mask: &mask_present,
-                    data: Box::new(mark::Mark::String(mark::StringView { data: vec!["some"] })),
+                    data: Box::new(mark::Mark::String(string_view(vec!["some"]))),
                 }),
             ),
             header(
                 Type::String,
                 mark::Mark::Nullable(mark::Nullable {
                     mask: &mask_null,
-                    data: Box::new(mark::Mark::String(mark::StringView {
-                        data: vec!["unused"],
-                    })),
+                    data: Box::new(mark::Mark::String(string_view(vec!["unused"]))),
                 }),
             ),
             header(
@@ -1708,16 +1725,14 @@ mod serde_tests {
                     is_nullable: false,
                     indices: mark::lc::Indices::U8(&low_cardinality_indices),
                     global_dictionary: None,
-                    additional_keys: Some(Box::new(mark::Mark::String(mark::StringView {
-                        data: vec!["dict"],
-                    }))),
+                    additional_keys: Some(Box::new(mark::Mark::String(string_view(vec!["dict"])))),
                 }),
             ),
             header(
                 Type::String,
                 mark::Mark::Map(mark::Map {
                     offsets: ByteView::try_from(map_offsets.as_slice())?,
-                    keys: Box::new(mark::Mark::String(mark::StringView { data: vec!["k"] })),
+                    keys: Box::new(mark::Mark::String(string_view(vec!["k"]))),
                     values: Box::new(mark::Mark::UInt64(ByteView::try_from(
                         map_value.as_slice(),
                     )?)),
@@ -1728,7 +1743,7 @@ mod serde_tests {
                 mark::Mark::Tuple(mark::Tuple {
                     values: vec![
                         mark::Mark::UInt64(ByteView::try_from(tuple_value.as_slice())?),
-                        mark::Mark::String(mark::StringView { data: vec!["two"] }),
+                        mark::Mark::String(string_view(vec!["two"])),
                     ],
                 }),
             ),
@@ -1750,9 +1765,7 @@ mod serde_tests {
                     array_of_tuples: Box::new(mark::Mark::Array(mark::Array {
                         offsets: ByteView::try_from(nested_offsets.as_slice())?,
                         values: Box::new(mark::Mark::Tuple(mark::Tuple {
-                            values: vec![mark::Mark::String(mark::StringView {
-                                data: vec!["a", "b"],
-                            })],
+                            values: vec![mark::Mark::String(string_view(vec!["a", "b"]))],
                         })),
                     })),
                 }),
@@ -1762,9 +1775,7 @@ mod serde_tests {
                 mark::Mark::Variant(mark::Variant {
                     offsets: vec![0],
                     discriminators: &variant_discriminators,
-                    types: vec![mark::Mark::String(mark::StringView {
-                        data: vec!["variant"],
-                    })],
+                    types: vec![mark::Mark::String(string_view(vec!["variant"]))],
                 }),
             ),
             header(
@@ -1772,9 +1783,7 @@ mod serde_tests {
                 mark::Mark::Dynamic(mark::Dynamic {
                     offsets: vec![0],
                     discriminators: vec![0],
-                    columns: vec![mark::Mark::String(mark::StringView {
-                        data: vec!["dynamic"],
-                    })],
+                    columns: vec![mark::Mark::String(string_view(vec!["dynamic"]))],
                 }),
             ),
         ];

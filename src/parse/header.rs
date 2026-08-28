@@ -165,7 +165,9 @@ pub fn json<'a>(
             mark: Mark::Empty,
         });
     }
-    paths.extend(dynamic_paths.data);
+    for path in dynamic_paths.data {
+        paths.push(crate::error::decode_utf8(path)?);
+    }
 
     for _ in 0..num_dynamic_paths {
         let header;

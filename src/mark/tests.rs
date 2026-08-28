@@ -130,7 +130,7 @@ fn plain_strings_array() -> TestResult {
     let strings_marker = &block.markers[1];
 
     for (i, expected) in expected_arrays.iter().enumerate() {
-        let slice: &[&str] = strings_marker.get(i)?.unwrap().try_into()?;
+        let slice: &[&bstr::BStr] = strings_marker.get(i)?.unwrap().try_into()?;
         let actual = slice.to_vec();
 
         assert_eq!(actual, *expected, "Mismatch at index {i}");
@@ -282,7 +282,11 @@ fn nullable_string() -> TestResult {
         assert_eq!(value, *expected, "Mismatch at index {i}");
 
         let value = strings_marker.get_opt_str(i)?.unwrap();
-        assert_eq!(value, *expected, "Mismatch at index {i} (get_opt_str)");
+        assert_eq!(
+            value,
+            expected.map(bstr::BStr::new),
+            "Mismatch at index {i} (get_opt_str)"
+        );
     }
 
     Ok(())
@@ -1370,7 +1374,11 @@ fn nullable_lc_str() -> TestResult {
         assert_eq!(value, *expected, "Mismatch at index {i}");
 
         let value = nlc_str_marker.get_opt_str(i)?.unwrap();
-        assert_eq!(value, *expected, "Mismatch at index {i} (get_opt_str)");
+        assert_eq!(
+            value,
+            expected.map(bstr::BStr::new),
+            "Mismatch at index {i} (get_opt_str)"
+        );
     }
 
     Ok(())

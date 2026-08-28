@@ -12,6 +12,7 @@ use crate::{
     value::{MapIterator, Value},
     zc,
 };
+use bstr::BStr;
 use chrono::{DateTime as ChronoDateTime, TimeZone};
 use chrono_tz::Tz;
 use core::fmt;
@@ -405,20 +406,20 @@ impl<'a> Mark<'a> {
     }
 
     #[inline]
-    pub fn get_str(&'a self, index: usize) -> crate::Result<Option<&'a str>> {
+    pub fn get_str(&'a self, index: usize) -> crate::Result<Option<&'a BStr>> {
         match self {
             Mark::String(strings) => Ok(strings.get(index)),
-            Mark::FixedString(fs) => Ok(fs.get_str(index)),
+            Mark::FixedString(fs) => Ok(fs.get_bstr(index)),
             Mark::LowCardinality(lc) => lc.get_str(index),
             mark => {
                 cold_path();
-                Err(Error::MismatchedType(mark.as_str(), "&str"))
+                Err(Error::MismatchedType(mark.as_str(), "&BStr"))
             }
         }
     }
 
     #[inline]
-    pub fn get_opt_str(&'a self, index: usize) -> crate::Result<Option<Option<&'a str>>> {
+    pub fn get_opt_str(&'a self, index: usize) -> crate::Result<Option<Option<&'a BStr>>> {
         let Mark::Nullable(Nullable { mask, data }) = self else {
             // convenience wrapper
             let value = self.get_str(index)?;
@@ -493,7 +494,7 @@ impl<'a> Mark<'a> {
     pub fn get_array_lc_strs(
         &'a self,
         index: usize,
-    ) -> crate::Result<Option<impl Iterator<Item = crate::Result<&'a str>>>> {
+    ) -> crate::Result<Option<impl Iterator<Item = crate::Result<&'a BStr>>>> {
         if matches!(self, Mark::Empty) {
             cold_path();
             return Ok(None);
@@ -627,7 +628,7 @@ impl<'a> Mark<'a> {
         (Float32, zc::F32),
         (Float64, zc::F64),
         (BFloat16, Bf16Data),
-        (String, &'a str),
+        (String, &'a BStr),
         (Uuid, UuidData),
         (Date, Date16Data),
         (Date32, Date32Data),
@@ -795,16 +796,15 @@ pub struct FixedString<'a> {
 
 impl<'a> FixedString<'a> {
     #[inline]
-    pub(crate) fn get_str(&self, index: usize) -> Option<&'a str> {
+    pub(crate) fn get_bstr(&self, index: usize) -> Option<&'a BStr> {
         let offset = self.size.checked_mul(index)?;
         let end = offset.checked_add(self.size)?;
-        let slice = self.data.get(offset..end)?.rtrim_zeros();
-        Some(unsafe { std::str::from_utf8_unchecked(slice) })
+        Some(BStr::new(self.data.get(offset..end)?.rtrim_zeros()))
     }
 
     #[inline]
     pub fn get(&self, index: usize) -> Option<Value<'a>> {
-        self.get_str(index).map(Value::String)
+        self.get_bstr(index).map(Value::String)
     }
 }
 
@@ -836,7 +836,7 @@ impl Enum8<'_> {
     pub fn get(&self, index: usize) -> Option<Value<'_>> {
         let variant = *self.data.get(index)?;
         if let Ok(index) = self.variants.binary_search_by_key(&variant, |(_, id)| *id) {
-            return Some(Value::String(self.variants[index].0));
+            return Some(Value::String(BStr::new(self.variants[index].0)));
         }
         // actually, at this point it's broken, but we trust clickhouse!
         None
@@ -854,7 +854,7 @@ impl Enum16<'_> {
     pub fn get(&self, index: usize) -> Option<Value<'_>> {
         let variant = self.data.get(index)?.get();
         if let Ok(index) = self.variants.binary_search_by_key(&variant, |(_, id)| *id) {
-            return Some(Value::String(self.variants[index].0));
+            return Some(Value::String(BStr::new(self.variants[index].0)));
         }
         None
     }
@@ -907,20 +907,20 @@ pub struct Tuple<'a> {
 
 #[derive(Debug)]
 pub struct StringView<'a> {
-    pub data: Vec<&'a str>,
+    pub data: Vec<&'a BStr>,
 }
 
 impl<'a> Deref for StringView<'a> {
-    type Target = [&'a str];
+    type Target = [&'a BStr];
 
     fn deref(&self) -> &Self::Target {
         &self.data
     }
 }
 
-impl StringView<'_> {
+impl<'a> StringView<'a> {
     #[inline(always)]
-    pub fn get(&self, index: usize) -> Option<&str> {
+    pub fn get(&self, index: usize) -> Option<&'a BStr> {
         self.data.get(index).copied()
     }
 }
@@ -942,7 +942,7 @@ struct ArrayLcStrIter<'a> {
 }
 
 impl<'a> Iterator for ArrayLcStrIter<'a> {
-    type Item = crate::Result<&'a str>;
+    type Item = crate::Result<&'a BStr>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {

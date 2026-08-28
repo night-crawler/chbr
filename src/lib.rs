@@ -25,6 +25,7 @@ pub mod types;
 pub mod value;
 mod zc;
 
+pub use bstr::BStr;
 pub use chbr_derive::{FromBlock, FromVariant};
 pub use error::Error;
 // Same name as the derive macro on purpose (macro vs type namespace):

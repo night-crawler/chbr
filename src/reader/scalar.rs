@@ -11,7 +11,7 @@ use crate::error::Error;
 use crate::mark::{
     BoolView, DateTime as DateTimeMark, DateTime64 as DateTime64Mark, Decimal32 as Decimal32Mark,
     Decimal64 as Decimal64Mark, Decimal128 as Decimal128Mark, Enum8 as Enum8Mark,
-    Enum16 as Enum16Mark, FixedString as FixedStringMark, Mark, StringView,
+    Enum16 as Enum16Mark, Mark,
 };
 use crate::slice::ByteView;
 use crate::{Bf16Data, Date16Data, Date32Data, Ipv4Data, Ipv6Data, UuidData, zc};
@@ -181,82 +181,6 @@ impl<'a> ReadSlice<'a> for Bool<'a> {
             return Err(Error::IndexOutOfBounds(end, "Bool"));
         };
         Ok(slice)
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct Str<'a>(pub &'a StringView<'a>);
-
-impl<'a> TryFrom<&'a Mark<'a>> for Str<'a> {
-    type Error = Error;
-
-    #[inline]
-    fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Mark::String(s) => Ok(Str(s)),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "String"))
-            }
-        }
-    }
-}
-
-impl<'a> TryRead<'a> for Str<'a> {
-    type Item = &'a str;
-
-    #[inline(always)]
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value) = self.0.get(idx) else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "String"));
-        };
-        Ok(value)
-    }
-}
-
-impl<'a> ReadSlice<'a> for Str<'a> {
-    type Elem = &'a str;
-
-    #[inline(always)]
-    fn try_read_slice(&self, range: Range<usize>) -> crate::Result<&'a [Self::Elem]> {
-        let end = range.end;
-        let Some(slice) = self.0.data.get(range) else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(end, "String"));
-        };
-        Ok(slice)
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct FixedStr<'a>(pub &'a FixedStringMark<'a>);
-
-impl<'a> TryFrom<&'a Mark<'a>> for FixedStr<'a> {
-    type Error = Error;
-
-    #[inline]
-    fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Mark::FixedString(fs) => Ok(Self(fs)),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "FixedString"))
-            }
-        }
-    }
-}
-
-impl<'a> TryRead<'a> for FixedStr<'a> {
-    type Item = &'a str;
-
-    #[inline(always)]
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value) = self.0.get_str(idx) else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "FixedString"));
-        };
-        Ok(value)
     }
 }
 
@@ -518,7 +442,6 @@ readable! {
     f64 => F64<'a>;
     half::bf16 => Bf16<'a>;
     bool => Bool<'a>;
-    &'a str => Str<'a>;
     uuid::Uuid => Uuid<'a>;
     Ipv4Addr => Ipv4<'a>;
     Ipv6Addr => Ipv6<'a>;

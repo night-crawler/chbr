@@ -4,12 +4,14 @@ use std::ops::Range;
 mod composite;
 mod json;
 mod scalar;
+mod string;
 #[cfg(test)]
 mod tests;
 
 pub use composite::*;
 pub use json::*;
 pub use scalar::*;
+pub use string::*;
 
 /// Reads values by index from an underlying storage, i.e., from a [`crate::Mark`].
 ///
@@ -92,8 +94,8 @@ pub trait FromVariant<'a>: Sized {
 /// Without `#[col(reader = ...)]`, the derive uses the default `<FieldType as Readable>::Reader`
 /// for that child [`crate::Mark`].
 ///
-/// For example, `Readable<'a> for &'a str` defines `ColStr<'a>` as its default
-/// reader. A variant `Text(&'a str)` therefore uses `ColStr<'a>`.
+/// For example, `Readable<'a> for &'a str` defines [`Str`] as its default
+/// reader. A variant `Text(&'a str)` therefore uses [`Str`].
 ///
 /// You need to specify the reader explicitly (`#[col(reader = ...)]`) when the corresponding
 /// child [`crate::Mark`] needs a `FixedString`, `Enum8`, or `Enum16` reader.

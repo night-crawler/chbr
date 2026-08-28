@@ -1,6 +1,7 @@
 use crate::mark::{Mark, checked_slice};
 use crate::value::{LowCardinalitySliceIterator, SliceUsizeIterator, Value};
 use crate::{Error, zc};
+use bstr::BStr;
 use std::hint::cold_path;
 use std::ops::Range;
 
@@ -35,7 +36,7 @@ impl LowCardinality<'_> {
     }
 
     #[inline]
-    pub(crate) fn get_str(&self, index: usize) -> crate::Result<Option<&str>> {
+    pub(crate) fn get_str(&self, index: usize) -> crate::Result<Option<&BStr>> {
         let Some(keys) = &self.additional_keys else {
             cold_path();
             return Err(Error::CorruptedData(
@@ -52,7 +53,7 @@ impl LowCardinality<'_> {
 
         let Mark::String(keys) = keys.as_ref() else {
             cold_path();
-            return Err(Error::MismatchedType(keys.as_str(), "&str"));
+            return Err(Error::MismatchedType(keys.as_str(), "&BStr"));
         };
         Ok(keys.get(value_index))
     }
@@ -199,15 +200,15 @@ impl Iterator for IndexIter<'_> {
 
 impl ExactSizeIterator for IndexIter<'_> {}
 
-/// Iterator over the string keys of a `LowCardinality` column slice.
+/// Iterator over raw string keys of a `LowCardinality` column slice.
 /// Waiting for: <https://github.com/rust-lang/rust/issues/63063>
 pub struct StrIter<'a> {
     pub(crate) indices: IndexIter<'a>,
-    pub(crate) keys: &'a [&'a str],
+    pub(crate) keys: &'a [&'a BStr],
 }
 
 impl<'a> Iterator for StrIter<'a> {
-    type Item = crate::Result<&'a str>;
+    type Item = crate::Result<&'a BStr>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {

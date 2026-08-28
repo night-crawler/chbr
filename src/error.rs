@@ -54,6 +54,14 @@ pub enum Error {
     ColumnNotFound(String),
 }
 
+#[inline]
+pub(crate) fn decode_utf8(bytes: &[u8]) -> crate::Result<&str> {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => Ok(s),
+        Err(error) => Err(Error::Utf8Decode(error, bytes.to_vec())),
+    }
+}
+
 impl<T> From<nom::Err<T>> for Error
 where
     T: Debug,
