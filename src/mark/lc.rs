@@ -266,3 +266,26 @@ impl<'a> TryFrom<Mark<'a>> for Indices<'a> {
         }
     }
 }
+
+pub struct ArrayLcStrIter<'a> {
+    pub inner: Option<StrIter<'a>>,
+}
+
+impl<'a> Iterator for ArrayLcStrIter<'a> {
+    type Item = crate::Result<&'a BStr>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.as_mut()?.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.inner {
+            Some(it) => it.size_hint(),
+            None => (0, Some(0)),
+        }
+    }
+}
+
+impl ExactSizeIterator for ArrayLcStrIter<'_> {}
