@@ -12,8 +12,9 @@ use crate::{
     value::{
         ArraySliceIterator, BoolSliceIterator, DynamicSliceIterator, Enum8SliceIterator,
         Enum16SliceIterator, FixedStringSliceIterator, LowCardinalitySliceIterator, MapIterator,
-        MapSliceIterator, NestedIterator, NestedSliceIterator, NullableSliceIterator,
-        TupleSliceIterator, Value, VariantSliceIterator,
+        MapSliceIterator, NamedTupleIterator, NamedTupleSliceIterator, NestedIterator,
+        NestedSliceIterator, NullableSliceIterator, TupleSliceIterator, Value,
+        VariantSliceIterator,
     },
 };
 use half::bf16;
@@ -1767,4 +1768,55 @@ fn mark_accessors_return_errors() -> TestResult {
     ));
 
     Ok(())
+}
+
+#[test]
+fn value_conversions_report_source_and_target_types() {
+    assert!(matches!(
+        bool::try_from(Value::UInt8(1)),
+        Err(crate::Error::MismatchedType("UInt8", "bool"))
+    ));
+    assert!(matches!(
+        <&str>::try_from(Value::UInt8(1)),
+        Err(crate::Error::MismatchedType("UInt8", "&str"))
+    ));
+    assert!(matches!(
+        TupleSliceIterator::try_from(Value::UInt8(1)),
+        Err(crate::Error::MismatchedType("UInt8", "TupleSliceIterator"))
+    ));
+    assert!(matches!(
+        MapSliceIterator::<bool, bool>::try_from(Value::UInt8(1)),
+        Err(crate::Error::MismatchedType("UInt8", "MapSliceIterator"))
+    ));
+
+    let named_tuple = mark::NamedTuple {
+        col_names: Vec::new(),
+        tuple: Box::new(Mark::Empty),
+    };
+    assert!(matches!(
+        NamedTupleIterator::try_from(Value::NamedTuple {
+            mark: &named_tuple,
+            index: 0,
+        }),
+        Err(crate::Error::MismatchedType(
+            "non-Tuple",
+            "NamedTupleIterator"
+        ))
+    ));
+
+    let mut slice = NamedTupleSliceIterator::try_from(Value::NamedTupleSlice {
+        mark: &named_tuple,
+        range: crate::TinyRange {
+            start: 0,
+            length: 1,
+        },
+    })
+    .expect("NamedTupleSlice must convert before reading its malformed tuple");
+    assert!(matches!(
+        slice.next(),
+        Some(Err(crate::Error::MismatchedType(
+            "non-Tuple",
+            "NamedTupleSliceIterator"
+        )))
+    ));
 }

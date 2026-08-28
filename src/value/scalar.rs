@@ -10,7 +10,7 @@ use half::bf16;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
-use super::Value;
+use super::{Value, short_type_name};
 use crate::{
     Bf16Data, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
     Decimal128Data, I256, Ipv4Data, Ipv6Data, U256, UuidData, error::Error, zc,
@@ -25,10 +25,7 @@ macro_rules! impl_try_from_value_slice {
                 match value {
                     Value::$variant(v) => Ok(v),
                     Value::Empty => Ok(&[]),
-                    other => {
-                        cold_path();
-                        Err(Error::MismatchedType(other.as_str(), stringify!($ty)))
-                    }
+                    other => Err(other.mismatched_type(stringify!($ty))),
                 }
             }
         }
@@ -43,10 +40,7 @@ macro_rules! impl_try_from_value {
             fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
                 match value {
                     Value::$variant(v) => Ok(v),
-                    other => {
-                        cold_path();
-                        Err(Error::MismatchedType(other.as_str(), stringify!($ty)))
-                    }
+                    other => Err(other.mismatched_type(stringify!($ty))),
                 }
             }
         }
@@ -91,10 +85,7 @@ impl<'a> TryFrom<Value<'a>> for Ipv6Addr {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Ipv6(v) => Ok(Ipv6Addr::from(*v)),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Ipv6Addr"))
-            }
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
         }
     }
 }
@@ -108,10 +99,7 @@ impl<'a> TryFrom<Value<'a>> for Uuid {
                 let [hi, lo] = uuid_data.0;
                 Ok(Uuid::from_u64_pair(hi.get(), lo.get()))
             }
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Uuid"))
-            }
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
         }
     }
 }
@@ -142,10 +130,7 @@ impl TryFrom<Value<'_>> for chrono::DateTime<Tz> {
 
                 Ok(value)
             }
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "DateTime"))
-            }
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
         }
     }
 }
@@ -156,10 +141,7 @@ impl TryFrom<Value<'_>> for chrono::NaiveDate {
     fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
         match value {
             Value::Date32(dt) | Value::Date(dt) => Ok(dt),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Date/Date64"))
-            }
+            other => Err(other.mismatched_type("Date/Date64")),
         }
     }
 }
@@ -246,10 +228,7 @@ macro_rules! impl_try_from_integer_value {
                             }
                         },
 
-                        other => {
-                            cold_path();
-                            Err(Error::MismatchedType(other.as_str(), stringify!($target)))
-                        },
+                        other => Err(other.mismatched_type(stringify!($target))),
                     }
                 }
             }
@@ -293,10 +272,7 @@ impl<'a> TryFrom<Value<'a>> for SliceUsizeIterator<'a> {
                 index: 0,
                 len: x.len(),
             }),
-            _ => {
-                cold_path();
-                Err(Error::MismatchedType(value.as_str(), "SliceUsizeIterator"))
-            }
+            _ => Err(value.mismatched_type(short_type_name::<Self>())),
         }
     }
 }
@@ -348,10 +324,7 @@ impl<'a> TryFrom<Value<'a>> for Decimal {
                     "Decimal256 is not yet supported".to_owned(),
                 ))
             }
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Decimal"))
-            }
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
         }
     }
 }
@@ -365,10 +338,7 @@ impl<'a> TryFrom<Value<'a>> for BoolSliceIterator<'a> {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::BoolSlice(data) => Ok(BoolSliceIterator { data: data.iter() }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "BoolSliceIterator"))
-            }
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
         }
     }
 }
@@ -401,13 +371,7 @@ impl<'a> TryFrom<Value<'a>> for DateTime32SliceIterator<'a> {
                 tz,
                 slice: slice.iter(),
             }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(
-                    other.as_str(),
-                    "DateTime32SliceIterator",
-                ))
-            }
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
         }
     }
 }
@@ -446,13 +410,7 @@ impl<'a> TryFrom<Value<'a>> for DateTime64SliceIterator<'a> {
                 precision,
                 slice: slice.iter(),
             }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(
-                    other.as_str(),
-                    "DateTime64SliceIterator",
-                ))
-            }
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
         }
     }
 }
@@ -486,13 +444,7 @@ impl<'a> TryFrom<Value<'a>> for Decimal32SliceIterator<'a> {
                 precision,
                 slice: slice.iter(),
             }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(
-                    other.as_str(),
-                    "Decimal32SliceIterator",
-                ))
-            }
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
         }
     }
 }
@@ -525,13 +477,7 @@ impl<'a> TryFrom<Value<'a>> for Decimal64SliceIterator<'a> {
                 precision,
                 slice: slice.iter(),
             }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(
-                    other.as_str(),
-                    "Decimal64SliceIterator",
-                ))
-            }
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
         }
     }
 }
@@ -564,13 +510,7 @@ impl<'a> TryFrom<Value<'a>> for Decimal128SliceIterator<'a> {
                 precision,
                 slice: slice.iter(),
             }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(
-                    other.as_str(),
-                    "Decimal128SliceIterator",
-                ))
-            }
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
         }
     }
 }
@@ -606,10 +546,7 @@ impl<'a> TryFrom<Value<'a>> for Enum8SliceIterator<'a> {
                     data: data.iter(),
                 })
             }
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Enum8Iterator"))
-            }
+            other => Err(other.mismatched_type("Enum8Iterator")),
         }
     }
 }
@@ -651,10 +588,7 @@ impl<'a> TryFrom<Value<'a>> for Enum16SliceIterator<'a> {
                     data: data.iter(),
                 })
             }
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Enum16Iterator"))
-            }
+            other => Err(other.mismatched_type("Enum16Iterator")),
         }
     }
 }
