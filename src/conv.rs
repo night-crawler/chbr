@@ -29,12 +29,10 @@ fn utc_alias_offset(tz: Tz) -> Option<TzOffset> {
     Some(UTC_ALIAS_OFFSETS[idx])
 }
 
-#[inline(always)]
 pub fn date16(days: u16) -> NaiveDate {
     EPOCH_DATE + Duration::days(i64::from(days))
 }
 
-#[inline(always)]
 pub fn date32(days: i32) -> NaiveDate {
     EPOCH_DATE + Duration::days(i64::from(days))
 }
@@ -46,7 +44,7 @@ pub fn datetime32(secs: u32) -> DateTime<Utc> {
     unsafe { DateTime::<Utc>::from_timestamp(i64::from(secs), 0).unwrap_unchecked() }
 }
 
-#[inline]
+#[inline(always)]
 pub fn datetime32_tz(secs: u32, tz: Tz) -> DateTime<Tz> {
     let dt_utc = datetime32(secs);
     match utc_alias_offset(tz) {
@@ -55,7 +53,6 @@ pub fn datetime32_tz(secs: u32, tz: Tz) -> DateTime<Tz> {
     }
 }
 
-#[inline(always)]
 pub fn datetime64(timestamp: i64, precision: u8) -> Option<DateTime<Utc>> {
     let pow = 10i64.checked_pow(u32::from(precision))?;
     let secs = timestamp / pow;
@@ -65,7 +62,6 @@ pub fn datetime64(timestamp: i64, precision: u8) -> Option<DateTime<Utc>> {
     DateTime::<Utc>::from_timestamp(secs, nsec)
 }
 
-#[inline]
 pub fn datetime64_tz(timestamp: i64, precision: u8, tz: Tz) -> Option<DateTime<Tz>> {
     let dt_utc = datetime64(timestamp, precision)?;
     Some(match utc_alias_offset(tz) {

@@ -35,13 +35,11 @@ pub trait FromBlock<'a>: TryRead<'a> {
     /// if it can.
     fn from_block(block: &'a crate::ParsedBlock<'a>) -> crate::Result<Self>;
 
-    #[inline]
     fn rows(block: &'a crate::ParsedBlock<'a>) -> crate::Result<RowsIter<'a, Self>> {
         Ok(RowsIter::new(Self::from_block(block)?, block.num_rows))
     }
 
     /// Iterates all rows of all `blocks` as one flat stream.
-    #[inline]
     fn iter_blocks(blocks: &'a [crate::ParsedBlock<'a>]) -> BlocksRows<'a, Self> {
         BlocksRows {
             blocks: blocks.iter(),
@@ -111,7 +109,6 @@ pub struct RowsIter<'a, R: TryRead<'a>> {
 }
 
 impl<'a, R: TryRead<'a>> RowsIter<'a, R> {
-    #[inline]
     pub const fn new(reader: R, num_rows: usize) -> Self {
         Self {
             reader,
@@ -124,13 +121,11 @@ impl<'a, R: TryRead<'a>> RowsIter<'a, R> {
 impl<'a, R: TryRead<'a>> Iterator for RowsIter<'a, R> {
     type Item = crate::Result<R::Item>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.range.next()?;
         Some(self.reader.try_read(i))
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.range.size_hint()
     }
@@ -147,7 +142,6 @@ pub struct BlocksRows<'a, R: FromBlock<'a>> {
 impl<'a, R: FromBlock<'a>> Iterator for BlocksRows<'a, R> {
     type Item = crate::Result<R::Item>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if let Some(current) = &mut self.rows_iter
@@ -166,7 +160,6 @@ impl<'a, R: FromBlock<'a>> Iterator for BlocksRows<'a, R> {
         }
     }
 
-    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         let current = match &self.rows_iter {
             Some(it) => it.size_hint().0,

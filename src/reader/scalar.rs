@@ -25,7 +25,7 @@ macro_rules! col_view {
             impl<'a> TryFrom<&'a Mark<'a>> for $name<'a> {
                 type Error = Error;
 
-                #[inline]
+
                 fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
                     match value {
                         Mark::$variant(v) => Ok(Self(v)),
@@ -40,6 +40,7 @@ macro_rules! col_view {
             impl<'a> TryRead<'a> for $name<'a> {
                 type Item = $item;
 
+
                 #[inline(always)]
                 fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
                     let Some($v) = self.0.as_slice().get(idx) else {
@@ -52,6 +53,7 @@ macro_rules! col_view {
 
             impl<'a> ReadSlice<'a> for $name<'a> {
                 type Elem = $elem;
+
 
                 #[inline(always)]
                 fn try_read_slice(
@@ -98,7 +100,7 @@ pub struct Usize<'a>(pub &'a Mark<'a>);
 
 impl<'a> TryRead<'a> for Usize<'a> {
     type Item = usize;
-    #[inline(always)]
+
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let value = match self.0 {
             Mark::UInt8(v) => v.get(idx).map(|v| usize::from(*v)),
@@ -124,7 +126,6 @@ impl<'a> TryRead<'a> for Usize<'a> {
 impl<'a> TryFrom<&'a Mark<'a>> for Usize<'a> {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::UInt8(_) | Mark::UInt16(_) | Mark::UInt32(_) | Mark::UInt64(_) => {
@@ -144,7 +145,6 @@ pub struct Bool<'a>(pub &'a BoolView<'a>);
 impl<'a> TryFrom<&'a Mark<'a>> for Bool<'a> {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::Bool(v) => Ok(Self(v)),
@@ -159,7 +159,6 @@ impl<'a> TryFrom<&'a Mark<'a>> for Bool<'a> {
 impl<'a> TryRead<'a> for Bool<'a> {
     type Item = bool;
 
-    #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(value) = self.0.get(idx) else {
             cold_path();
@@ -190,7 +189,6 @@ pub struct Enum8<'a>(pub &'a Enum8Mark<'a>);
 impl<'a> TryFrom<&'a Mark<'a>> for Enum8<'a> {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::Enum8(e) => Ok(Self(e)),
@@ -205,7 +203,6 @@ impl<'a> TryFrom<&'a Mark<'a>> for Enum8<'a> {
 impl<'a> TryRead<'a> for Enum8<'a> {
     type Item = &'a str;
 
-    #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(&variant) = self.0.data.get(idx) else {
             cold_path();
@@ -231,7 +228,6 @@ pub struct Enum16<'a>(pub &'a Enum16Mark<'a>);
 impl<'a> TryFrom<&'a Mark<'a>> for Enum16<'a> {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::Enum16(e) => Ok(Self(e)),
@@ -246,7 +242,6 @@ impl<'a> TryFrom<&'a Mark<'a>> for Enum16<'a> {
 impl<'a> TryRead<'a> for Enum16<'a> {
     type Item = &'a str;
 
-    #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(variant) = self.0.data.get(idx) else {
             cold_path();
@@ -273,7 +268,6 @@ pub struct DateTime<'a>(pub &'a DateTimeMark<'a>);
 impl<'a> TryFrom<&'a Mark<'a>> for DateTime<'a> {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::DateTime(dt) => Ok(Self(dt)),
@@ -304,7 +298,6 @@ pub struct DateTime64<'a>(pub &'a DateTime64Mark<'a>);
 impl<'a> TryFrom<&'a Mark<'a>> for DateTime64<'a> {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::DateTime64(dt) => Ok(Self(dt)),
@@ -319,7 +312,6 @@ impl<'a> TryFrom<&'a Mark<'a>> for DateTime64<'a> {
 impl<'a> TryRead<'a> for DateTime64<'a> {
     type Item = chrono::DateTime<Tz>;
 
-    #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(value) = self.0.data.get(idx) else {
             cold_path();
@@ -348,7 +340,7 @@ macro_rules! col_decimal {
             impl<'a> TryFrom<&'a Mark<'a>> for $name<'a> {
                 type Error = Error;
 
-                #[inline]
+
                 fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
                     match value {
                         Mark::$variant(d) => Ok(Self(d)),
@@ -363,7 +355,7 @@ macro_rules! col_decimal {
             impl<'a> TryRead<'a> for $name<'a> {
                 type Item = Decimal;
 
-                #[inline(always)]
+
                 fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
                     let Some($v) = self.0.data.get(idx) else {
                         cold_path();
@@ -395,7 +387,6 @@ pub struct Value<'a>(pub &'a Mark<'a>);
 impl<'a> TryFrom<&'a Mark<'a>> for Value<'a> {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         Ok(Self(value))
     }
@@ -404,7 +395,6 @@ impl<'a> TryFrom<&'a Mark<'a>> for Value<'a> {
 impl<'a> TryRead<'a> for Value<'a> {
     type Item = crate::value::Value<'a>;
 
-    #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(value) = self.0.get(idx)? else {
             cold_path();

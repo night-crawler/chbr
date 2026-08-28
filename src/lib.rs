@@ -53,7 +53,6 @@ pub(crate) trait ByteExt {
 }
 
 impl ByteExt for [u8] {
-    #[inline(always)]
     fn rtrim_zeros(&self) -> &[u8] {
         let mut end = self.len();
         while end > 0 && self[end - 1] == 0 {
@@ -75,7 +74,6 @@ pub struct TinyRange {
 }
 
 impl From<TinyRange> for Range<usize> {
-    #[inline(always)]
     fn from(value: TinyRange) -> Self {
         Range {
             start: value.start as usize,
@@ -87,7 +85,6 @@ impl From<TinyRange> for Range<usize> {
 impl TryFrom<Range<usize>> for TinyRange {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Range<usize>) -> std::result::Result<Self, Self::Error> {
         let Ok(start) = u32::try_from(value.start) else {
             cold_path();
@@ -183,7 +180,6 @@ impl_from!(Date32Data => NaiveDate, |d| conv::date32(d.0.get()));
 impl_from!(DateTime32Data => chrono::DateTime<chrono::Utc>, |d| conv::datetime32(d.0.get()));
 
 impl DateTime64Data {
-    #[inline(always)]
     pub fn with_tz_and_precision(&self, tz: Tz, precision: u8) -> Option<chrono::DateTime<Tz>> {
         conv::datetime64_tz(self.0.get(), precision, tz)
     }
@@ -197,7 +193,6 @@ impl DateTime32Data {
 }
 
 impl Decimal32Data {
-    #[inline(always)]
     pub fn with_precision(&self, precision: u8) -> rust_decimal::Decimal {
         let value = self.0.get();
         rust_decimal::Decimal::new(i64::from(value), u32::from(precision))
@@ -205,7 +200,6 @@ impl Decimal32Data {
 }
 
 impl Decimal64Data {
-    #[inline(always)]
     pub fn with_precision(&self, precision: u8) -> rust_decimal::Decimal {
         let value = self.0.get();
         rust_decimal::Decimal::new(value, u32::from(precision))
@@ -213,7 +207,6 @@ impl Decimal64Data {
 }
 
 impl Decimal128Data {
-    #[inline(always)]
     pub fn with_precision(&self, precision: u8) -> Result<rust_decimal::Decimal> {
         let value = self.0.get();
         match rust_decimal::Decimal::try_from_i128_with_scale(value, u32::from(precision)) {
@@ -233,7 +226,6 @@ pub struct ParsedBlock<'a> {
 }
 
 impl<'a> ParsedBlock<'a> {
-    #[inline]
     pub fn mark(&self, name: &str) -> Result<&mark::Mark<'a>> {
         mark_by_name(&self.col_names, &self.markers, name)
     }
@@ -288,7 +280,6 @@ pub struct BlocksIterator<'a> {
 }
 
 impl<'a> BlocksIterator<'a> {
-    #[inline]
     pub fn new(blocks: &'a [ParsedBlock<'a>]) -> Self {
         Self {
             blocks: blocks.iter().peekable(),
@@ -330,22 +321,18 @@ pub struct BlockRow<'a> {
 }
 
 impl<'a> BlockRow<'a> {
-    #[inline]
     pub const fn cols(&self) -> &'a [mark::Mark<'a>] {
         self.cols
     }
 
-    #[inline]
     pub const fn col_names(&self) -> &'a [&'a str] {
         self.col_names
     }
 
-    #[inline]
     pub const fn row_index(&self) -> usize {
         self.row_index
     }
 
-    #[inline]
     pub const fn col_index(&self) -> usize {
         self.col_index
     }
@@ -375,7 +362,6 @@ impl<'a> Iterator for BlocksIterator<'a> {
         }
     }
 
-    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         let mut blocks = self.blocks.clone();
         let mut remaining = match blocks.next() {

@@ -14,7 +14,6 @@ pub struct Json<'a>(&'a mark::Json<'a>);
 impl<'a> TryFrom<&'a mark::Mark<'a>> for Json<'a> {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: &'a mark::Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             mark::Mark::Json(mark) => Ok(Self(mark)),
@@ -29,7 +28,6 @@ impl<'a> TryFrom<&'a mark::Mark<'a>> for Json<'a> {
 impl<'a> TryRead<'a> for Json<'a> {
     type Item = JsonValue<'a>;
 
-    #[inline(always)]
     fn try_read(&self, row: usize) -> crate::Result<Self::Item> {
         if !self.0.contains_row(row) {
             cold_path();
@@ -46,7 +44,6 @@ pub struct JsonValue<'a> {
 }
 
 impl<'a> JsonValue<'a> {
-    #[inline]
     pub const fn paths(self) -> JsonIterator<'a> {
         JsonIterator {
             mark: self.mark,
@@ -75,7 +72,6 @@ impl<'a> Readable<'a> for JsonValue<'a> {
 impl<'a> TryFrom<Value<'a>> for JsonValue<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::Json { mark, index } => Ok(Self { mark, row: index }),
@@ -96,7 +92,6 @@ pub struct JsonIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for JsonIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match JsonValue::try_from(value) {
             Ok(value) => Ok(value.paths()),
@@ -108,7 +103,6 @@ impl<'a> TryFrom<Value<'a>> for JsonIterator<'a> {
 impl<'a> Iterator for JsonIterator<'a> {
     type Item = Result<(&'a str, Value<'a>), Error>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             let path_index = self.path_index;
@@ -126,7 +120,6 @@ impl<'a> Iterator for JsonIterator<'a> {
         }
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = self.mark.paths.len() - self.path_index;
         (0, Some(remaining))
@@ -141,7 +134,6 @@ pub struct JsonSliceIterator<'a> {
 impl<'a> TryFrom<Value<'a>> for JsonSliceIterator<'a> {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::JsonSlice { mark, range } => Ok(Self {
@@ -159,7 +151,6 @@ impl<'a> TryFrom<Value<'a>> for JsonSliceIterator<'a> {
 impl<'a> Iterator for JsonSliceIterator<'a> {
     type Item = JsonIterator<'a>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let row = self.range.next()?;
         Some(
@@ -171,7 +162,6 @@ impl<'a> Iterator for JsonSliceIterator<'a> {
         )
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.range.size_hint()
     }
@@ -432,13 +422,11 @@ struct WideNumber {
 
 #[cfg(feature = "serde1")]
 impl WideNumber {
-    #[inline]
     const fn push(&mut self, byte: u8) {
         self.bytes[self.len] = byte;
         self.len += 1;
     }
 
-    #[inline]
     fn as_str(&self) -> &str {
         std::str::from_utf8(&self.bytes[..self.len]).expect("wide number formatter emits ASCII")
     }

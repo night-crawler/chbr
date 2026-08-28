@@ -173,8 +173,8 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for LcNullable<'a, Inner> {
         if value_index == 0 {
             return Ok(None);
         }
+        // SAFETY:
         // Construction guarantees that a missing dictionary has only null indices.
-        // A non-null index therefore proves that the common populated case has a dictionary.
         let dict = unsafe { self.dict.as_ref().unwrap_unchecked() };
         Ok(Some(dict.try_read(value_index)?))
     }
@@ -245,7 +245,7 @@ pub struct ArrayIter<'a, Inner: TryRead<'a>> {
 }
 
 impl<'a, Inner: TryRead<'a>> ArrayIter<'a, Inner> {
-    #[inline]
+    #[inline(always)]
     pub fn try_collect_vec(self) -> crate::Result<Vec<Inner::Item>> {
         let mut out = Vec::with_capacity(self.range.len());
         for item in self {
@@ -270,7 +270,6 @@ impl<'a, Inner: TryRead<'a>> Iterator for ArrayIter<'a, Inner> {
         Some(inner.try_read(i))
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.range.size_hint()
     }
@@ -335,7 +334,7 @@ where
 
 impl<'a, K: TryRead<'a> + 'a, V: TryRead<'a> + 'a> TryRead<'a> for Map<'a, K, V> {
     type Item = MapIter<'a, K, V>;
-    #[inline(always)]
+
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some((s, e)) = self.offsets.offset_indices(idx)? else {
             cold_path();
@@ -360,7 +359,6 @@ pub struct MapIter<'a, K: TryRead<'a>, V: TryRead<'a>> {
 impl<'a, K: TryRead<'a>, V: TryRead<'a>> Iterator for MapIter<'a, K, V> {
     type Item = crate::Result<(K::Item, V::Item)>;
 
-    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.range.next()?;
         let key = match self.keys.try_read(i) {
@@ -374,7 +372,6 @@ impl<'a, K: TryRead<'a>, V: TryRead<'a>> Iterator for MapIter<'a, K, V> {
         Some(Ok((key, value)))
     }
 
-    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.range.size_hint()
     }
@@ -401,7 +398,6 @@ pub struct Variant<'a, T: FromVariant<'a>> {
 }
 
 impl<'a, T: FromVariant<'a>> Clone for Variant<'a, T> {
-    #[inline]
     fn clone(&self) -> Self {
         *self
     }
@@ -429,7 +425,6 @@ impl<'a, T: FromVariant<'a>> TryFrom<&'a Mark<'a>> for Variant<'a, T> {
 impl<'a, T: FromVariant<'a> + 'a> TryRead<'a> for Variant<'a, T> {
     type Item = T;
 
-    #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let Some(&discriminator) = self.mark.discriminators.get(idx) else {
             cold_path();
@@ -457,7 +452,6 @@ pub struct VariantNullable<'a, T: FromVariant<'a>> {
 }
 
 impl<'a, T: FromVariant<'a>> Clone for VariantNullable<'a, T> {
-    #[inline]
     fn clone(&self) -> Self {
         *self
     }
@@ -478,7 +472,6 @@ impl<'a, T: FromVariant<'a>> TryFrom<&'a Mark<'a>> for VariantNullable<'a, T> {
 impl<'a, T: FromVariant<'a> + 'a> TryRead<'a> for VariantNullable<'a, T> {
     type Item = Option<T>;
 
-    #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
         let mark = self.inner.mark;
         let Some(&discriminator) = mark.discriminators.get(idx) else {
@@ -539,7 +532,6 @@ macro_rules! impl_col_tuple {
         impl<'a, $($t: TryRead<'a> + 'a,)+> TryRead<'a> for Tuple<($($t,)+)> {
             type Item = ($($t::Item,)+);
 
-            #[inline(always)]
             fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
                 Ok(($(self.0.$idx.try_read(idx)?,)+))
             }

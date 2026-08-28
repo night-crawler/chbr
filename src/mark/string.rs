@@ -9,14 +9,12 @@ pub struct FixedString<'a> {
 }
 
 impl<'a> FixedString<'a> {
-    #[inline]
-    pub(crate) fn get_bstr(&self, index: usize) -> Option<&'a BStr> {
+    pub fn get_bstr(&self, index: usize) -> Option<&'a BStr> {
         let offset = self.size.checked_mul(index)?;
         let end = offset.checked_add(self.size)?;
         Some(BStr::new(self.data.get(offset..end)?.rtrim_zeros()))
     }
 
-    #[inline]
     pub fn get(&self, index: usize) -> Option<Value<'a>> {
         self.get_bstr(index).map(Value::String)
     }

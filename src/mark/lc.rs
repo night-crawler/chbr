@@ -35,7 +35,7 @@ impl LowCardinality<'_> {
         self.indices.get(index)
     }
 
-    #[inline]
+    #[inline(always)]
     pub(crate) fn get_str(&self, index: usize) -> crate::Result<Option<&BStr>> {
         let Some(keys) = &self.additional_keys else {
             cold_path();
@@ -58,7 +58,6 @@ impl LowCardinality<'_> {
         Ok(keys.get(value_index))
     }
 
-    #[inline]
     pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         // https://github.com/ClickHouse/clickhouse-go/blob/71a2b475e899afe9626f40af513bcf25aa3098a2/lib/column/lowcardinality.go#L191
         let Some(keys) = &self.additional_keys else {
@@ -96,7 +95,6 @@ impl<'a> Indices<'a> {
         }
     }
 
-    #[inline]
     pub const fn is_empty(self) -> bool {
         match self {
             Self::Empty => true,
@@ -107,7 +105,6 @@ impl<'a> Indices<'a> {
         }
     }
 
-    #[inline]
     pub fn all_zero(self) -> bool {
         match self {
             Self::Empty => true,
@@ -118,7 +115,6 @@ impl<'a> Indices<'a> {
         }
     }
 
-    #[inline]
     pub fn slice(self, range: Range<usize>) -> crate::Result<Value<'a>> {
         match self {
             Self::Empty => {
