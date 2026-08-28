@@ -1,9 +1,9 @@
-use core::{convert::TryFrom, hint::cold_path};
+use core::convert::TryFrom;
 use std::ops::Range;
 
 use bstr::BStr;
 
-use super::Value;
+use super::{Value, short_type_name};
 use crate::{ByteExt as _, error::Error, mark::FixedString};
 
 impl<'a> TryFrom<Value<'a>> for &'a BStr {
@@ -12,10 +12,7 @@ impl<'a> TryFrom<Value<'a>> for &'a BStr {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::String(value) => Ok(value),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), stringify!(&'a BStr)))
-            }
+            other => Err(other.mismatched_type(stringify!(&'a BStr))),
         }
     }
 }
@@ -27,13 +24,7 @@ impl<'a> TryFrom<Value<'a>> for &'a [&'a BStr] {
         match value {
             Value::StringSlice(value) => Ok(value),
             Value::Empty => Ok(&[]),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(
-                    other.as_str(),
-                    stringify!(&'a [&'a BStr]),
-                ))
-            }
+            other => Err(other.mismatched_type(stringify!(&'a [&'a BStr]))),
         }
     }
 }
@@ -44,10 +35,7 @@ impl<'a> TryFrom<Value<'a>> for &'a str {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::String(value) => crate::error::decode_utf8(value),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "&str"))
-            }
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
         }
     }
 }
@@ -66,13 +54,7 @@ impl<'a> TryFrom<Value<'a>> for FixedStringSliceIterator<'a> {
                 mark,
                 range: range.into(),
             }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(
-                    other.as_str(),
-                    "FixedStringSliceIterator",
-                ))
-            }
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
         }
     }
 }
