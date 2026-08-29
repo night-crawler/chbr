@@ -1,7 +1,7 @@
 use chbr::FromBlock;
 use chbr::reader::{
-    Array, Bool, DateTime, F64, Ipv6, LcNullableTrustedStr, LcTrustedStr, Nullable, U32, U64,
-    U128, Uuid,
+    Array, Bool, DateTime, F64, Ipv6, LcNullableTrustedStr, LcTrustedStr, Nullable, U32, U64, U128,
+    Uuid,
 };
 
 #[derive(FromBlock)]

@@ -16,45 +16,24 @@ pub type Offsets<'a> = ByteView<'a, zc::U64>;
 
 pub(crate) trait OffsetIndexPair {
     fn offset_indices(&self, index: usize) -> crate::Result<Option<(usize, usize)>>;
-    fn get_cast<T>(&self, index: usize) -> crate::Result<Option<T>>
-    where
-        T: TryFrom<u64>;
     fn last_or_default(&self) -> crate::Result<usize>;
 }
 
 impl OffsetIndexPair for Offsets<'_> {
     #[inline(always)]
     fn offset_indices(&self, index: usize) -> crate::Result<Option<(usize, usize)>> {
+        let slice = self.as_slice();
+        let Some(end) = slice.get(index) else {
+            return Ok(None);
+        };
+        let end = cast_offset(end.get())?;
         let start = if index == 0 {
             0
         } else {
-            let Some(start) = self.get_cast(index.saturating_sub(1))? else {
-                return Ok(None);
-            };
-            start
-        };
-
-        let Some(end) = self.get_cast(index)? else {
-            return Ok(None);
+            // SAFETY: the successful `get` above proves `index < slice.len()`.
+            cast_offset(unsafe { slice.get_unchecked(index - 1) }.get())?
         };
         Ok(Some((start, end)))
-    }
-
-    #[inline]
-    fn get_cast<T>(&self, index: usize) -> crate::Result<Option<T>>
-    where
-        T: TryFrom<u64>,
-    {
-        let Some(value) = self.get(index).map(|v| v.get()) else {
-            return Ok(None);
-        };
-        match T::try_from(value) {
-            Ok(value) => Ok(Some(value)),
-            Err(_) => {
-                cold_path();
-                Err(crate::Error::Overflow(value.to_string()))
-            }
-        }
     }
 
     fn last_or_default(&self) -> crate::Result<usize> {
@@ -69,6 +48,17 @@ impl OffsetIndexPair for Offsets<'_> {
         }
 
         Ok(0)
+    }
+}
+
+#[inline(always)]
+fn cast_offset(value: u64) -> crate::Result<usize> {
+    match usize::try_from(value) {
+        Ok(value) => Ok(value),
+        Err(_) => {
+            cold_path();
+            Err(crate::Error::Overflow(value.to_string()))
+        }
     }
 }
 

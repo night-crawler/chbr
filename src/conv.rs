@@ -24,7 +24,7 @@ static UTC_ALIAS_OFFSETS: LazyLock<[TzOffset; UTC_ALIASES.len()]> = LazyLock::ne
 });
 
 #[inline]
-fn utc_alias_offset(tz: Tz) -> Option<TzOffset> {
+pub fn utc_alias_offset(tz: Tz) -> Option<TzOffset> {
     let idx = UTC_ALIASES.iter().position(|&alias| alias == tz)?;
     Some(UTC_ALIAS_OFFSETS[idx])
 }
@@ -46,8 +46,13 @@ pub fn datetime32(secs: u32) -> DateTime<Utc> {
 
 #[inline(always)]
 pub fn datetime32_tz(secs: u32, tz: Tz) -> DateTime<Tz> {
+    datetime32_resolved(secs, tz, utc_alias_offset(tz))
+}
+
+#[inline(always)]
+pub fn datetime32_resolved(secs: u32, tz: Tz, utc_offset: Option<TzOffset>) -> DateTime<Tz> {
     let dt_utc = datetime32(secs);
-    match utc_alias_offset(tz) {
+    match utc_offset {
         Some(offset) => DateTime::from_naive_utc_and_offset(dt_utc.naive_utc(), offset),
         None => dt_utc.with_timezone(&tz),
     }
@@ -63,8 +68,18 @@ pub fn datetime64(timestamp: i64, precision: u8) -> Option<DateTime<Utc>> {
 }
 
 pub fn datetime64_tz(timestamp: i64, precision: u8, tz: Tz) -> Option<DateTime<Tz>> {
+    datetime64_resolved(timestamp, precision, tz, utc_alias_offset(tz))
+}
+
+#[inline]
+pub fn datetime64_resolved(
+    timestamp: i64,
+    precision: u8,
+    tz: Tz,
+    utc_offset: Option<TzOffset>,
+) -> Option<DateTime<Tz>> {
     let dt_utc = datetime64(timestamp, precision)?;
-    Some(match utc_alias_offset(tz) {
+    Some(match utc_offset {
         Some(offset) => DateTime::from_naive_utc_and_offset(dt_utc.naive_utc(), offset),
         None => dt_utc.with_timezone(&tz),
     })
