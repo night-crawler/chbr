@@ -261,14 +261,21 @@ impl<'a> TryRead<'a> for Enum16<'a> {
 }
 
 #[derive(Clone, Copy)]
-pub struct DateTime<'a>(pub &'a DateTimeMark<'a>);
+pub struct DateTime<'a> {
+    mark: &'a DateTimeMark<'a>,
+    // Cached only when offset is stable and doesn't mess with DST stuff.
+    cached_offset: Option<chrono_tz::TzOffset>,
+}
 
 impl<'a> TryFrom<&'a Mark<'a>> for DateTime<'a> {
     type Error = Error;
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
-            Mark::DateTime(dt) => Ok(Self(dt)),
+            Mark::DateTime(dt) => Ok(Self {
+                mark: dt,
+                cached_offset: crate::conv::utc_alias_offset(dt.tz),
+            }),
             other => {
                 cold_path();
                 Err(Error::MismatchedType(other.as_str(), "DateTime"))
@@ -282,23 +289,34 @@ impl<'a> TryRead<'a> for DateTime<'a> {
 
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value) = self.0.data.get(idx) else {
+        let Some(value) = self.mark.data.get(idx) else {
             cold_path();
             return Err(Error::IndexOutOfBounds(idx, "DateTime"));
         };
-        Ok(value.with_tz(self.0.tz))
+        Ok(crate::conv::datetime32_resolved(
+            value.0.get(),
+            self.mark.tz,
+            self.cached_offset,
+        ))
     }
 }
 
 #[derive(Clone, Copy)]
-pub struct DateTime64<'a>(pub &'a DateTime64Mark<'a>);
+pub struct DateTime64<'a> {
+    mark: &'a DateTime64Mark<'a>,
+    // Cached only when offset is stable and doesn't mess with DST stuff.
+    cached_offset: Option<chrono_tz::TzOffset>,
+}
 
 impl<'a> TryFrom<&'a Mark<'a>> for DateTime64<'a> {
     type Error = Error;
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
-            Mark::DateTime64(dt) => Ok(Self(dt)),
+            Mark::DateTime64(dt) => Ok(Self {
+                mark: dt,
+                cached_offset: crate::conv::utc_alias_offset(dt.tz),
+            }),
             other => {
                 cold_path();
                 Err(Error::MismatchedType(other.as_str(), "DateTime64"))
@@ -311,11 +329,16 @@ impl<'a> TryRead<'a> for DateTime64<'a> {
     type Item = chrono::DateTime<Tz>;
 
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value) = self.0.data.get(idx) else {
+        let Some(value) = self.mark.data.get(idx) else {
             cold_path();
             return Err(Error::IndexOutOfBounds(idx, "DateTime64"));
         };
-        match value.with_tz_and_precision(self.0.tz, self.0.precision) {
+        match crate::conv::datetime64_resolved(
+            value.0.get(),
+            self.mark.precision,
+            self.mark.tz,
+            self.cached_offset,
+        ) {
             Some(dt) => Ok(dt),
             None => {
                 cold_path();

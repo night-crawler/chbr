@@ -36,10 +36,7 @@ fn sum_blocks(blocks: &[chbr::ParsedBlock<'_>]) -> TestResult<u128> {
         acc = acc.wrapping_add(opt_len(row.lc_nullable_string8));
         acc = acc.wrapping_add(opt_len(row.lc_nullable_string_cd_00000));
 
-        acc = acc.wrapping_add(
-            row.some_ip_address
-                .map_or(0, std::net::Ipv6Addr::to_bits),
-        );
+        acc = acc.wrapping_add(row.some_ip_address.map_or(0, std::net::Ipv6Addr::to_bits));
 
         for s in row.lc_tags {
             acc = acc.wrapping_add(s?.len() as u128);
