@@ -15,7 +15,7 @@ use crate::{
             HAS_ADDITIONAL_KEYS_BIT, NEED_GLOBAL_DICTIONARY_BIT, NEED_UPDATE_DICTIONARY_BIT,
             TUINT8, TUINT16, TUINT32, TUINT64,
         },
-        header, parse_offsets, parse_u64, parse_var_str_bytes, parse_varuint, take_elements,
+        header, parse_offsets, parse_u64, parse_var_str_bytes, take_elements,
     },
     types::{DynamicHeader, Field, JsonHeader, MapHeader, OffsetIndexPair as _, Type, TypeHeader},
 };
@@ -26,6 +26,13 @@ impl<'a> Type<'a> {
         ctx: &ParseContext<'a>,
     ) -> IResult<&'a [u8], TypeHeader<'a>> {
         debug!("Decoding header for type: {self:?}");
+        if ctx.num_rows == 0 {
+            cold_path();
+            // CPP NativeWriter serializes prefixes only when the block has rows, so we would just
+            // fail to parse anything at all.
+            return Ok((ctx.input, self.empty_header()));
+        }
+
         match self {
             Type::Nullable(inner) => {
                 let (input, th) = inner.decode_header(ctx)?;
@@ -75,6 +82,38 @@ impl<'a> Type<'a> {
                 debug!("Nothing decoded for {:?}", self);
                 Ok((ctx.input, TypeHeader::Empty))
             }
+        }
+    }
+
+    /// A zero-block corner case.
+    fn empty_header(&self) -> TypeHeader<'a> {
+        match self {
+            Type::Nullable(inner) => inner.empty_header(),
+            Type::Array(inner) => TypeHeader::Array(Box::new(inner.empty_header())),
+            Type::Tuple(inner) => TypeHeader::Tuple(inner.iter().map(Type::empty_header).collect()),
+            Type::Map(key, val) => TypeHeader::Map(Box::new(MapHeader {
+                key: key.empty_header(),
+                value: val.empty_header(),
+            })),
+            Type::Variant(inner) => {
+                TypeHeader::Variant(inner.iter().map(Type::empty_header).collect())
+            }
+            Type::Dynamic => TypeHeader::Dynamic(Box::new(DynamicHeader {
+                types: Vec::new(),
+                headers: Vec::new(),
+            })),
+            Type::Json(_) => TypeHeader::Json(Box::new(JsonHeader {
+                paths: Vec::new(),
+                col_headers: Vec::new(),
+            })),
+            Type::Nested(fields) | Type::NamedTuple(fields) => {
+                TypeHeader::Nested(fields.iter().map(|f| f.typ.empty_header()).collect())
+            }
+            Type::Point => header::point(),
+            Type::Ring | Type::LineString => header::ring(),
+            Type::Polygon | Type::MultiLineString => header::polygon(),
+            Type::MultiPolygon => header::multi_polygon(),
+            _ => TypeHeader::Empty,
         }
     }
 
@@ -214,15 +253,24 @@ fn json<'a>(
 
 fn dynamic<'a>(ctx: &ParseContext<'a>, header: DynamicHeader<'a>) -> IResult<&'a [u8], Mark<'a>> {
     let types = header.types;
+
+    // Discriminators are a raw UInt8 stream in SerializationVariant BASIC mode.
+    // 255 is a NULL row.
+    let Some((raw_discriminators, mut input)) = ctx.input.split_at_checked(ctx.num_rows) else {
+        cold_path();
+        return Err(Error::Length(ctx.num_rows));
+    };
+
     let mut discriminators = Vec::with_capacity(ctx.num_rows);
     let mut offsets = vec![0usize; ctx.num_rows];
     let mut row_counts = vec![0usize; types.len()];
 
-    let mut input = ctx.input;
-
-    for offset in &mut offsets {
-        let disc;
-        (input, disc) = parse_varuint(input)?;
+    for (raw_discriminator, offset) in raw_discriminators.iter().copied().zip(offsets.iter_mut()) {
+        let disc = usize::from(raw_discriminator);
+        discriminators.push(disc);
+        if raw_discriminator == Variant::NULL_DISCRIMINATOR {
+            continue;
+        }
 
         let Some(row_count) = row_counts.get_mut(disc) else {
             cold_path();
@@ -233,8 +281,6 @@ fn dynamic<'a>(ctx: &ParseContext<'a>, header: DynamicHeader<'a>) -> IResult<&'a
         };
         *offset = *row_count;
         *row_count += 1;
-
-        discriminators.push(disc);
     }
 
     let mut columns = Vec::with_capacity(types.len());
