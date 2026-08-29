@@ -4,7 +4,9 @@ use quote::{ToTokens, format_ident, quote};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::token::Comma;
-use syn::{Data, DeriveInput, Expr, Field, Fields, Lifetime, Meta, Variant, parse_macro_input};
+use syn::{
+    Data, DeriveInput, Expr, Field, Fields, Lifetime, Meta, Variant, parse_macro_input, parse_quote,
+};
 
 struct ColSpec {
     ident: syn::Ident,
@@ -103,6 +105,35 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
     let item_ident = format_ident!("{}Item", ident);
     let num_fields = specs.len();
 
+    let (impl_generics, ty_generics, _) = input.generics.split_for_impl();
+
+    // Every field type must be a reader: needed by the item struct's `::Item`
+    // projections and, via the `TryRead: Copy` supertrait, by `Copy`/`Clone`.
+    let mut read_generics = input.generics.clone();
+    for ColSpec { ty, .. } in &specs {
+        read_generics
+            .make_where_clause()
+            .predicates
+            .push(parse_quote! { #ty: ::chbr::reader::TryRead<#lt> });
+    }
+    let (_, _, read_where) = read_generics.split_for_impl();
+
+    // Constructing from marks additionally needs `TryFrom<&Mark>` per field,
+    // with its error convertible for `?`.
+    let mut mark_generics = read_generics.clone();
+    for ColSpec { ty, .. } in &specs {
+        let predicates = &mut mark_generics.make_where_clause().predicates;
+        predicates.push(parse_quote! {
+            #ty: ::core::convert::TryFrom<&#lt ::chbr::mark::Mark<#lt>>
+        });
+        predicates.push(parse_quote! {
+            ::chbr::error::Error: ::core::convert::From<
+                <#ty as ::core::convert::TryFrom<&#lt ::chbr::mark::Mark<#lt>>>::Error,
+            >
+        });
+    }
+    let (_, _, mark_where) = mark_generics.split_for_impl();
+
     let item_fields = specs
         .iter()
         .map(|ColSpec { ident, ty, vis, .. }| {
@@ -149,15 +180,15 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
         .collect::<Vec<_>>();
 
     Ok(quote! {
-        #vis struct #item_ident<#lt> {
+        #vis struct #item_ident #impl_generics #read_where {
             #(#item_fields,)*
         }
 
         #[automatically_derived]
-        impl<#lt> ::core::marker::Copy for #ident<#lt> {}
+        impl #impl_generics ::core::marker::Copy for #ident #ty_generics #read_where {}
 
         #[automatically_derived]
-        impl<#lt> ::core::clone::Clone for #ident<#lt> {
+        impl #impl_generics ::core::clone::Clone for #ident #ty_generics #read_where {
             #[inline]
             fn clone(&self) -> Self {
                 *self
@@ -165,15 +196,15 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
         }
 
         #[automatically_derived]
-        impl<#lt> ::chbr::reader::FromBlock<#lt> for #ident<#lt> {
+        impl #impl_generics ::chbr::reader::FromBlock<#lt> for #ident #ty_generics #mark_where {
             fn from_block(block: &#lt ::chbr::ParsedBlock<#lt>) -> ::chbr::Result<Self> {
                 ::core::result::Result::Ok(Self { #(#block_inits,)* })
             }
         }
 
         #[automatically_derived]
-        impl<#lt> ::chbr::reader::TryRead<#lt> for #ident<#lt> {
-            type Item = #item_ident<#lt>;
+        impl #impl_generics ::chbr::reader::TryRead<#lt> for #ident #ty_generics #read_where {
+            type Item = #item_ident #ty_generics;
 
             #[inline(always)]
             fn try_read(&self, idx: usize) -> ::chbr::Result<Self::Item> {
@@ -182,7 +213,10 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
         }
 
         #[automatically_derived]
-        impl<#lt> ::core::convert::TryFrom<&#lt ::chbr::mark::Mark<#lt>> for #ident<#lt> {
+        impl #impl_generics ::core::convert::TryFrom<&#lt ::chbr::mark::Mark<#lt>>
+            for #ident #ty_generics
+        #mark_where
+        {
             type Error = ::chbr::error::Error;
 
             fn try_from(
@@ -358,11 +392,16 @@ fn parse_col_reader(variant: &Variant) -> Result<Option<syn::Type>, syn::Error> 
 }
 
 fn extract_lifetime(input: &DeriveInput) -> Result<&Lifetime, syn::Error> {
-    match extract_optional_lifetime(input)? {
-        Some(lifetime) => Ok(lifetime),
-        None => Err(syn::Error::new(
+    let mut lifetimes = input.generics.lifetimes();
+    match (lifetimes.next(), lifetimes.next()) {
+        (Some(first), None) => Ok(&first.lifetime),
+        (None, _) => Err(syn::Error::new(
             input.generics.span(),
             "FromBlock requires exactly one lifetime parameter",
+        )),
+        (Some(_), Some(second)) => Err(syn::Error::new(
+            second.span(),
+            "at most one lifetime parameter is supported",
         )),
     }
 }

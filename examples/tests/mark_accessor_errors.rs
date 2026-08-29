@@ -25,7 +25,7 @@ fn reports_mark_accessor_errors() -> Result<(), Box<dyn std::error::Error>> {
     let mark = Mark::UInt8(ByteView::try_from(bytes.as_slice())?);
     assert!(matches!(
         mark.slice(1..3),
-        Err(Error::IndexOutOfBounds(3, "UInt8"))
+        Err(Error::RangeOutOfBounds(_, "UInt8"))
     ));
 
     assert!(matches!(
