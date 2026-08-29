@@ -274,20 +274,20 @@ impl<'a> ParsedBlock<'a> {
 }
 
 #[derive(Clone)]
-pub struct BlocksIterator<'a> {
-    blocks: Peekable<std::slice::Iter<'a, ParsedBlock<'a>>>,
+pub struct BlocksIterator<'data: 'iter, 'iter> {
+    blocks: Peekable<std::slice::Iter<'iter, ParsedBlock<'data>>>,
     block_row: usize,
 }
 
-impl<'a> BlocksIterator<'a> {
-    pub fn new(blocks: &'a [ParsedBlock<'a>]) -> Self {
+impl<'data, 'iter> BlocksIterator<'data, 'iter> {
+    pub fn new(blocks: &'iter [ParsedBlock<'data>]) -> Self {
         Self {
             blocks: blocks.iter().peekable(),
             block_row: 0,
         }
     }
 
-    pub fn new_ordered(blocks: &'a mut [ParsedBlock<'a>], order: &[&str]) -> Result<Self> {
+    pub fn new_ordered(blocks: &'iter mut [ParsedBlock<'data>], order: &[&str]) -> Result<Self> {
         reorder_block_cols(blocks, order)?;
         Ok(Self {
             blocks: blocks.iter().peekable(),
@@ -313,19 +313,19 @@ pub fn reorder_block_cols(blocks: &mut [ParsedBlock<'_>], order: &[&str]) -> Res
     Ok(())
 }
 
-pub struct BlockRow<'a> {
-    col_names: &'a [&'a str],
-    cols: &'a [mark::Mark<'a>],
+pub struct BlockRow<'data: 'iter, 'iter> {
+    col_names: &'iter [&'data str],
+    cols: &'iter [mark::Mark<'data>],
     col_index: usize,
     row_index: usize,
 }
 
-impl<'a> BlockRow<'a> {
-    pub const fn cols(&self) -> &'a [mark::Mark<'a>] {
+impl<'data, 'iter> BlockRow<'data, 'iter> {
+    pub const fn cols(&self) -> &'iter [mark::Mark<'data>] {
         self.cols
     }
 
-    pub const fn col_names(&self) -> &'a [&'a str] {
+    pub const fn col_names(&self) -> &'iter [&'data str] {
         self.col_names
     }
 
@@ -338,12 +338,12 @@ impl<'a> BlockRow<'a> {
     }
 }
 
-impl<'a> Iterator for BlocksIterator<'a> {
-    type Item = BlockRow<'a>;
+impl<'data, 'iter> Iterator for BlocksIterator<'data, 'iter> {
+    type Item = BlockRow<'data, 'iter>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            let block = self.blocks.peek()?;
+            let block = *self.blocks.peek()?;
             if self.block_row >= block.num_rows {
                 self.blocks.next();
                 self.block_row = 0;
@@ -375,16 +375,18 @@ impl<'a> Iterator for BlocksIterator<'a> {
     }
 }
 
-impl ExactSizeIterator for BlocksIterator<'_> {}
+impl ExactSizeIterator for BlocksIterator<'_, '_> {}
 
-pub fn iter_blocks<'a>(blocks: &'a [ParsedBlock]) -> BlocksIterator<'a> {
+pub fn iter_blocks<'data, 'iter>(
+    blocks: &'iter [ParsedBlock<'data>],
+) -> BlocksIterator<'data, 'iter> {
     BlocksIterator::new(blocks)
 }
 
-pub fn iter_blocks_ordered<'a>(
-    blocks: &'a mut [ParsedBlock<'a>],
+pub fn iter_blocks_ordered<'data, 'iter>(
+    blocks: &'iter mut [ParsedBlock<'data>],
     order: &[&str],
-) -> Result<BlocksIterator<'a>> {
+) -> Result<BlocksIterator<'data, 'iter>> {
     BlocksIterator::new_ordered(blocks, order)
 }
 

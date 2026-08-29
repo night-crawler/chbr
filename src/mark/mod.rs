@@ -348,7 +348,7 @@ impl<'a> Mark<'a> {
     }
 
     #[inline(always)]
-    pub fn get_str(&'a self, index: usize) -> crate::Result<Option<&'a BStr>> {
+    pub fn get_str(&self, index: usize) -> crate::Result<Option<&'a BStr>> {
         match self {
             Mark::String(strings) => Ok(strings.get(index)),
             Mark::FixedString(fs) => Ok(fs.get_bstr(index)),
@@ -361,7 +361,7 @@ impl<'a> Mark<'a> {
     }
 
     #[inline(always)]
-    pub fn get_opt_str(&'a self, index: usize) -> crate::Result<Option<Option<&'a BStr>>> {
+    pub fn get_opt_str(&self, index: usize) -> crate::Result<Option<Option<&'a BStr>>> {
         let Mark::Nullable(Nullable { mask, data }) = self else {
             // convenience wrapper
             let value = self.get_str(index)?;
@@ -378,7 +378,7 @@ impl<'a> Mark<'a> {
     #[expect(clippy::needless_pass_by_value)]
     #[inline(always)]
     pub fn get_datetime<T: TimeZone>(
-        &'a self,
+        &self,
         index: usize,
         tz: T,
     ) -> crate::Result<Option<ChronoDateTime<T>>> {
@@ -409,7 +409,7 @@ impl<'a> Mark<'a> {
     }
 
     #[inline(always)]
-    pub fn slice_lc_strs(&'a self, idx: Range<usize>) -> crate::Result<lc::StrIter<'a>> {
+    pub fn slice_lc_strs(&self, idx: Range<usize>) -> crate::Result<lc::StrIter<'a, '_>> {
         let Mark::LowCardinality(lc) = self else {
             cold_path();
             return Err(Error::MismatchedType(self.as_str(), "LowCardinality"));
@@ -434,7 +434,7 @@ impl<'a> Mark<'a> {
 
     #[inline(always)]
     pub fn get_array_lc_strs(
-        &'a self,
+        &self,
         index: usize,
     ) -> crate::Result<Option<impl Iterator<Item = crate::Result<&'a BStr>>>> {
         if matches!(self, Mark::Empty) {
@@ -480,7 +480,7 @@ impl<'a> Mark<'a> {
 
     #[inline]
     pub fn get_arr_bool_iter(
-        &'a self,
+        &self,
         index: usize,
     ) -> crate::Result<Option<impl Iterator<Item = bool>>> {
         let Mark::Array(arr) = self else {
@@ -504,7 +504,7 @@ impl<'a> Mark<'a> {
         Ok(Some(slice.iter().copied().map(|b| b != 0)))
     }
 
-    pub fn get_bool(&'a self, index: usize) -> crate::Result<Option<bool>> {
+    pub fn get_bool(&self, index: usize) -> crate::Result<Option<bool>> {
         match self {
             Mark::Bool(bv) => {
                 let value = bv.get(index);
@@ -569,13 +569,33 @@ impl<'a> Mark<'a> {
         (Float32, zc::F32),
         (Float64, zc::F64),
         (BFloat16, Bf16Data),
-        (String, &'a BStr),
         (Uuid, UuidData),
         (Date, Date16Data),
         (Date32, Date32Data),
         (Ipv4, Ipv4Data),
         (Ipv6, Ipv6Data),
     );
+
+    // It borrows the Mark's vec, so can't be done the same way as get_arr_*_slice
+    pub fn get_arr_string_slice(&self, index: usize) -> crate::Result<Option<&[&'a BStr]>> {
+        let Mark::Array(arr) = self else {
+            cold_path();
+            return Err(Error::MismatchedType(self.as_str(), "Array"));
+        };
+
+        let Some((start, end)) = arr.offsets.offset_indices(index)? else {
+            return Ok(None);
+        };
+
+        match arr.values.as_ref() {
+            Mark::String(bv) => Ok(Some(&bv[start..end])),
+            Mark::Empty => Ok(Some(&[])),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "String"))
+            }
+        }
+    }
 }
 
 fn checked_slice<'a, T>(
