@@ -13,7 +13,7 @@ pub struct LowCardinality<'a> {
     pub additional_keys: Option<Box<Mark<'a>>>,
 }
 
-impl LowCardinality<'_> {
+impl<'a> LowCardinality<'a> {
     pub fn slice(&self, range: Range<usize>) -> crate::Result<LowCardinalitySliceIterator<'_>> {
         let Some(additional_keys) = self.additional_keys.as_ref() else {
             return Err(Error::MismatchedType(
@@ -36,7 +36,7 @@ impl LowCardinality<'_> {
     }
 
     #[inline(always)]
-    pub(crate) fn get_str(&self, index: usize) -> crate::Result<Option<&BStr>> {
+    pub(crate) fn get_str(&self, index: usize) -> crate::Result<Option<&'a BStr>> {
         let Some(keys) = &self.additional_keys else {
             cold_path();
             return Err(Error::CorruptedData(
@@ -198,13 +198,13 @@ impl ExactSizeIterator for IndexIter<'_> {}
 
 /// Iterator over raw string keys of a `LowCardinality` column slice.
 /// Waiting for: <https://github.com/rust-lang/rust/issues/63063>
-pub struct StrIter<'a> {
-    pub(crate) indices: IndexIter<'a>,
-    pub(crate) keys: &'a [&'a BStr],
+pub struct StrIter<'data: 'keys, 'keys> {
+    pub(crate) indices: IndexIter<'data>,
+    pub(crate) keys: &'keys [&'data BStr],
 }
 
-impl<'a> Iterator for StrIter<'a> {
-    type Item = crate::Result<&'a BStr>;
+impl<'data> Iterator for StrIter<'data, '_> {
+    type Item = crate::Result<&'data BStr>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
@@ -231,7 +231,7 @@ impl<'a> Iterator for StrIter<'a> {
     }
 }
 
-impl ExactSizeIterator for StrIter<'_> {}
+impl ExactSizeIterator for StrIter<'_, '_> {}
 
 #[derive(Clone, Copy, Debug)]
 pub enum Indices<'a> {
@@ -263,12 +263,12 @@ impl<'a> TryFrom<Mark<'a>> for Indices<'a> {
     }
 }
 
-pub struct ArrayLcStrIter<'a> {
-    pub inner: Option<StrIter<'a>>,
+pub struct ArrayLcStrIter<'data: 'keys, 'keys> {
+    pub inner: Option<StrIter<'data, 'keys>>,
 }
 
-impl<'a> Iterator for ArrayLcStrIter<'a> {
-    type Item = crate::Result<&'a BStr>;
+impl<'data> Iterator for ArrayLcStrIter<'data, '_> {
+    type Item = crate::Result<&'data BStr>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
@@ -284,4 +284,4 @@ impl<'a> Iterator for ArrayLcStrIter<'a> {
     }
 }
 
-impl ExactSizeIterator for ArrayLcStrIter<'_> {}
+impl ExactSizeIterator for ArrayLcStrIter<'_, '_> {}

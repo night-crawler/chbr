@@ -56,10 +56,10 @@ fn trusted_str(bytes: &chbr::BStr) -> &str {
     unsafe { std::str::from_utf8_unchecked(bytes) }
 }
 
-impl<'a> TryFrom<BlockRow<'a>> for BenchmarkSample<'a> {
+impl<'data, 'iter> TryFrom<BlockRow<'data, 'iter>> for BenchmarkSample<'data> {
     type Error = chbr::error::Error;
 
-    fn try_from(row: BlockRow<'a>) -> Result<Self, Self::Error> {
+    fn try_from(row: BlockRow<'data, 'iter>) -> Result<Self, Self::Error> {
         let i = row.row_index();
 
         let [
