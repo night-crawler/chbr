@@ -6,8 +6,11 @@ use crate::{
     Error,
     mark::Mark,
     parse::{
-        IResult, block::ParseContext, column::string, consts::LOW_CARDINALITY_VERSION, parse_u64,
-        parse_var_str, parse_varuint,
+        IResult,
+        block::ParseContext,
+        column::string,
+        consts::{LOW_CARDINALITY_VERSION, MAX_DYNAMIC_TYPES},
+        parse_u64, parse_var_str, parse_varuint,
     },
     types::{DynamicHeader, Field, JsonColumnHeader, JsonHeader, MapHeader, Type, TypeHeader},
 };
@@ -35,6 +38,12 @@ pub fn dynamic<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], DynamicHeader<'a
     }
 
     let (mut input, num_types) = parse_varuint::<usize>(input)?;
+    if num_types > MAX_DYNAMIC_TYPES {
+        cold_path();
+        return Err(Error::CorruptedData(format!(
+            "Dynamic column has too many types: {num_types} (max {MAX_DYNAMIC_TYPES})"
+        )));
+    }
     let mut type_names = Vec::with_capacity(num_types + 1);
     for _ in 0..num_types {
         let t;
@@ -150,8 +159,9 @@ pub fn json<'a>(
         unsafe { unreachable_unchecked() };
     };
 
-    let mut paths = Vec::with_capacity(typed_paths.len() + num_dynamic_paths);
-    let mut col_headers = Vec::with_capacity(typed_paths.len() + num_dynamic_paths);
+    let cap = typed_paths.len() + num_dynamic_paths.min(input.len());
+    let mut paths = Vec::with_capacity(cap);
+    let mut col_headers = Vec::with_capacity(cap);
     for field in typed_paths {
         paths.push(field.name);
         col_headers.push(JsonColumnHeader {
@@ -195,6 +205,12 @@ fn json_column<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], JsonColumnHeader
 
     let (input, max_types) = parse_varuint(input)?;
     let (mut input, total_types) = parse_varuint(input)?;
+    if total_types > MAX_DYNAMIC_TYPES {
+        cold_path();
+        return Err(Error::CorruptedData(format!(
+            "JSON dynamic path has too many types: {total_types} (max {MAX_DYNAMIC_TYPES})"
+        )));
+    }
     let mut type_names = Vec::with_capacity(total_types + 1);
     for _ in 0..total_types {
         let type_name;
