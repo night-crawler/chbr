@@ -154,6 +154,59 @@ impl<'a> Type<'a> {
     }
 }
 
+/// BASIC-mode discriminator
+struct Discriminators<'a> {
+    /// Raw discriminators slice
+    raw: &'a [u8],
+    /// Index of the type's sub-column
+    offsets: Vec<u32>,
+    /// Number of rows in each type's sub-column
+    row_counts: Vec<u32>,
+}
+
+impl<'a> Discriminators<'a> {
+    fn parse(
+        input: &'a [u8],
+        num_rows: usize,
+        num_types: usize,
+        what: &'static str,
+    ) -> IResult<&'a [u8], Discriminators<'a>> {
+        if u32::try_from(num_rows).is_err() {
+            cold_path();
+            return Err(Error::Overflow(format!("{what}: {num_rows} rows")));
+        }
+        let Some((raw, rest)) = input.split_at_checked(num_rows) else {
+            cold_path();
+            return Err(Error::Length(num_rows));
+        };
+
+        let mut offsets = vec![0u32; num_rows];
+        let mut row_counts = vec![0u32; num_types];
+        for (raw, offset) in raw.iter().copied().zip(offsets.iter_mut()) {
+            if raw == Variant::NULL_DISCRIMINATOR {
+                continue;
+            }
+            let Some(row_count) = row_counts.get_mut(usize::from(raw)) else {
+                cold_path();
+                return Err(Error::CorruptedData(format!(
+                    "{what} discriminator {raw} out of bounds for {num_types} types"
+                )));
+            };
+            *offset = *row_count;
+            *row_count += 1;
+        }
+
+        Ok((
+            rest,
+            Discriminators {
+                raw,
+                offsets,
+                row_counts,
+            },
+        ))
+    }
+}
+
 fn json<'a>(
     ctx: &ParseContext<'a>,
     JsonHeader {
@@ -182,33 +235,15 @@ fn json<'a>(
             continue;
         }
 
-        let Some((raw_discriminators, remainder)) = input.split_at_checked(num_rows) else {
-            cold_path();
-            return Err(Error::Length(num_rows));
-        };
+        let (
+            remainder,
+            Discriminators {
+                raw: raw_discriminators,
+                offsets,
+                row_counts,
+            },
+        ) = Discriminators::parse(input, num_rows, col_header.types.len(), "JSON path")?;
         input = remainder;
-
-        let mut discriminators = Vec::with_capacity(num_rows);
-        let mut offsets = vec![0usize; num_rows];
-        let mut row_counts = vec![0usize; col_header.types.len()];
-        for (raw_discriminator, offset) in
-            raw_discriminators.iter().copied().zip(offsets.iter_mut())
-        {
-            let discriminator = usize::from(raw_discriminator);
-            discriminators.push(discriminator);
-            if raw_discriminator == 255 {
-                continue;
-            }
-            let Some(row_count) = row_counts.get_mut(discriminator) else {
-                cold_path();
-                return Err(Error::CorruptedData(format!(
-                    "JSON path discriminator {discriminator} out of bounds for {} types",
-                    col_header.types.len()
-                )));
-            };
-            *offset = *row_count;
-            *row_count += 1;
-        }
 
         let mut columns = Vec::with_capacity(col_header.types.len());
         for (((index, typ), type_header), read_rows) in col_header
@@ -223,13 +258,16 @@ fn json<'a>(
                 continue;
             }
             let marker;
-            (input, marker) = typ.decode(ctx.fork(input).with_num_rows(read_rows), type_header)?;
+            (input, marker) = typ.decode(
+                ctx.fork(input).with_num_rows(read_rows as usize),
+                type_header,
+            )?;
             debug!("Decoded JSON path type {index} with {read_rows} rows");
             columns.push(marker);
         }
         col_header.mark = Mark::Dynamic(Dynamic {
             offsets,
-            discriminators,
+            discriminators: raw_discriminators,
             columns,
         });
     }
@@ -254,34 +292,14 @@ fn json<'a>(
 fn dynamic<'a>(ctx: &ParseContext<'a>, header: DynamicHeader<'a>) -> IResult<&'a [u8], Mark<'a>> {
     let types = header.types;
 
-    // Discriminators are a raw UInt8 stream in SerializationVariant BASIC mode.
-    // 255 is a NULL row.
-    let Some((raw_discriminators, mut input)) = ctx.input.split_at_checked(ctx.num_rows) else {
-        cold_path();
-        return Err(Error::Length(ctx.num_rows));
-    };
-
-    let mut discriminators = Vec::with_capacity(ctx.num_rows);
-    let mut offsets = vec![0usize; ctx.num_rows];
-    let mut row_counts = vec![0usize; types.len()];
-
-    for (raw_discriminator, offset) in raw_discriminators.iter().copied().zip(offsets.iter_mut()) {
-        let disc = usize::from(raw_discriminator);
-        discriminators.push(disc);
-        if raw_discriminator == Variant::NULL_DISCRIMINATOR {
-            continue;
-        }
-
-        let Some(row_count) = row_counts.get_mut(disc) else {
-            cold_path();
-            return Err(Error::CorruptedData(format!(
-                "Dynamic discriminator {disc} out of bounds for {} types",
-                types.len()
-            )));
-        };
-        *offset = *row_count;
-        *row_count += 1;
-    }
+    let (
+        mut input,
+        Discriminators {
+            raw: discriminators,
+            offsets,
+            row_counts,
+        },
+    ) = Discriminators::parse(ctx.input, ctx.num_rows, types.len(), "Dynamic")?;
 
     let mut columns = Vec::with_capacity(types.len());
     for ((i, typ), header) in types.into_iter().enumerate().zip(header.headers) {
@@ -290,7 +308,7 @@ fn dynamic<'a>(ctx: &ParseContext<'a>, header: DynamicHeader<'a>) -> IResult<&'a
             continue;
         }
 
-        let read_rows = row_counts[i];
+        let read_rows = row_counts[i] as usize;
         debug!(
             "Decoding dynamic column {i}: {typ:?}, {header:?}; remainder: {}; read rows: \
              {read_rows}",
@@ -418,34 +436,23 @@ fn variant<'a>(
     ctx: &ParseContext<'a>,
     headers: Vec<TypeHeader<'a>>,
 ) -> IResult<&'a [u8], Mark<'a>> {
-    let input = ctx.input;
-
-    let Some((discriminators, mut input)) = input.split_at_checked(ctx.num_rows) else {
-        cold_path();
-        return Err(Error::Length(ctx.num_rows));
-    };
-    let mut offsets = vec![0; ctx.num_rows];
-    let mut row_counts = vec![0; inner.len()];
-    for (discriminator, offset) in discriminators.iter().copied().zip(offsets.iter_mut()) {
-        if discriminator == Variant::NULL_DISCRIMINATOR {
-            continue;
-        }
-        let Some(count) = row_counts.get_mut(discriminator as usize) else {
-            cold_path();
-            return Err(Error::Parse(format!(
-                "Variant: discriminator {discriminator} out of bounds for inner types length {}",
-                inner.len()
-            )));
-        };
-        *offset = *count;
-        *count += 1;
-    }
+    let (
+        mut input,
+        Discriminators {
+            raw: discriminators,
+            offsets,
+            row_counts,
+        },
+    ) = Discriminators::parse(ctx.input, ctx.num_rows, inner.len(), "Variant")?;
 
     let mut markers = Vec::with_capacity(inner.len());
 
     for ((idx, typ), header) in inner.into_iter().enumerate().zip(headers) {
         let marker;
-        (input, marker) = typ.decode(ctx.fork(input).with_num_rows(row_counts[idx]), header)?;
+        (input, marker) = typ.decode(
+            ctx.fork(input).with_num_rows(row_counts[idx] as usize),
+            header,
+        )?;
         markers.push(marker);
     }
 

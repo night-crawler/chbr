@@ -640,7 +640,7 @@ pub struct Map<'a> {
 
 #[derive(Debug)]
 pub struct Variant<'a> {
-    pub offsets: Vec<usize>,
+    pub offsets: Vec<u32>,
     pub discriminators: &'a [u8],
     pub types: Vec<Mark<'a>>,
 }
@@ -656,10 +656,10 @@ impl Variant<'_> {
         let Some(&in_type_index) = self.offsets.get(index) else {
             return Ok(None);
         };
-        let Some(mark) = self.types.get(discriminator as usize) else {
+        let Some(mark) = self.types.get(usize::from(discriminator)) else {
             return Ok(None);
         };
-        mark.get(in_type_index)
+        mark.get(in_type_index as usize)
     }
 }
 
@@ -793,8 +793,8 @@ impl Enum16<'_> {
 
 #[derive(Debug)]
 pub struct Dynamic<'a> {
-    pub offsets: Vec<usize>,
-    pub discriminators: Vec<usize>,
+    pub offsets: Vec<u32>,
+    pub discriminators: &'a [u8],
     pub columns: Vec<Mark<'a>>,
 }
 
@@ -806,10 +806,10 @@ impl Dynamic<'_> {
         let Some(&in_type_index) = self.offsets.get(index) else {
             return Ok(None);
         };
-        let Some(mark) = self.columns.get(discriminator) else {
+        let Some(mark) = self.columns.get(usize::from(discriminator)) else {
             return Ok(None);
         };
-        mark.get(in_type_index)
+        mark.get(in_type_index as usize)
     }
 }
 

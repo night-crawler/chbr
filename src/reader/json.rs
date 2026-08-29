@@ -573,7 +573,10 @@ impl<'de> CellDeserializer<'de> {
                     let Some(mark) = variant.types.get(usize::from(discriminator)) else {
                         return Ok(CellState::Missing);
                     };
-                    cell = Self { mark, row };
+                    cell = Self {
+                        mark,
+                        row: row as usize,
+                    };
                 }
                 mark::Mark::Dynamic(dynamic) => {
                     let Some(&discriminator) = dynamic.discriminators.get(cell.row) else {
@@ -582,10 +585,13 @@ impl<'de> CellDeserializer<'de> {
                     let Some(&row) = dynamic.offsets.get(cell.row) else {
                         return Ok(CellState::Missing);
                     };
-                    let Some(mark) = dynamic.columns.get(discriminator) else {
+                    let Some(mark) = dynamic.columns.get(usize::from(discriminator)) else {
                         return Ok(CellState::Missing);
                     };
-                    cell = Self { mark, row };
+                    cell = Self {
+                        mark,
+                        row: row as usize,
+                    };
                 }
                 mark => {
                     return if base_contains(mark, cell.row)? {
@@ -1770,7 +1776,7 @@ mod serde_tests {
                 Type::String,
                 mark::Mark::Dynamic(mark::Dynamic {
                     offsets: vec![0],
-                    discriminators: vec![0],
+                    discriminators: &variant_discriminators,
                     columns: vec![mark::Mark::String(string_view(vec!["dynamic"]))],
                 }),
             ),
