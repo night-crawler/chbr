@@ -2,10 +2,36 @@ use crate::{ByteExt as _, value::Value};
 use bstr::BStr;
 use std::ops::Deref;
 
-#[derive(Debug)]
 pub struct FixedString<'a> {
     pub size: usize,
     pub data: &'a [u8],
+}
+
+impl std::fmt::Debug for FixedString<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Render the packed records as trimmed `BStr` values: readable text when the
+        // bytes are valid UTF-8, escaped bytes otherwise. Avoids the raw `[12, 22, …]`.
+        struct Records<'a> {
+            data: &'a [u8],
+            size: usize,
+        }
+        impl std::fmt::Debug for Records<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let mut list = f.debug_list();
+                if self.size == 0 {
+                    return list.finish();
+                }
+                for chunk in self.data.chunks(self.size) {
+                    list.entry(&BStr::new(chunk.rtrim_zeros()));
+                }
+                list.finish()
+            }
+        }
+        f.debug_struct("FixedString")
+            .field("size", &self.size)
+            .field("values", &Records { data: self.data, size: self.size })
+            .finish()
+    }
 }
 
 impl<'a> FixedString<'a> {

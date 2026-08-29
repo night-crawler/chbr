@@ -847,163 +847,26 @@ impl BoolView<'_> {
 
 impl Debug for Mark<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn dbg_slice(f: &mut fmt::Formatter<'_>, name: &str, bytes: &[u8]) -> fmt::Result {
-            f.debug_struct(name)
-                .field("len_bytes", &bytes.len())
-                .field("ptr", &bytes.as_ptr())
-                .finish()
+        macro_rules! fmt_mark {
+            (named: [$($named:ident),* $(,)?], delegate: [$($delegate:ident),* $(,)?]) => {
+                match self {
+                    Mark::Empty => f.write_str("Empty"),
+                    $( Mark::$named(inner) => f.debug_tuple(self.as_str()).field(inner).finish(), )*
+                    $( Mark::$delegate(inner) => Debug::fmt(inner, f), )*
+                }
+            };
         }
-        fn dbg_bv<T: zc::Unaligned + zc::FromBytes + Copy + Debug>(
-            f: &mut fmt::Formatter<'_>,
-            name: &str,
-            bv: &ByteView<'_, T>,
-        ) -> fmt::Result {
-            let bytes = bv.as_bytes();
-            f.debug_struct(name)
-                .field("len", &bytes.len())
-                .field("data", &bv.as_slice())
-                .finish()
-        }
-        use Mark::{
-            Array, BFloat16, Bool, Date, Date32, DateTime, DateTime64, Decimal32, Decimal64,
-            Decimal128, Decimal256, Dynamic, Empty, Enum8, Enum16, FixedString, Float32, Float64,
-            Int8, Int16, Int32, Int64, Int128, Int256, Ipv4, Ipv6, Json, LowCardinality, Map,
-            NamedTuple, Nested, Nullable, String, Tuple, UInt8, UInt16, UInt32, UInt64, UInt128,
-            UInt256, Uuid, Variant,
-        };
-        match self {
-            Empty => f.write_str("Empty"),
-
-            Bool(b) => dbg_slice(
-                f,
-                core::any::type_name::<Self>()
-                    .rsplit("::")
-                    .next()
-                    .expect("bug: must have at least one element always"),
-                b.data,
-            ),
-
-            Ipv4(v) => dbg_bv(f, "Ipv4", v),
-            Ipv6(v) => dbg_bv(f, "Ipv6", v),
-            Date32(v) => dbg_bv(f, "Date32", v),
-            Date(v) => dbg_bv(f, "Date", v),
-            Uuid(v) => dbg_bv(f, "Uuid", v),
-            Int8(v) => dbg_bv(f, "Int8", v),
-            Int16(v) => dbg_bv(f, "Int16", v),
-            Int32(v) => dbg_bv(f, "Int32", v),
-            Int64(v) => dbg_bv(f, "Int64", v),
-            Int128(v) => dbg_bv(f, "Int128", v),
-            Int256(v) => dbg_bv(f, "Int256", v),
-            UInt8(v) => dbg_bv(f, "UInt8", v),
-            UInt16(v) => dbg_bv(f, "UInt16", v),
-            UInt32(v) => dbg_bv(f, "UInt32", v),
-            UInt64(v) => dbg_bv(f, "UInt64", v),
-            UInt128(v) => dbg_bv(f, "UInt128", v),
-            UInt256(v) => dbg_bv(f, "UInt256", v),
-            Float32(v) => dbg_bv(f, "Float32", v),
-            Float64(v) => dbg_bv(f, "Float64", v),
-            BFloat16(v) => dbg_bv(f, "BFloat16", v),
-
-            Decimal32(d) => f
-                .debug_struct("Decimal32")
-                .field("scale", &d.precision)
-                .field("data", &d.data.as_slice())
-                .finish(),
-            Decimal64(d) => f
-                .debug_struct("Decimal64")
-                .field("scale", &d.precision)
-                .field("data", &d.data.as_slice())
-                .finish(),
-            Decimal128(d) => f
-                .debug_struct("Decimal128")
-                .field("scale", &d.precision)
-                .field("data", &d.data.as_slice())
-                .finish(),
-            Decimal256(d) => f
-                .debug_struct("Decimal256")
-                .field("scale", &d.precision)
-                .field("data", &d.data.as_slice())
-                .finish(),
-
-            String(data) => f.debug_struct("String").field("data", data).finish(),
-            FixedString(ff) => f
-                .debug_struct("FixedString")
-                .field("fixed_len", &ff.size)
-                .field("data", &ff.data)
-                .finish(),
-
-            DateTime(d) => f
-                .debug_struct("DateTime")
-                .field("tz", &d.tz)
-                .field("data", &d.data.as_slice())
-                .finish(),
-            DateTime64(d) => f
-                .debug_struct("DateTime64")
-                .field("tz", &d.tz)
-                .field("precision", &d.precision)
-                .field("data", &d.data.as_slice())
-                .finish(),
-
-            Enum8(e) => f
-                .debug_struct("Enum8")
-                .field("data", &e.data.as_slice())
-                .finish(),
-            Enum16(e) => f.debug_struct("Enum16").field("map", &e).finish(),
-
-            LowCardinality(lc) => f
-                .debug_struct("LowCardinality")
-                .field("indices", &lc.indices)
-                .field("global_dictionary", &lc.global_dictionary)
-                .field("additional_keys", &lc.additional_keys)
-                .finish(),
-
-            Array(a) => f
-                .debug_struct("Array")
-                .field("offsets_len", &a.offsets.len())
-                .field("values", &a.values)
-                .finish(),
-
-            Tuple(items) => f.debug_tuple("Tuple").field(items).finish(),
-
-            Nullable(n) => f.debug_struct("Nullable").field("data", n).finish(),
-
-            Map(m) => f
-                .debug_struct("Map")
-                .field("offsets_len", &m.offsets.len())
-                .field("keys", &m.keys)
-                .field("values", &m.values)
-                .finish(),
-
-            Variant(v) => f
-                .debug_struct("Variant")
-                .field("disc_bytes", &v.discriminators.len())
-                .field("types", &v.types)
-                .field("offsets", &v.offsets)
-                .finish(),
-
-            Nested(n) => f
-                .debug_struct("Nested")
-                .field("col_names", &n.col_names)
-                .field("array_of_tuples", &n.array_of_tuples)
-                .finish(),
-
-            NamedTuple(n) => f
-                .debug_struct("NamedTuple")
-                .field("col_names", &n.col_names)
-                .field("tuple", &n.tuple)
-                .finish(),
-
-            Dynamic(d) => f
-                .debug_struct("Dynamic")
-                .field("discriminators", &d.discriminators)
-                .field("columns", &d.columns)
-                .finish(),
-
-            Json(j) => f
-                .debug_struct("Json")
-                .field("paths", &j.paths)
-                .field("headers", &j.headers)
-                .finish(),
+        fmt_mark! {
+            named: [
+                Bool, Int8, Int16, Int32, Int64, Int128, Int256, UInt8, UInt16, UInt32,
+                UInt64, UInt128, UInt256, Float32, Float64, BFloat16, Uuid, Date, Date32,
+                Ipv4, Ipv6, String,
+            ],
+            delegate: [
+                Decimal32, Decimal64, Decimal128, Decimal256, FixedString, DateTime,
+                DateTime64, Enum8, Enum16, LowCardinality, Array, Tuple, Nullable, Map,
+                Variant, Nested, NamedTuple, Dynamic, Json,
+            ]
         }
     }
 }
