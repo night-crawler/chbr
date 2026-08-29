@@ -537,7 +537,10 @@ fn array<'a>(
 
 pub(super) fn string<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
     let mut input = ctx.input;
-    let mut strings = Vec::with_capacity(ctx.num_rows);
+    // Capacity hint clamped to the remaining input: every string costs at
+    // least one length byte, so a hostile row count cannot allocate more
+    // than the input it arrived in.
+    let mut strings = Vec::with_capacity(ctx.num_rows.min(input.len()));
     for _ in 0..ctx.num_rows {
         let s;
         (input, s) = parse_var_str_bytes(input)?;
