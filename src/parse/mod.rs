@@ -28,51 +28,73 @@ fn get_unsigned_leb128(input: &[u8]) -> Result<(u64, &[u8]), Error> {
     const DATA: u8 = 0x7F;
     const CONT: u8 = 0x80;
 
-    macro_rules! read {
-        ($idx:expr, $shift:expr, $acc:ident, $len:ident) => {{
-            if $len <= $idx {
-                cold_path();
-                return Err(Error::Length($idx));
-            }
-            let byte = input[$idx];
-            $acc |= (u64::from(byte & DATA)) << $shift;
-            if byte & CONT == 0 {
-                return Ok(($acc, &input[$idx + 1..]));
-            }
-        }};
+    let mut acc: u64 = 0;
+
+    if let Some(head) = input.first_chunk::<10>() {
+        macro_rules! read {
+            ($idx:expr, $shift:expr) => {{
+                let byte = head[$idx];
+                acc |= u64::from(byte & DATA) << $shift;
+                if byte & CONT == 0 {
+                    return Ok((acc, &input[$idx + 1..]));
+                }
+            }};
+        }
+
+        read!(0, 0);
+        read!(1, 7);
+        read!(2, 14);
+        read!(3, 21);
+        read!(4, 28);
+        read!(5, 35);
+        read!(6, 42);
+        read!(7, 49);
+        read!(8, 56);
+
+        let b9 = head[9];
+        if b9 & CONT != 0 || b9 > 1 {
+            cold_path();
+            return Err(Error::Overflow("varuint too large for u64".into()));
+        }
+
+        acc |= u64::from(b9) << 63;
+        return Ok((acc, &input[10..]));
     }
 
+    // Slow path: fewer than 10 bytes left; check the length at every byte.
     let len = input.len();
     if len == 0 {
         cold_path();
         return Err(Error::Length(0));
     }
 
-    let mut acc: u64 = 0;
-
-    read!(0, 0, acc, len);
-    read!(1, 7, acc, len);
-    read!(2, 14, acc, len);
-    read!(3, 21, acc, len);
-    read!(4, 28, acc, len);
-    read!(5, 35, acc, len);
-    read!(6, 42, acc, len);
-    read!(7, 49, acc, len);
-    read!(8, 56, acc, len);
-
-    if len <= 9 {
-        cold_path();
-        return Err(Error::Length(9));
+    macro_rules! read_checked {
+        ($idx:expr, $shift:expr) => {{
+            if len <= $idx {
+                cold_path();
+                return Err(Error::Length($idx));
+            }
+            let byte = input[$idx];
+            acc |= u64::from(byte & DATA) << $shift;
+            if byte & CONT == 0 {
+                return Ok((acc, &input[$idx + 1..]));
+            }
+        }};
     }
 
-    let b9 = input[9];
-    if b9 & CONT != 0 || b9 > 1 {
-        cold_path();
-        return Err(Error::Overflow("varuint too large for u64".into()));
-    }
+    read_checked!(0, 0);
+    read_checked!(1, 7);
+    read_checked!(2, 14);
+    read_checked!(3, 21);
+    read_checked!(4, 28);
+    read_checked!(5, 35);
+    read_checked!(6, 42);
+    read_checked!(7, 49);
+    read_checked!(8, 56);
 
-    acc |= u64::from(b9) << 63;
-    Ok((acc, &input[10..]))
+    // len <= 9 here: a continuation bit ran past the end of the buffer.
+    cold_path();
+    Err(Error::Length(9))
 }
 
 fn parse_u64<T>(input: &[u8]) -> IResult<&[u8], T>

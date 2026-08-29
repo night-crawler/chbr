@@ -441,7 +441,7 @@ impl<'a, T: FromVariant<'a> + 'a> TryRead<'a> for Variant<'a, T> {
         T::read(
             &self.readers,
             discriminator as usize,
-            self.mark.offsets[idx],
+            self.mark.offsets[idx] as usize,
         )
     }
 }
@@ -484,7 +484,7 @@ impl<'a, T: FromVariant<'a> + 'a> TryRead<'a> for VariantNullable<'a, T> {
         T::read(
             &self.inner.readers,
             discriminator as usize,
-            mark.offsets[idx],
+            mark.offsets[idx] as usize,
         )
         .map(Some)
     }

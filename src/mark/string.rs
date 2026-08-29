@@ -29,7 +29,13 @@ impl std::fmt::Debug for FixedString<'_> {
         }
         f.debug_struct("FixedString")
             .field("size", &self.size)
-            .field("values", &Records { data: self.data, size: self.size })
+            .field(
+                "values",
+                &Records {
+                    data: self.data,
+                    size: self.size,
+                },
+            )
             .finish()
     }
 }
