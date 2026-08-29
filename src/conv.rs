@@ -19,6 +19,8 @@ const UTC_ALIASES: [Tz; 11] = [
     Tz::Etc__GMTMinus0,
 ];
 
+// A reminder for future self: either a lock or an unsound transmute into TzOffset because they have
+// no public anything to const construct it.
 static UTC_ALIAS_OFFSETS: LazyLock<[TzOffset; UTC_ALIASES.len()]> = LazyLock::new(|| {
     UTC_ALIASES.map(|tz| tz.offset_from_utc_datetime(&DateTime::UNIX_EPOCH.naive_utc()))
 });
