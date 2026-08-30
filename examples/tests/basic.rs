@@ -17,9 +17,8 @@ fn basic() -> Result<(), Box<dyn std::error::Error>> {
         let i = row.row_index();
 
         let id = id.get_u32(i)?.expect("valid row index");
-        let tags: &[&chbr::BStr] = tags.get(i)?.expect("valid row index").try_into()?;
+        let tags: chbr::mark::StringIter = tags.get(i)?.expect("valid row index").try_into()?;
         let tags = tags
-            .iter()
             .map(|value| std::str::from_utf8(value))
             .collect::<Result<Vec<_>, _>>()?;
 

@@ -1,4 +1,4 @@
-use crate::mark::{Mark, checked_slice};
+use crate::mark::{Mark, StringView, checked_slice};
 use crate::value::{LowCardinalitySliceIterator, SliceUsizeIterator, Value};
 use crate::{Error, zc};
 use bstr::BStr;
@@ -200,7 +200,7 @@ impl ExactSizeIterator for IndexIter<'_> {}
 /// Waiting for: <https://github.com/rust-lang/rust/issues/63063>
 pub struct StrIter<'data: 'keys, 'keys> {
     pub(crate) indices: IndexIter<'data>,
-    pub(crate) keys: &'keys [&'data BStr],
+    pub(crate) keys: &'keys StringView<'data>,
 }
 
 impl<'data> Iterator for StrIter<'data, '_> {
@@ -215,7 +215,7 @@ impl<'data> Iterator for StrIter<'data, '_> {
                 return Some(Err(error));
             }
         };
-        let Some(value) = self.keys.get(index).copied() else {
+        let Some(value) = self.keys.get(index) else {
             cold_path();
             return Some(Err(Error::IndexOutOfBounds(
                 index,

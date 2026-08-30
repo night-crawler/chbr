@@ -175,7 +175,7 @@ pub fn json<'a>(
             mark: Mark::Empty,
         });
     }
-    for path in dynamic_paths.data {
+    for path in dynamic_paths.iter() {
         paths.push(crate::error::decode_utf8(path)?);
     }
 

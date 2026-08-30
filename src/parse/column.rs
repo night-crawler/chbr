@@ -1,4 +1,3 @@
-use bstr::BStr;
 use log::debug;
 
 use std::hint::cold_path;
@@ -15,7 +14,7 @@ use crate::{
             HAS_ADDITIONAL_KEYS_BIT, NEED_GLOBAL_DICTIONARY_BIT, NEED_UPDATE_DICTIONARY_BIT,
             TUINT8, TUINT16, TUINT32, TUINT64,
         },
-        header, parse_offsets, parse_u64, parse_var_str_bytes, take_elements,
+        header, parse_offsets, parse_u64, parse_varuint, take_elements,
     },
     types::{DynamicHeader, Field, JsonHeader, MapHeader, OffsetIndexPair as _, Type, TypeHeader},
 };
@@ -536,18 +535,26 @@ fn array<'a>(
 }
 
 pub(super) fn string<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
-    let mut input = ctx.input;
-    // Capacity hint clamped to the remaining input: every string costs at
-    // least one length byte, so a hostile row count cannot allocate more
-    // than the input it arrived in.
-    let mut strings = Vec::with_capacity(ctx.num_rows.min(input.len()));
-    for _ in 0..ctx.num_rows {
-        let s;
-        (input, s) = parse_var_str_bytes(input)?;
-        strings.push(BStr::new(s));
+    let data = ctx.input;
+    if ctx.num_rows > data.len() {
+        cold_path();
+        return Err(Error::Length(ctx.num_rows));
     }
 
-    Ok((input, Mark::String(StringView { data: strings })))
+    let mut view = StringView::new(data, ctx.num_rows);
+    let mut input = data;
+    for row in 0..ctx.num_rows {
+        let len;
+        (input, len) = parse_varuint::<usize>(input)?;
+        let Some(rest) = input.get(len..) else {
+            cold_path();
+            return Err(Error::Length(len));
+        };
+        view.set(row, data.len() - input.len(), len);
+        input = rest;
+    }
+
+    Ok((input, Mark::String(view)))
 }
 
 fn named_tuple<'a>(

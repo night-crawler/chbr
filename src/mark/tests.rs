@@ -1,6 +1,6 @@
 use std::{collections::HashMap, str::FromStr as _};
 
-use super::{Mark, StringView, Tuple};
+use super::{EMPTY_STRINGS, Mark, Tuple};
 use crate::mark;
 
 use crate::zc;
@@ -131,11 +131,23 @@ fn plain_strings_array() -> TestResult {
     let strings_marker = &block.markers[1];
 
     for (i, expected) in expected_arrays.iter().enumerate() {
-        let slice: &[&bstr::BStr] = strings_marker.get(i)?.unwrap().try_into()?;
-        let actual = slice.to_vec();
+        let iter: mark::StringIter = strings_marker.get(i)?.unwrap().try_into()?;
+        let actual = iter.collect::<Vec<_>>();
 
         assert_eq!(actual, *expected, "Mismatch at index {i}");
+
+        let direct = strings_marker
+            .get_arr_strs(i)?
+            .expect("row is present")
+            .collect::<Vec<_>>();
+        assert_eq!(direct, *expected, "Mismatch at index {i}");
     }
+
+    assert!(
+        strings_marker
+            .get_arr_strs(expected_arrays.len())?
+            .is_none()
+    );
 
     Ok(())
 }
@@ -1740,7 +1752,7 @@ fn mark_accessors_return_errors() -> TestResult {
     ));
 
     assert!(matches!(
-        mark::lc::Indices::try_from(Mark::String(StringView { data: Vec::new() })),
+        mark::lc::Indices::try_from(Mark::String(EMPTY_STRINGS)),
         Err(crate::Error::CorruptedData(_))
     ));
 
@@ -1749,7 +1761,7 @@ fn mark_accessors_return_errors() -> TestResult {
         is_nullable: false,
         indices: mark::lc::Indices::U8(&indices),
         global_dictionary: None,
-        additional_keys: Some(Box::new(Mark::String(StringView { data: Vec::new() }))),
+        additional_keys: Some(Box::new(Mark::String(EMPTY_STRINGS))),
     });
     let mut values = invalid_dictionary.slice_lc_strs(0..1)?;
     assert!(matches!(

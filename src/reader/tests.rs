@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use testresult::TestResult;
 
 use super::*;
-use crate::common::load;
+use crate::common::{self, load};
 use crate::error::Error;
 use crate::mark;
 use crate::parse::block::parse_single;
@@ -677,18 +677,17 @@ fn nullable_low_cardinality_reader_allows_missing_unused_dictionary() -> TestRes
 fn string_readers_separate_bytes_checked_and_trusted_utf8() -> TestResult {
     let valid = bstr::BStr::new(b"valid");
     let invalid = bstr::BStr::new(b"\xff");
-    let mark = mark::Mark::String(mark::StringView {
-        data: vec![valid, invalid],
-    });
+    let encoded = common::encode_strings(&[valid, invalid]);
+    let mark = common::string_mark(&encoded, 2);
+    let encoded_valid = common::encode_strings(&[valid]);
+    let encoded_invalid = common::encode_strings(&[invalid]);
 
     assert_eq!(mark.get_str(1)?.expect("valid row"), invalid);
 
     let nullable_mask = [0_u8];
     let nullable = mark::Mark::Nullable(mark::Nullable {
         mask: &nullable_mask,
-        data: Box::new(mark::Mark::String(mark::StringView {
-            data: vec![invalid],
-        })),
+        data: Box::new(common::string_mark(&encoded_invalid, 1)),
     });
     assert_eq!(nullable.get_opt_str(0)?.expect("valid row"), Some(invalid));
 
@@ -697,9 +696,7 @@ fn string_readers_separate_bytes_checked_and_trusted_utf8() -> TestResult {
         is_nullable: false,
         indices: mark::lc::Indices::U8(&lc_indices),
         global_dictionary: None,
-        additional_keys: Some(Box::new(mark::Mark::String(mark::StringView {
-            data: vec![invalid],
-        }))),
+        additional_keys: Some(Box::new(common::string_mark(&encoded_invalid, 1))),
     });
     assert_eq!(low_cardinality.get_str(0)?.expect("valid row"), invalid);
 
@@ -715,12 +712,12 @@ fn string_readers_separate_bytes_checked_and_trusted_utf8() -> TestResult {
     assert_eq!(raw_array, [invalid]);
 
     let bytes = Bytes::try_from(&mark)?;
-    assert_eq!(bytes.try_read(0)?, b"valid");
-    assert_eq!(bytes.try_read(1)?, b"\xff");
+    assert_eq!(bytes.try_read(0)?, valid);
+    assert_eq!(bytes.try_read(1)?, invalid);
 
     assert!(matches!(Str::try_from(&mark), Err(Error::Utf8Decode(_, _))));
 
-    let valid_mark = mark::Mark::String(mark::StringView { data: vec![valid] });
+    let valid_mark = common::string_mark(&encoded_valid, 1);
     let checked = Str::try_from(&valid_mark)?;
     assert_eq!(checked.try_read(0)?, "valid");
 

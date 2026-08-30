@@ -1243,7 +1243,6 @@ impl<'de> de::Deserializer<'de> for NamedRowDeserializer<'de> {
 
 #[cfg(all(test, feature = "serde1"))]
 mod serde_tests {
-    use bstr::BStr;
     use std::{collections::BTreeMap, net::Ipv4Addr};
 
     use serde::Deserialize;
@@ -1272,10 +1271,13 @@ mod serde_tests {
         }
     }
 
-    fn string_view(data: Vec<&str>) -> mark::StringView<'_> {
-        mark::StringView {
-            data: data.into_iter().map(BStr::new).collect(),
-        }
+    // Tests describe columns as literals; the parser turns them into marks, so
+    // the encoded payload is materialized (and leaked) to stand in for a block.
+    fn string_col(values: &[&str]) -> mark::Mark<'static> {
+        let bytes = values.iter().map(|v| v.as_bytes()).collect::<Vec<_>>();
+        let encoded = Vec::leak(crate::common::encode_strings(&bytes));
+
+        crate::common::string_mark(encoded, values.len())
     }
 
     #[test]
@@ -1411,8 +1413,8 @@ mod serde_tests {
         let duplicate = mark::Json::new(
             vec!["a", "a"],
             vec![
-                header(Type::String, mark::Mark::String(string_view(vec!["x"]))),
-                header(Type::String, mark::Mark::String(string_view(vec!["y"]))),
+                header(Type::String, string_col(&["x"])),
+                header(Type::String, string_col(&["y"])),
             ],
             1,
         );
@@ -1421,8 +1423,8 @@ mod serde_tests {
         let mark = mark::Mark::Json(mark::Json::new(
             vec!["a", "a.b"],
             vec![
-                header(Type::String, mark::Mark::String(string_view(vec!["x"]))),
-                header(Type::String, mark::Mark::String(string_view(vec!["y"]))),
+                header(Type::String, string_col(&["x"])),
+                header(Type::String, string_col(&["y"])),
             ],
             1,
         )?);
@@ -1439,11 +1441,8 @@ mod serde_tests {
         let mark = mark::Mark::Json(mark::Json::new(
             vec!["a%2Eb", "nested.value"],
             vec![
-                header(Type::String, mark::Mark::String(string_view(vec!["dot"]))),
-                header(
-                    Type::String,
-                    mark::Mark::String(string_view(vec!["nested"])),
-                ),
+                header(Type::String, string_col(&["dot"])),
+                header(Type::String, string_col(&["nested"])),
             ],
             1,
         )?);
@@ -1467,10 +1466,7 @@ mod serde_tests {
 
         let nested_json = mark::Json::new(
             vec!["name"],
-            vec![header(
-                Type::String,
-                mark::Mark::String(string_view(vec!["one", "two", "three"])),
-            )],
+            vec![header(Type::String, string_col(&["one", "two", "three"]))],
             3,
         )?;
         let inner_offsets = [1_u64.to_le_bytes(), 3_u64.to_le_bytes()].concat();
@@ -1703,14 +1699,14 @@ mod serde_tests {
                 Type::String,
                 mark::Mark::Nullable(mark::Nullable {
                     mask: &mask_present,
-                    data: Box::new(mark::Mark::String(string_view(vec!["some"]))),
+                    data: Box::new(string_col(&["some"])),
                 }),
             ),
             header(
                 Type::String,
                 mark::Mark::Nullable(mark::Nullable {
                     mask: &mask_null,
-                    data: Box::new(mark::Mark::String(string_view(vec!["unused"]))),
+                    data: Box::new(string_col(&["unused"])),
                 }),
             ),
             header(
@@ -1719,14 +1715,14 @@ mod serde_tests {
                     is_nullable: false,
                     indices: mark::lc::Indices::U8(&low_cardinality_indices),
                     global_dictionary: None,
-                    additional_keys: Some(Box::new(mark::Mark::String(string_view(vec!["dict"])))),
+                    additional_keys: Some(Box::new(string_col(&["dict"]))),
                 }),
             ),
             header(
                 Type::String,
                 mark::Mark::Map(mark::Map {
                     offsets: ByteView::try_from(map_offsets.as_slice())?,
-                    keys: Box::new(mark::Mark::String(string_view(vec!["k"]))),
+                    keys: Box::new(string_col(&["k"])),
                     values: Box::new(mark::Mark::UInt64(ByteView::try_from(
                         map_value.as_slice(),
                     )?)),
@@ -1737,7 +1733,7 @@ mod serde_tests {
                 mark::Mark::Tuple(mark::Tuple {
                     values: vec![
                         mark::Mark::UInt64(ByteView::try_from(tuple_value.as_slice())?),
-                        mark::Mark::String(string_view(vec!["two"])),
+                        string_col(&["two"]),
                     ],
                 }),
             ),
@@ -1759,7 +1755,7 @@ mod serde_tests {
                     array_of_tuples: Box::new(mark::Mark::Array(mark::Array {
                         offsets: ByteView::try_from(nested_offsets.as_slice())?,
                         values: Box::new(mark::Mark::Tuple(mark::Tuple {
-                            values: vec![mark::Mark::String(string_view(vec!["a", "b"]))],
+                            values: vec![string_col(&["a", "b"])],
                         })),
                     })),
                 }),
@@ -1769,7 +1765,7 @@ mod serde_tests {
                 mark::Mark::Variant(mark::Variant {
                     offsets: vec![0],
                     discriminators: &variant_discriminators,
-                    types: vec![mark::Mark::String(string_view(vec!["variant"]))],
+                    types: vec![string_col(&["variant"])],
                 }),
             ),
             header(
@@ -1777,7 +1773,7 @@ mod serde_tests {
                 mark::Mark::Dynamic(mark::Dynamic {
                     offsets: vec![0],
                     discriminators: &variant_discriminators,
-                    columns: vec![mark::Mark::String(string_view(vec!["dynamic"]))],
+                    columns: vec![string_col(&["dynamic"])],
                 }),
             ),
         ];

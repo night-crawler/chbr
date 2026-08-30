@@ -4,7 +4,9 @@ use std::ops::Range;
 use bstr::BStr;
 
 use super::{Value, short_type_name};
-use crate::{ByteExt as _, error::Error, mark::FixedString};
+use crate::ByteExt as _;
+use crate::error::Error;
+use crate::mark::{FixedString, StringIter};
 
 impl<'a> TryFrom<Value<'a>> for &'a BStr {
     type Error = Error;
@@ -17,14 +19,14 @@ impl<'a> TryFrom<Value<'a>> for &'a BStr {
     }
 }
 
-impl<'a> TryFrom<Value<'a>> for &'a [&'a BStr] {
+impl<'a> TryFrom<Value<'a>> for StringIter<'a, 'a> {
     type Error = Error;
 
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::StringSlice(value) => Ok(value),
-            Value::Empty => Ok(&[]),
-            other => Err(other.mismatched_type(stringify!(&'a [&'a BStr]))),
+            Value::StringSlice { mark, range } => Ok(mark.range_iter(range.into())),
+            Value::Empty => Ok(crate::mark::string::empty_iter()),
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
         }
     }
 }

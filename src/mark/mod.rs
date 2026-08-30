@@ -1,9 +1,9 @@
 mod json;
 pub mod lc;
-mod string;
+pub(crate) mod string;
 
 pub use json::Json;
-pub use string::{FixedString, StringView};
+pub use string::{EMPTY_STRINGS, FixedString, StringIter, StringView};
 
 use crate::{
     Bf16Data, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
@@ -265,9 +265,10 @@ impl<'a> Mark<'a> {
             Mark::Date32(bv) => Ok(Value::Date32Slice(self.checked_slice(bv.as_slice(), idx)?)),
             Mark::Ipv4(bv) => Ok(Value::Ipv4Slice(self.checked_slice(bv.as_slice(), idx)?)),
             Mark::Ipv6(bv) => Ok(Value::Ipv6Slice(self.checked_slice(bv.as_slice(), idx)?)),
-            Mark::String(sv) => Ok(Value::StringSlice(
-                self.checked_slice(sv.data.as_slice(), idx)?,
-            )),
+            Mark::String(mark) => Ok(Value::StringSlice {
+                mark,
+                range: idx.try_into()?,
+            }),
 
             Mark::Decimal32(d) => Ok(Value::Decimal32Slice {
                 precision: d.precision,
@@ -576,8 +577,7 @@ impl<'a> Mark<'a> {
         (Ipv6, Ipv6Data),
     );
 
-    // It borrows the Mark's vec, so can't be done the same way as get_arr_*_slice
-    pub fn get_arr_string_slice(&self, index: usize) -> crate::Result<Option<&[&'a BStr]>> {
+    pub fn get_arr_strs(&self, index: usize) -> crate::Result<Option<StringIter<'a, '_>>> {
         let Mark::Array(arr) = self else {
             cold_path();
             return Err(Error::MismatchedType(self.as_str(), "Array"));
@@ -588,8 +588,8 @@ impl<'a> Mark<'a> {
         };
 
         match arr.values.as_ref() {
-            Mark::String(bv) => Ok(Some(&bv[start..end])),
-            Mark::Empty => Ok(Some(&[])),
+            Mark::String(view) => Ok(Some(view.range_iter(start..end))),
+            Mark::Empty => Ok(Some(string::empty_iter())),
             other => {
                 cold_path();
                 Err(Error::MismatchedType(other.as_str(), "String"))

@@ -1,9 +1,8 @@
 use std::hint::cold_path;
-use std::ops::Range;
 
 use bstr::BStr;
 
-use super::{ReadSlice, Readable, TryRead};
+use super::{Readable, TryRead};
 use crate::ByteExt as _;
 use crate::error::{Error, decode_utf8};
 use crate::mark::{FixedString as FixedStringMark, Mark, StringView};
@@ -38,18 +37,6 @@ impl<'a> TryRead<'a> for Bytes<'a> {
     }
 }
 
-impl<'a> ReadSlice<'a> for Bytes<'a> {
-    type Elem = &'a BStr;
-
-    fn try_read_slice(&self, range: Range<usize>) -> crate::Result<&'a [Self::Elem]> {
-        let Some(slice) = self.0.data.get(range.clone()) else {
-            cold_path();
-            return Err(Error::RangeOutOfBounds(range, "String"));
-        };
-        Ok(slice)
-    }
-}
-
 /// Reads ClickHouse `String` values as `&str`.
 ///
 /// [`TryFrom`] validates the complete column once.
@@ -61,7 +48,7 @@ impl<'a> TryFrom<&'a Mark<'a>> for Str<'a> {
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         let reader = Bytes::try_from(value)?;
-        for value in &reader.0.data {
+        for value in reader.0.iter() {
             decode_utf8(value)?;
         }
         Ok(Self(reader.0))

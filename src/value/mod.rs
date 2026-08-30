@@ -49,7 +49,10 @@ pub enum Value<'a> {
     Ipv4(Ipv4Addr),
     Ipv6(&'a Ipv6Data),
 
-    StringSlice(&'a [&'a BStr]),
+    StringSlice {
+        mark: &'a mark::StringView<'a>,
+        range: TinyRange,
+    },
     BoolSlice(&'a [u8]),
     Int8Slice(&'a [i8]),
     Int16Slice(&'a [zc::I16]),
@@ -215,7 +218,7 @@ impl Value<'_> {
             Value::DateTime64(_, _) => "DateTime64",
             Value::Ipv4(_) => "Ipv4",
             Value::Ipv6(_) => "Ipv6",
-            Value::StringSlice(_) => "StringSlice",
+            Value::StringSlice { .. } => "StringSlice",
             Value::Int8Slice(_) => "Int8Slice",
             Value::Int16Slice(_) => "Int16Slice",
             Value::Int32Slice(_) => "Int32Slice",

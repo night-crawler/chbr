@@ -14,6 +14,7 @@ use chrono_tz::Tz;
 use log::debug;
 use uuid::Uuid;
 
+mod arr;
 pub mod conv;
 pub mod error;
 mod macros;
@@ -425,5 +426,38 @@ pub(crate) mod common {
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
         Ok(buf)
+    }
+
+    /// Encodes `values` the way a `String` column arrives on the wire.
+    pub fn encode_strings(values: &[&[u8]]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for value in values {
+            let mut len = value.len();
+            while len >= 0x80 {
+                out.push(u8::try_from(len & 0x7F).expect("masked to 7 bits") | 0x80);
+                len >>= 7;
+            }
+            out.push(u8::try_from(len).expect("below 0x80"));
+            out.extend_from_slice(value);
+        }
+        out
+    }
+
+    /// Decodes a `String` column out of [`encode_strings`] output, so tests get
+    /// their marks from the parser instead of hand-building one.
+    pub fn string_mark(encoded: &[u8], rows: usize) -> crate::mark::Mark<'_> {
+        let ctx = crate::parse::block::ParseContext {
+            initial: encoded,
+            input: encoded,
+            num_columns: 1,
+            num_rows: rows,
+            col_id: 0,
+            column_name: "s",
+        };
+        let (rest, mark) = crate::types::Type::String
+            .decode(ctx, crate::types::TypeHeader::Empty)
+            .expect("the encoded column parses");
+        assert!(rest.is_empty(), "the column consumes the whole buffer");
+        mark
     }
 }

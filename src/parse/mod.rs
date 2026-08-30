@@ -94,17 +94,6 @@ where
     Ok((rest, value))
 }
 
-fn parse_var_str_bytes(input: &[u8]) -> IResult<&[u8], &[u8]> {
-    let (input, len) = parse_varuint(input)?;
-    if input.len() < len {
-        cold_path();
-        return Err(Error::Length(len));
-    }
-
-    let (str_bytes, remainder) = input.split_at(len);
-    Ok((remainder, str_bytes))
-}
-
 pub(crate) fn parse_var_str(input: &[u8]) -> IResult<&[u8], &str> {
     let (input, len) = parse_varuint(input)?;
     if input.len() < len {

@@ -2,7 +2,7 @@ mod common;
 
 use chbr::FromBlock;
 use chbr::error::Error;
-use chbr::mark::{self, Mark, StringView, Tuple};
+use chbr::mark::{self, EMPTY_STRINGS, Mark, Tuple};
 use chbr::parse::block::parse_single;
 use chbr::reader::I64;
 use chbr::slice::ByteView;
@@ -29,7 +29,7 @@ fn reports_mark_accessor_errors() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     assert!(matches!(
-        mark::lc::Indices::try_from(Mark::String(StringView { data: Vec::new() })),
+        mark::lc::Indices::try_from(Mark::String(EMPTY_STRINGS)),
         Err(Error::CorruptedData(_))
     ));
 
@@ -38,7 +38,7 @@ fn reports_mark_accessor_errors() -> Result<(), Box<dyn std::error::Error>> {
         is_nullable: false,
         indices: mark::lc::Indices::U8(&indices),
         global_dictionary: None,
-        additional_keys: Some(Box::new(Mark::String(StringView { data: Vec::new() }))),
+        additional_keys: Some(Box::new(Mark::String(EMPTY_STRINGS))),
     });
     let mut values = invalid_dictionary.slice_lc_strs(0..1)?;
     assert!(matches!(
