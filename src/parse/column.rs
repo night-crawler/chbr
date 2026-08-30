@@ -537,15 +537,21 @@ fn array<'a>(
 
 pub(super) fn string<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
     let mut input = ctx.input;
-    // Capacity hint clamped to the remaining input: every string costs at
-    // least one length byte, so a hostile row count cannot allocate more
-    // than the input it arrived in.
-    let mut strings = Vec::with_capacity(ctx.num_rows.min(input.len()));
-    for _ in 0..ctx.num_rows {
+    let num_rows = ctx.num_rows;
+    // We set the full vec in the end, and never skip a row, so we can ignore zeroing stuff.
+    let mut strings: Vec<&'a BStr> = Vec::with_capacity(num_rows.min(input.len()));
+    let spare = strings.spare_capacity_mut();
+
+    let mut written = 0usize;
+    while written < num_rows {
         let s;
         (input, s) = parse_var_str_bytes(input)?;
-        strings.push(BStr::new(s));
+        unsafe { spare.get_unchecked_mut(written).write(BStr::new(s)) };
+        written += 1;
     }
+
+    // SAFETY: we set the len that is equal to the allocated capacity
+    unsafe { strings.set_len(written) };
 
     Ok((input, Mark::String(StringView { data: strings })))
 }
