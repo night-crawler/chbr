@@ -1,5 +1,9 @@
 use std::{fs, hint::black_box, time::Duration};
 
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod common;
 
 use chbr::FromBlock as _;

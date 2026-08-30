@@ -1,5 +1,9 @@
 use std::{fs, hint::black_box};
 
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use chbr::{
     parse::block::parse_single,
     reader::{Json, TryRead as _},
