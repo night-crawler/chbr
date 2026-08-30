@@ -6,6 +6,7 @@ edition = "2024"
 [features]
 default = []
 serde1 = ["dep:serde"]
+mimalloc = ["dep:mimalloc"]
 
 [dependencies]
 unsigned-varint = { version = "0.8", features = ["std"] }
@@ -22,6 +23,7 @@ half = { version = "2.6", features = ["zerocopy"] }
 paste = "1"
 serde = { version = "1", optional = true }
 bstr = "1"
+mimalloc = { version = "0.1", optional = true }
 
 [dependencies.chbr_derive]
 path = "./chbr_derive"

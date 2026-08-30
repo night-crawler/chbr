@@ -1,5 +1,9 @@
 use std::{fs, hint::black_box, net::Ipv6Addr, time::Duration};
 
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod common;
 
 use chbr::{BlockRow, BlocksIterator, FromBlock as _, parse::block::parse_many};
