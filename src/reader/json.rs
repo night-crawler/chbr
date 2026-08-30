@@ -1261,11 +1261,11 @@ mod serde_tests {
 
     fn header<'a>(typ: Type<'a>, mark: mark::Mark<'a>) -> JsonColumnHeader<'a> {
         JsonColumnHeader {
-            path_version: 0,
-            max_types: 0,
-            total_types: 1,
+            _path_version: 0,
+            _max_types: 0,
+            _total_types: 1,
             types: vec![typ],
-            variant_version: 0,
+            _variant_version: 0,
             is_typed: true,
             type_headers: vec![],
             mark,

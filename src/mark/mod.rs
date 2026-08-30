@@ -2,7 +2,7 @@ mod json;
 pub mod lc;
 mod string;
 
-pub use json::Json;
+pub(crate) use json::Json;
 pub use string::{FixedString, StringView};
 
 use crate::{
@@ -70,66 +70,6 @@ pub enum Mark<'a> {
 }
 
 impl<'a> Mark<'a> {
-    pub const fn size(&self) -> Option<usize> {
-        #[expect(clippy::match_same_arms)]
-        match self {
-            Self::Bool(_) => Some(1),
-            Self::Int8(_) => Some(1),
-            Self::Int16(_) => Some(2),
-            Self::Int32(_) => Some(4),
-            Self::Int64(_) => Some(8),
-            Self::Int128(_) => Some(16),
-            Self::Int256(_) => Some(32),
-            Self::UInt8(_) => Some(1),
-            Self::UInt16(_) => Some(2),
-            Self::UInt32(_) => Some(4),
-            Self::UInt64(_) => Some(8),
-            Self::UInt128(_) => Some(16),
-            Self::UInt256(_) => Some(32),
-
-            Self::Float32(_) => Some(4),
-            Self::Float64(_) => Some(8),
-            Self::BFloat16(_) => Some(2),
-
-            Self::Uuid(_) => Some(16),
-
-            Self::Decimal32(_) => Some(4),
-            Self::Decimal64(_) => Some(8),
-            Self::Decimal128(_) => Some(16),
-            Self::Decimal256(_) => Some(32),
-
-            Self::FixedString(f) => Some(f.size),
-
-            Self::Ipv4(_) => Some(4),
-            Self::Ipv6(_) => Some(16),
-
-            Self::Date(_) => Some(2),
-            Self::Date32(_) => Some(4),
-            Self::DateTime { .. } => Some(4),
-            Self::DateTime64 { .. } => Some(8),
-            Self::Enum8(_) => Some(1),
-            Self::Enum16(_) => Some(2),
-
-            // For completeness, everything below is variable in size
-            Self::Map { .. } => None,
-
-            Self::Array(_) => None,
-
-            Self::Tuple(_) => None,
-
-            Self::Variant { .. } => None,
-            Self::Dynamic(_) => None,
-            Self::Json { .. } => None,
-
-            Self::Nullable(_) => None,
-            Self::LowCardinality { .. } => None,
-            Self::String(_) => None,
-            Self::Nested { .. } => None,
-            Self::NamedTuple { .. } => None,
-            Self::Empty => None,
-        }
-    }
-
     pub const fn as_str(&self) -> &'static str {
         match self {
             Mark::Empty => "Empty",
@@ -613,7 +553,7 @@ fn checked_slice<'a, T>(
 macro_rules! impl_get {
     ($ty:ident, $variant:ident) => {
         impl<'a> $ty<'a> {
-            pub const fn get(&'a self, index: usize) -> Option<Value<'a>> {
+            pub(crate) const fn get(&'a self, index: usize) -> Option<Value<'a>> {
                 if self.data.len() <= index {
                     cold_path();
                     None
@@ -633,23 +573,23 @@ macro_rules! impl_get_many {
 
 #[derive(Debug)]
 pub struct Map<'a> {
-    pub offsets: Offsets<'a>,
-    pub keys: Box<Mark<'a>>,
-    pub values: Box<Mark<'a>>,
+    pub(crate) offsets: Offsets<'a>,
+    pub(crate) keys: Box<Mark<'a>>,
+    pub(crate) values: Box<Mark<'a>>,
 }
 
 #[derive(Debug)]
 pub struct Variant<'a> {
-    pub offsets: Vec<u32>,
-    pub discriminators: &'a [u8],
-    pub types: Vec<Mark<'a>>,
+    pub(crate) offsets: Vec<u32>,
+    pub(crate) discriminators: &'a [u8],
+    pub(crate) types: Vec<Mark<'a>>,
 }
 
 impl Variant<'_> {
     /// Discriminator byte marking a NULL row.
-    pub const NULL_DISCRIMINATOR: u8 = 255;
+    pub(crate) const NULL_DISCRIMINATOR: u8 = 255;
 
-    pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
+    pub(crate) fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         let Some(&discriminator) = self.discriminators.get(index) else {
             return Ok(None);
         };
@@ -665,12 +605,12 @@ impl Variant<'_> {
 
 #[derive(Debug)]
 pub struct Nested<'a> {
-    pub col_names: Vec<&'a str>,
-    pub array_of_tuples: Box<Mark<'a>>,
+    pub(crate) col_names: Vec<&'a str>,
+    pub(crate) array_of_tuples: Box<Mark<'a>>,
 }
 
 impl Nested<'_> {
-    pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
+    pub(crate) fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         // verify the index is present
         if self.array_of_tuples.get(index)?.is_none() {
             return Ok(None);
@@ -694,7 +634,7 @@ impl<'a> NamedTuple<'a> {
         crate::mark_by_name(&self.col_names, &tuple.values, name)
     }
 
-    pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
+    pub(crate) fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         if self.tuple.get(index)?.is_none() {
             return Ok(None);
         }
@@ -704,12 +644,12 @@ impl<'a> NamedTuple<'a> {
 
 #[derive(Debug)]
 pub struct Array<'a> {
-    pub offsets: Offsets<'a>,
-    pub values: Box<Mark<'a>>,
+    pub(crate) offsets: Offsets<'a>,
+    pub(crate) values: Box<Mark<'a>>,
 }
 
 impl Array<'_> {
-    pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
+    pub(crate) fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         let Some((start, end)) = self.offsets.offset_indices(index)? else {
             return Ok(None);
         };
@@ -719,39 +659,39 @@ impl Array<'_> {
 
 #[derive(Debug)]
 pub struct Decimal32<'a> {
-    pub precision: u8,
-    pub data: ByteView<'a, Decimal32Data>,
+    pub(crate) precision: u8,
+    pub(crate) data: ByteView<'a, Decimal32Data>,
 }
 
 #[derive(Debug)]
 pub struct Decimal64<'a> {
-    pub precision: u8,
-    pub data: ByteView<'a, Decimal64Data>,
+    pub(crate) precision: u8,
+    pub(crate) data: ByteView<'a, Decimal64Data>,
 }
 
 #[derive(Debug)]
 pub struct Decimal128<'a> {
-    pub precision: u8,
-    pub data: ByteView<'a, Decimal128Data>,
+    pub(crate) precision: u8,
+    pub(crate) data: ByteView<'a, Decimal128Data>,
 }
 
 #[derive(Debug)]
 pub struct Decimal256<'a> {
-    pub precision: u8,
-    pub data: ByteView<'a, Decimal256Data>,
+    pub(crate) precision: u8,
+    pub(crate) data: ByteView<'a, Decimal256Data>,
 }
 
 #[derive(Debug)]
 pub struct DateTime<'a> {
-    pub tz: Tz,
-    pub data: ByteView<'a, DateTime32Data>,
+    pub(crate) tz: Tz,
+    pub(crate) data: ByteView<'a, DateTime32Data>,
 }
 
 #[derive(Debug)]
 pub struct DateTime64<'a> {
-    pub precision: u8,
-    pub tz: Tz,
-    pub data: ByteView<'a, DateTime64Data>,
+    pub(crate) precision: u8,
+    pub(crate) tz: Tz,
+    pub(crate) data: ByteView<'a, DateTime64Data>,
 }
 
 impl_get_many!(
@@ -760,12 +700,12 @@ impl_get_many!(
 
 #[derive(Debug)]
 pub struct Enum8<'a> {
-    pub variants: Vec<(&'a str, i8)>,
-    pub data: ByteView<'a, i8>,
+    pub(crate) variants: Vec<(&'a str, i8)>,
+    pub(crate) data: ByteView<'a, i8>,
 }
 
 impl Enum8<'_> {
-    pub fn get(&self, index: usize) -> Option<Value<'_>> {
+    pub(crate) fn get(&self, index: usize) -> Option<Value<'_>> {
         let variant = *self.data.get(index)?;
         if let Ok(index) = self.variants.binary_search_by_key(&variant, |(_, id)| *id) {
             return Some(Value::String(BStr::new(self.variants[index].0)));
@@ -777,12 +717,12 @@ impl Enum8<'_> {
 
 #[derive(Debug)]
 pub struct Enum16<'a> {
-    pub variants: Vec<(&'a str, i16)>,
-    pub data: ByteView<'a, zc::I16>,
+    pub(crate) variants: Vec<(&'a str, i16)>,
+    pub(crate) data: ByteView<'a, zc::I16>,
 }
 
 impl Enum16<'_> {
-    pub fn get(&self, index: usize) -> Option<Value<'_>> {
+    pub(crate) fn get(&self, index: usize) -> Option<Value<'_>> {
         let variant = self.data.get(index)?.get();
         if let Ok(index) = self.variants.binary_search_by_key(&variant, |(_, id)| *id) {
             return Some(Value::String(BStr::new(self.variants[index].0)));
@@ -793,13 +733,13 @@ impl Enum16<'_> {
 
 #[derive(Debug)]
 pub struct Dynamic<'a> {
-    pub offsets: Vec<u32>,
-    pub discriminators: &'a [u8],
-    pub columns: Vec<Mark<'a>>,
+    pub(crate) offsets: Vec<u32>,
+    pub(crate) discriminators: &'a [u8],
+    pub(crate) columns: Vec<Mark<'a>>,
 }
 
 impl Dynamic<'_> {
-    pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
+    pub(crate) fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         let Some(&discriminator) = self.discriminators.get(index) else {
             return Ok(None);
         };
@@ -815,12 +755,12 @@ impl Dynamic<'_> {
 
 #[derive(Debug)]
 pub struct Nullable<'a> {
-    pub mask: &'a [u8],
-    pub data: Box<Mark<'a>>,
+    pub(crate) mask: &'a [u8],
+    pub(crate) data: Box<Mark<'a>>,
 }
 
 impl Nullable<'_> {
-    pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
+    pub(crate) fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         if self.mask.get(index) == Some(&1) {
             return Ok(Some(Value::Empty));
         }
@@ -836,11 +776,11 @@ pub struct Tuple<'a> {
 
 #[derive(Debug)]
 pub struct BoolView<'a> {
-    pub data: &'a [u8],
+    pub(crate) data: &'a [u8],
 }
 
 impl BoolView<'_> {
-    pub fn get(&self, index: usize) -> Option<bool> {
+    pub(crate) fn get(&self, index: usize) -> Option<bool> {
         self.data.get(index).map(|&val| val == 1)
     }
 }

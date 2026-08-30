@@ -165,11 +165,11 @@ pub fn json<'a>(
     for field in typed_paths {
         paths.push(field.name);
         col_headers.push(JsonColumnHeader {
-            path_version: 0,
-            max_types: 0,
-            total_types: 1,
+            _path_version: 0,
+            _max_types: 0,
+            _total_types: 1,
             types: vec![field.typ.clone()],
-            variant_version: 0,
+            _variant_version: 0,
             is_typed: true,
             type_headers: vec![],
             mark: Mark::Empty,
@@ -236,11 +236,11 @@ fn json_column<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], JsonColumnHeader
     Ok((
         input,
         JsonColumnHeader {
-            path_version: version,
-            max_types,
-            total_types,
+            _path_version: version,
+            _max_types: max_types,
+            _total_types: total_types,
             types,
-            variant_version,
+            _variant_version: variant_version,
             is_typed: false,
             type_headers: vec![],
             mark: Mark::Empty,

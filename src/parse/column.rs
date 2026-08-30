@@ -141,7 +141,7 @@ impl<'a> Type<'a> {
             Type::Map(key, value) => map(*key, *value, &ctx, header.into_map()),
             Type::Variant(inner) => variant(inner, &ctx, header.into_variant()),
             Type::LowCardinality(inner) => lc(inner.as_ref(), &ctx),
-            Type::Nullable(inner) => nullable(*inner, &ctx, header.into_nullable()),
+            Type::Nullable(inner) => nullable(*inner, &ctx, header),
             Type::Dynamic => dynamic(&ctx, header.into_dynamic()),
             Type::Json(_) => json(&ctx, header.into_json()),
             Type::Nested(fields) => nested(fields, ctx, header.into_nested()),

@@ -14,7 +14,7 @@ pub use chrono_tz::Tz;
 
 pub type Offsets<'a> = ByteView<'a, zc::U64>;
 
-pub(crate) trait OffsetIndexPair {
+pub trait OffsetIndexPair {
     fn offset_indices(&self, index: usize) -> crate::Result<Option<(usize, usize)>>;
     fn last_or_default(&self) -> crate::Result<usize>;
 }
@@ -64,20 +64,20 @@ fn cast_offset(value: u64) -> crate::Result<usize> {
 
 #[derive(Debug)]
 pub struct MapHeader<'a> {
-    pub key: TypeHeader<'a>,
-    pub value: TypeHeader<'a>,
+    pub(crate) key: TypeHeader<'a>,
+    pub(crate) value: TypeHeader<'a>,
 }
 
 #[derive(Debug)]
 pub struct DynamicHeader<'a> {
-    pub types: Vec<Type<'a>>,
-    pub headers: Vec<TypeHeader<'a>>,
+    pub(crate) types: Vec<Type<'a>>,
+    pub(crate) headers: Vec<TypeHeader<'a>>,
 }
 
 #[derive(Debug)]
 pub struct JsonHeader<'a> {
-    pub paths: Vec<&'a str>,
-    pub col_headers: Vec<JsonColumnHeader<'a>>,
+    pub(crate) paths: Vec<&'a str>,
+    pub(crate) col_headers: Vec<JsonColumnHeader<'a>>,
 }
 
 #[derive(Debug)]
@@ -89,7 +89,6 @@ pub enum TypeHeader<'a> {
     Variant(Vec<TypeHeader<'a>>),
     Array(Box<TypeHeader<'a>>),
     Dynamic(Box<DynamicHeader<'a>>),
-    Nullable(Box<TypeHeader<'a>>),
     Nested(Vec<TypeHeader<'a>>),
 }
 
@@ -140,14 +139,6 @@ impl<'a> TypeHeader<'a> {
         match self {
             TypeHeader::Nested(n) => n,
             e => unreachable!("Unexpected type header: {e:?}"),
-        }
-    }
-
-    pub(crate) fn into_nullable(self) -> TypeHeader<'a> {
-        match self {
-            TypeHeader::Nullable(inner) => *inner,
-            TypeHeader::Empty => TypeHeader::Empty,
-            e => unreachable!("bug: unexpected type header: {e:?}"),
         }
     }
 }
@@ -239,17 +230,17 @@ pub enum Type<'a> {
 
 #[expect(clippy::multiple_inherent_impl)]
 impl<'a> Type<'a> {
-    pub const fn is_nullable(&self) -> bool {
+    pub(crate) const fn is_nullable(&self) -> bool {
         matches!(self, Type::Nullable(_))
     }
-    pub fn strip_null(&self) -> &Type<'a> {
+    pub(crate) fn strip_null(&self) -> &Type<'a> {
         match self {
             Type::Nullable(inner) => inner,
             _ => self,
         }
     }
 
-    pub const fn size(&self) -> Option<usize> {
+    pub(crate) const fn size(&self) -> Option<usize> {
         #[expect(clippy::match_same_arms)]
         match self {
             Self::Bool => Some(1),
@@ -320,7 +311,7 @@ impl<'a> Type<'a> {
         }
     }
 
-    pub fn from_bytes(s: &[u8]) -> Result<Type<'_>, crate::Error> {
+    pub(crate) fn from_bytes(s: &[u8]) -> Result<Type<'_>, crate::Error> {
         let (remainder, typ) = match parse_type(s) {
             Ok(parsed) => parsed,
             Err(e) => return Err(crate::Error::Parse(e.to_string())),
@@ -334,7 +325,7 @@ impl<'a> Type<'a> {
         Ok(typ)
     }
 
-    pub fn into_fixed_size_marker(self, data: &'a [u8]) -> crate::Result<Mark<'a>> {
+    pub(crate) fn into_fixed_size_marker(self, data: &'a [u8]) -> crate::Result<Mark<'a>> {
         let mark = match self {
             Type::Bool => Mark::Bool(BoolView { data }),
             Type::Int8 => Mark::Int8(ByteView::try_from(data)?),
@@ -407,18 +398,18 @@ impl<'a> Type<'a> {
 
 #[derive(Debug)]
 pub struct JsonColumnHeader<'a> {
-    pub path_version: u64,
-    pub max_types: usize,
-    pub total_types: usize,
-    pub types: Vec<Type<'a>>,
-    pub variant_version: u64,
-    pub is_typed: bool,
-    pub type_headers: Vec<TypeHeader<'a>>,
-    pub mark: Mark<'a>,
+    pub(crate) _path_version: u64,
+    pub(crate) _max_types: usize,
+    pub(crate) _total_types: usize,
+    pub(crate) types: Vec<Type<'a>>,
+    pub(crate) _variant_version: u64,
+    pub(crate) is_typed: bool,
+    pub(crate) type_headers: Vec<TypeHeader<'a>>,
+    pub(crate) mark: Mark<'a>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Field<'a> {
-    pub name: &'a str,
-    pub typ: Type<'a>,
+    pub(crate) name: &'a str,
+    pub(crate) typ: Type<'a>,
 }

@@ -6,8 +6,8 @@ use crate::{Error, TinyRange, types::JsonColumnHeader, value::Value};
 
 #[derive(Debug)]
 pub struct Json<'a> {
-    pub paths: Vec<&'a str>,
-    pub headers: Vec<JsonColumnHeader<'a>>,
+    pub(crate) paths: Vec<&'a str>,
+    pub(crate) headers: Vec<JsonColumnHeader<'a>>,
     rows: usize,
     #[cfg(feature = "serde1")]
     nodes: Vec<JsonPathNode<'a>>,
@@ -23,7 +23,7 @@ struct JsonPathNode<'a> {
 }
 
 impl<'a> Json<'a> {
-    pub fn new(
+    pub(crate) fn new(
         paths: Vec<&'a str>,
         headers: Vec<JsonColumnHeader<'a>>,
         rows: usize,
