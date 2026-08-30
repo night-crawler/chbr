@@ -14,7 +14,10 @@ pub struct LowCardinality<'a> {
 }
 
 impl<'a> LowCardinality<'a> {
-    pub fn slice(&self, range: Range<usize>) -> crate::Result<LowCardinalitySliceIterator<'_>> {
+    pub(crate) fn slice(
+        &self,
+        range: Range<usize>,
+    ) -> crate::Result<LowCardinalitySliceIterator<'_>> {
         let Some(additional_keys) = self.additional_keys.as_ref() else {
             return Err(Error::MismatchedType(
                 "LowCardinalitySliceIterator",
@@ -31,7 +34,7 @@ impl<'a> LowCardinality<'a> {
     }
 
     #[inline(always)]
-    pub fn value_index(&self, index: usize) -> crate::Result<Option<usize>> {
+    pub(crate) fn value_index(&self, index: usize) -> crate::Result<Option<usize>> {
         self.indices.get(index)
     }
 
@@ -58,7 +61,7 @@ impl<'a> LowCardinality<'a> {
         Ok(keys.get(value_index))
     }
 
-    pub fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
+    pub(crate) fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         // https://github.com/ClickHouse/clickhouse-go/blob/71a2b475e899afe9626f40af513bcf25aa3098a2/lib/column/lowcardinality.go#L191
         let Some(keys) = &self.additional_keys else {
             return Ok(None);
@@ -82,7 +85,7 @@ impl<'a> LowCardinality<'a> {
 
 impl<'a> Indices<'a> {
     #[inline(always)]
-    pub fn get(self, index: usize) -> crate::Result<Option<usize>> {
+    pub(crate) fn get(self, index: usize) -> crate::Result<Option<usize>> {
         match self {
             Self::Empty => Ok(None),
             Self::U8(indices) => Ok(indices.get(index).copied().map(usize::from)),
@@ -95,7 +98,7 @@ impl<'a> Indices<'a> {
         }
     }
 
-    pub const fn is_empty(self) -> bool {
+    pub(crate) const fn is_empty(self) -> bool {
         match self {
             Self::Empty => true,
             Self::U8(indices) => indices.is_empty(),
@@ -105,7 +108,7 @@ impl<'a> Indices<'a> {
         }
     }
 
-    pub fn all_zero(self) -> bool {
+    pub(crate) fn all_zero(self) -> bool {
         match self {
             Self::Empty => true,
             Self::U8(indices) => indices.iter().all(|&value| value == 0),
@@ -115,7 +118,7 @@ impl<'a> Indices<'a> {
         }
     }
 
-    pub fn slice(self, range: Range<usize>) -> crate::Result<Value<'a>> {
+    pub(crate) fn slice(self, range: Range<usize>) -> crate::Result<Value<'a>> {
         match self {
             Self::Empty => {
                 if range.start != 0 || range.end != 0 {
@@ -263,8 +266,8 @@ impl<'a> TryFrom<Mark<'a>> for Indices<'a> {
     }
 }
 
-pub struct ArrayLcStrIter<'data: 'keys, 'keys> {
-    pub inner: Option<StrIter<'data, 'keys>>,
+pub(crate) struct ArrayLcStrIter<'data: 'keys, 'keys> {
+    pub(crate) inner: Option<StrIter<'data, 'keys>>,
 }
 
 impl<'data> Iterator for ArrayLcStrIter<'data, '_> {

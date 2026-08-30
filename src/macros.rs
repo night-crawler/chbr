@@ -71,7 +71,7 @@ macro_rules! define_ip_getters {
             $(
 
                 #[inline(always)]
-                pub fn [<get_ $mark_variant:lower>](&self, index: usize)
+                pub(crate) fn [<get_ $mark_variant:lower>](&self, index: usize)
                     -> crate::Result<Option<$ret_type>>
                 {
                     match self {

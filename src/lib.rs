@@ -14,14 +14,14 @@ use chrono_tz::Tz;
 use log::debug;
 use uuid::Uuid;
 
-pub mod conv;
+pub(crate) mod conv;
 pub mod error;
 mod macros;
 pub mod mark;
 pub mod parse;
 pub mod reader;
 pub mod slice;
-pub mod types;
+pub(crate) mod types;
 pub mod value;
 pub mod zc;
 
@@ -116,7 +116,6 @@ impl TryFrom<Range<usize>> for TinyRange {
     }
 }
 
-#[macro_export]
 macro_rules! transparent_newtype {
     ( $( $vis:vis $name:ident ( $inner:ty ) ; )+ ) => {
         $(
@@ -134,12 +133,11 @@ macro_rules! transparent_newtype {
                 zerocopy::FromBytes,
                 zerocopy::Unaligned,
             )]
-            $vis struct $name(pub $inner);
+            $vis struct $name(pub(crate) $inner);
         )+
     };
 }
 
-#[macro_export]
 macro_rules! impl_from {
     ( $src:ty => $dst:ty , |$v:ident| $body:expr ) => {
         impl From<$src> for $dst {
@@ -180,34 +178,38 @@ impl_from!(Date32Data => NaiveDate, |d| conv::date32(d.0.get()));
 impl_from!(DateTime32Data => chrono::DateTime<chrono::Utc>, |d| conv::datetime32(d.0.get()));
 
 impl DateTime64Data {
-    pub fn with_tz_and_precision(&self, tz: Tz, precision: u8) -> Option<chrono::DateTime<Tz>> {
+    pub(crate) fn with_tz_and_precision(
+        &self,
+        tz: Tz,
+        precision: u8,
+    ) -> Option<chrono::DateTime<Tz>> {
         conv::datetime64_tz(self.0.get(), precision, tz)
     }
 }
 
 impl DateTime32Data {
     #[inline(always)]
-    pub fn with_tz(&self, tz: Tz) -> chrono::DateTime<Tz> {
+    pub(crate) fn with_tz(&self, tz: Tz) -> chrono::DateTime<Tz> {
         conv::datetime32_tz(self.0.get(), tz)
     }
 }
 
 impl Decimal32Data {
-    pub fn with_precision(&self, precision: u8) -> rust_decimal::Decimal {
+    pub(crate) fn with_precision(&self, precision: u8) -> rust_decimal::Decimal {
         let value = self.0.get();
         rust_decimal::Decimal::new(i64::from(value), u32::from(precision))
     }
 }
 
 impl Decimal64Data {
-    pub fn with_precision(&self, precision: u8) -> rust_decimal::Decimal {
+    pub(crate) fn with_precision(&self, precision: u8) -> rust_decimal::Decimal {
         let value = self.0.get();
         rust_decimal::Decimal::new(value, u32::from(precision))
     }
 }
 
 impl Decimal128Data {
-    pub fn with_precision(&self, precision: u8) -> Result<rust_decimal::Decimal> {
+    pub(crate) fn with_precision(&self, precision: u8) -> Result<rust_decimal::Decimal> {
         let value = self.0.get();
         match rust_decimal::Decimal::try_from_i128_with_scale(value, u32::from(precision)) {
             Ok(value) => Ok(value),
@@ -296,7 +298,7 @@ impl<'data, 'iter> BlocksIterator<'data, 'iter> {
     }
 }
 
-pub fn reorder_block_cols(blocks: &mut [ParsedBlock<'_>], order: &[&str]) -> Result<()> {
+pub(crate) fn reorder_block_cols(blocks: &mut [ParsedBlock<'_>], order: &[&str]) -> Result<()> {
     let order_map = order
         .iter()
         .enumerate()

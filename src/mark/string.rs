@@ -3,8 +3,8 @@ use bstr::BStr;
 use std::ops::Deref;
 
 pub struct FixedString<'a> {
-    pub size: usize,
-    pub data: &'a [u8],
+    pub(crate) size: usize,
+    pub(crate) data: &'a [u8],
 }
 
 impl std::fmt::Debug for FixedString<'_> {
@@ -41,13 +41,13 @@ impl std::fmt::Debug for FixedString<'_> {
 }
 
 impl<'a> FixedString<'a> {
-    pub fn get_bstr(&self, index: usize) -> Option<&'a BStr> {
+    pub(crate) fn get_bstr(&self, index: usize) -> Option<&'a BStr> {
         let offset = self.size.checked_mul(index)?;
         let end = offset.checked_add(self.size)?;
         Some(BStr::new(self.data.get(offset..end)?.rtrim_zeros()))
     }
 
-    pub fn get(&self, index: usize) -> Option<Value<'a>> {
+    pub(crate) fn get(&self, index: usize) -> Option<Value<'a>> {
         self.get_bstr(index).map(Value::String)
     }
 }
@@ -67,7 +67,7 @@ impl<'a> Deref for StringView<'a> {
 
 impl<'a> StringView<'a> {
     #[inline(always)]
-    pub fn get(&self, index: usize) -> Option<&'a BStr> {
+    pub(crate) fn get(&self, index: usize) -> Option<&'a BStr> {
         self.data.get(index).copied()
     }
 }

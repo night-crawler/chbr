@@ -8,8 +8,8 @@ use std::ops::Range;
 
 #[derive(Clone, Copy)]
 pub struct Nullable<'a, Inner> {
-    pub mask: &'a [u8],
-    pub inner: Inner,
+    pub(crate) mask: &'a [u8],
+    pub(crate) inner: Inner,
 }
 
 impl<'a, Inner> TryFrom<&'a Mark<'a>> for Nullable<'a, Inner>
@@ -182,8 +182,8 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for LcNullable<'a, Inner> {
 
 #[derive(Clone, Copy)]
 pub struct Array<'a, Inner: TryRead<'a>> {
-    pub offsets: &'a Offsets<'a>,
-    pub values: Option<Inner>,
+    pub(crate) offsets: &'a Offsets<'a>,
+    pub(crate) values: Option<Inner>,
 }
 
 impl<'a, Inner> TryFrom<&'a Mark<'a>> for Array<'a, Inner>
@@ -304,9 +304,9 @@ impl<'a, Inner: ReadSlice<'a>> ArrayIter<'a, Inner> {
 
 #[derive(Clone, Copy)]
 pub struct Map<'a, K: TryRead<'a>, V: TryRead<'a>> {
-    pub offsets: &'a Offsets<'a>,
-    pub keys: K,
-    pub values: V,
+    pub(crate) offsets: &'a Offsets<'a>,
+    pub(crate) keys: K,
+    pub(crate) values: V,
 }
 
 impl<'a, K, V> TryFrom<&'a Mark<'a>> for Map<'a, K, V>

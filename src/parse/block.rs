@@ -14,15 +14,15 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct ParseContext<'a> {
-    pub initial: &'a [u8],
+pub(crate) struct ParseContext<'a> {
+    pub(crate) initial: &'a [u8],
 
-    pub input: &'a [u8],
-    pub num_columns: usize,
-    pub num_rows: usize,
-    pub col_id: usize,
+    pub(crate) input: &'a [u8],
+    pub(crate) num_columns: usize,
+    pub(crate) num_rows: usize,
+    pub(crate) col_id: usize,
 
-    pub column_name: &'a str,
+    pub(crate) column_name: &'a str,
 }
 
 impl Deref for ParseContext<'_> {
@@ -34,7 +34,7 @@ impl Deref for ParseContext<'_> {
 }
 
 impl<'a> ParseContext<'a> {
-    pub const fn fork(&self, input: &'a [u8]) -> ParseContext<'a> {
+    pub(crate) const fn fork(&self, input: &'a [u8]) -> ParseContext<'a> {
         ParseContext {
             initial: self.initial,
             input,
@@ -44,14 +44,8 @@ impl<'a> ParseContext<'a> {
             column_name: self.column_name,
         }
     }
-    pub const fn with_column_name(self, column_name: &'a str) -> ParseContext<'a> {
-        ParseContext {
-            column_name,
-            ..self
-        }
-    }
 
-    pub const fn with_num_rows(self, num_rows: usize) -> ParseContext<'a> {
+    pub(crate) const fn with_num_rows(self, num_rows: usize) -> ParseContext<'a> {
         ParseContext { num_rows, ..self }
     }
 }

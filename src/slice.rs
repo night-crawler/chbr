@@ -31,29 +31,26 @@ impl<'a, T: zc::Unaligned + zc::FromBytes + Copy> TryFrom<&'a [u8]> for ByteView
 
 impl<'a, T: zc::Unaligned + zc::FromBytes + Copy> ByteView<'a, T> {
     #[inline]
-    pub const fn len(&self) -> usize {
+    pub(crate) const fn len(&self) -> usize {
         self.bytes.len() / size_of::<T>()
     }
 
-    pub const fn is_empty(&self) -> bool {
+    #[expect(dead_code)]
+    pub(crate) const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     #[inline(always)]
-    pub fn get(&self, index: usize) -> Option<&T> {
+    pub(crate) fn get(&self, index: usize) -> Option<&T> {
         self.as_slice().get(index)
     }
 
-    pub const fn last(&self) -> Option<&T> {
+    pub(crate) const fn last(&self) -> Option<&T> {
         self.as_slice().last()
     }
 
-    pub const fn as_bytes(&self) -> &'a [u8] {
-        self.bytes
-    }
-
     #[inline(always)]
-    pub const fn as_slice(&self) -> &'a [T] {
+    pub(crate) const fn as_slice(&self) -> &'a [T] {
         let n_elements = self.len();
         unsafe { core::slice::from_raw_parts(self.bytes.as_ptr().cast::<T>(), n_elements) }
     }

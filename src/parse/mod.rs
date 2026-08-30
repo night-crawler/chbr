@@ -3,12 +3,12 @@ use std::hint::cold_path;
 use crate::{error::Error, slice::ByteView, types::Offsets, zc};
 
 pub mod block;
-pub mod column;
+pub(crate) mod column;
 mod consts;
-pub mod header;
-pub mod typ;
+pub(crate) mod header;
+pub(crate) mod typ;
 
-pub type IResult<I, O, E = Error> = Result<(I, O), E>;
+pub(crate) type IResult<I, O, E = Error> = Result<(I, O), E>;
 
 const DATA: u8 = 0x7F;
 const CONT: u8 = 0x80;

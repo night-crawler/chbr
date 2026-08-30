@@ -109,7 +109,7 @@ pub struct RowsIter<'a, R: TryRead<'a>> {
 }
 
 impl<'a, R: TryRead<'a>> RowsIter<'a, R> {
-    pub const fn new(reader: R, num_rows: usize) -> Self {
+    pub(crate) const fn new(reader: R, num_rows: usize) -> Self {
         Self {
             reader,
             range: 0..num_rows,

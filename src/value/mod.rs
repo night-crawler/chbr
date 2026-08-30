@@ -272,8 +272,8 @@ impl Value<'_> {
 }
 
 pub struct LowCardinalitySliceIterator<'a> {
-    pub indices: SliceUsizeIterator<'a>,
-    pub additional_keys: &'a mark::Mark<'a>,
+    pub(crate) indices: SliceUsizeIterator<'a>,
+    pub(crate) additional_keys: &'a mark::Mark<'a>,
 }
 
 impl<'a> TryFrom<Value<'a>> for LowCardinalitySliceIterator<'a> {
