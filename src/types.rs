@@ -19,35 +19,38 @@ pub trait OffsetIndexPair {
     fn last_or_default(&self) -> crate::Result<usize>;
 }
 
-impl OffsetIndexPair for Offsets<'_> {
+impl OffsetIndexPair for [zc::U64] {
     #[inline(always)]
     fn offset_indices(&self, index: usize) -> crate::Result<Option<(usize, usize)>> {
-        let slice = self.as_slice();
-        let Some(end) = slice.get(index) else {
+        let Some(end) = self.get(index) else {
             return Ok(None);
         };
         let end = cast_offset(end.get())?;
         let start = if index == 0 {
             0
         } else {
-            // SAFETY: the successful `get` above proves `index < slice.len()`.
-            cast_offset(unsafe { slice.get_unchecked(index - 1) }.get())?
+            // SAFETY: the successful `get` above proves `index < self.len()`.
+            cast_offset(unsafe { self.get_unchecked(index - 1) }.get())?
         };
         Ok(Some((start, end)))
     }
 
     fn last_or_default(&self) -> crate::Result<usize> {
-        if let Some(last) = self.last()
-            && let last = last.get()
-        {
-            let Ok(last) = usize::try_from(last) else {
-                cold_path();
-                return Err(crate::Error::Overflow(last.to_string()));
-            };
-            return Ok(last);
+        match self.last() {
+            Some(last) => cast_offset(last.get()),
+            None => Ok(0),
         }
+    }
+}
 
-        Ok(0)
+impl OffsetIndexPair for Offsets<'_> {
+    #[inline(always)]
+    fn offset_indices(&self, index: usize) -> crate::Result<Option<(usize, usize)>> {
+        self.as_slice().offset_indices(index)
+    }
+
+    fn last_or_default(&self) -> crate::Result<usize> {
+        self.as_slice().last_or_default()
     }
 }
 

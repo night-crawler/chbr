@@ -45,10 +45,6 @@ impl<'a, T: zc::Unaligned + zc::FromBytes + Copy> ByteView<'a, T> {
         self.as_slice().get(index)
     }
 
-    pub(crate) const fn last(&self) -> Option<&T> {
-        self.as_slice().last()
-    }
-
     #[inline(always)]
     pub(crate) const fn as_slice(&self) -> &'a [T] {
         let n_elements = self.len();

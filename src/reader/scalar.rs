@@ -9,18 +9,17 @@ use rust_decimal::Decimal;
 use super::{ReadSlice, Readable, TryRead};
 use crate::error::Error;
 use crate::mark::{
-    BoolView, DateTime as DateTimeMark, DateTime64 as DateTime64Mark, Decimal32 as Decimal32Mark,
+    DateTime as DateTimeMark, DateTime64 as DateTime64Mark, Decimal32 as Decimal32Mark,
     Decimal64 as Decimal64Mark, Decimal128 as Decimal128Mark, Enum8 as Enum8Mark,
     Enum16 as Enum16Mark, Mark,
 };
-use crate::slice::ByteView;
 use crate::{Bf16Data, Date16Data, Date32Data, Ipv4Data, Ipv6Data, UuidData, zc};
 
 macro_rules! col_view {
     ($($name:ident, $variant:ident, $elem:ty, $item:ty, |$v:ident| $conv:expr;)+) => {
         $(
             #[derive(Clone, Copy)]
-            pub struct $name<'a>(pub &'a ByteView<'a, $elem>);
+            pub struct $name<'a>(pub &'a [$elem]);
 
             impl<'a> TryFrom<&'a Mark<'a>> for $name<'a> {
                 type Error = Error;
@@ -28,7 +27,7 @@ macro_rules! col_view {
 
                 fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
                     match value {
-                        Mark::$variant(v) => Ok(Self(v)),
+                        Mark::$variant(v) => Ok(Self(v.as_slice())),
                         other => {
                             cold_path();
                             Err(Error::MismatchedType(other.as_str(), stringify!($variant)))
@@ -43,7 +42,7 @@ macro_rules! col_view {
 
                 #[inline(always)]
                 fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-                    let Some($v) = self.0.as_slice().get(idx) else {
+                    let Some($v) = self.0.get(idx) else {
                         cold_path();
                         return Err(Error::IndexOutOfBounds(idx, stringify!($variant)));
                     };
@@ -60,7 +59,7 @@ macro_rules! col_view {
                     &self,
                     range: Range<usize>,
                 ) -> crate::Result<&'a [Self::Elem]> {
-                    let Some(slice) = self.0.as_slice().get(range.clone()) else {
+                    let Some(slice) = self.0.get(range.clone()) else {
                         cold_path();
                         return Err(Error::RangeOutOfBounds(range, stringify!($variant)));
                     };
@@ -138,15 +137,16 @@ impl<'a> TryFrom<&'a Mark<'a>> for Usize<'a> {
     }
 }
 
+/// Raw mask bytes; `1` is `true`.
 #[derive(Clone, Copy)]
-pub struct Bool<'a>(pub &'a BoolView<'a>);
+pub struct Bool<'a>(pub &'a [u8]);
 
 impl<'a> TryFrom<&'a Mark<'a>> for Bool<'a> {
     type Error = Error;
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
-            Mark::Bool(v) => Ok(Self(v)),
+            Mark::Bool(v) => Ok(Self(v.data)),
             other => {
                 cold_path();
                 Err(Error::MismatchedType(other.as_str(), "Bool"))
@@ -158,22 +158,22 @@ impl<'a> TryFrom<&'a Mark<'a>> for Bool<'a> {
 impl<'a> TryRead<'a> for Bool<'a> {
     type Item = bool;
 
+    #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value) = self.0.get(idx) else {
+        let Some(&value) = self.0.get(idx) else {
             cold_path();
             return Err(Error::IndexOutOfBounds(idx, "Bool"));
         };
-        Ok(value)
+        Ok(value == 1)
     }
 }
 
 impl<'a> ReadSlice<'a> for Bool<'a> {
-    /// Raw mask bytes; `1` is `true`.
     type Elem = u8;
 
     #[inline(always)]
     fn try_read_slice(&self, range: Range<usize>) -> crate::Result<&'a [Self::Elem]> {
-        let Some(slice) = self.0.data.get(range.clone()) else {
+        let Some(slice) = self.0.get(range.clone()) else {
             cold_path();
             return Err(Error::RangeOutOfBounds(range, "Bool"));
         };

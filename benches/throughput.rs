@@ -9,59 +9,51 @@ use testresult::TestResult;
 
 use crate::common::BenchmarkCols;
 
-#[inline(always)]
-fn opt_len(s: Option<&str>) -> u128 {
-    s.map_or(0, str::len) as u128
-}
-
-fn sum_blocks(blocks: &[chbr::ParsedBlock<'_>]) -> TestResult<u128> {
-    let mut acc: u128 = 0;
-
+fn consume_blocks(blocks: &[chbr::ParsedBlock<'_>]) -> TestResult<()> {
     for row in BenchmarkCols::iter_blocks(blocks) {
         let row = row?;
 
-        acc = acc.wrapping_add(row.id.as_u128());
-        acc = acc.wrapping_add(row.lc_string_cd10.len() as u128);
-        acc = acc.wrapping_add_signed(i128::from(row.timestamp.timestamp()));
-        acc = acc.wrapping_add(u128::from(row.count.to_bits()));
-        acc = acc.wrapping_add(u128::from(row.some_number));
+        black_box(row.id);
+        black_box(row.lc_string_cd10);
+        black_box(row.timestamp);
+        black_box(row.count);
+        black_box(row.some_number);
 
-        acc = acc.wrapping_add(opt_len(row.lc_nullable_string_cd1000));
-        acc = acc.wrapping_add(opt_len(row.lc_nullable_string_cd5000));
-        acc = acc.wrapping_add(opt_len(row.lc_nullable_string_cd3000));
-        acc = acc.wrapping_add(opt_len(row.lc_nullable_string_cd4000));
-        acc = acc.wrapping_add(opt_len(row.lc_nullable_string_cd50000));
-        acc = acc.wrapping_add(opt_len(row.lc_nullable_string_cd100));
-        acc = acc.wrapping_add(opt_len(row.lc_nullable_string_cd500));
-        acc = acc.wrapping_add(opt_len(row.lc_nullable_string8));
-        acc = acc.wrapping_add(opt_len(row.lc_nullable_string_cd_00000));
+        black_box(row.lc_nullable_string_cd1000);
+        black_box(row.lc_nullable_string_cd5000);
+        black_box(row.lc_nullable_string_cd3000);
+        black_box(row.lc_nullable_string_cd4000);
+        black_box(row.lc_nullable_string_cd50000);
+        black_box(row.lc_nullable_string_cd100);
+        black_box(row.lc_nullable_string_cd500);
+        black_box(row.lc_nullable_string8);
+        black_box(row.lc_nullable_string_cd_00000);
 
-        acc = acc.wrapping_add(row.some_ip_address.map_or(0, std::net::Ipv6Addr::to_bits));
+        black_box(row.some_ip_address);
 
         for s in row.lc_tags {
-            acc = acc.wrapping_add(s?.len() as u128);
+            black_box(s?);
         }
         for s in row.nested_lc_string_cd10 {
-            acc = acc.wrapping_add(s?.len() as u128);
+            black_box(s?);
         }
         for &flag in row.nested_flag.try_as_slice()? {
-            acc = acc.wrapping_add(u128::from(flag));
+            black_box(flag);
         }
         for v in row.nested_some_id.try_as_slice()? {
-            acc = acc.wrapping_add(v.get());
+            black_box(v.get());
         }
         for v in row.nested_some_other_id.try_as_slice()? {
-            acc = acc.wrapping_add(u128::from(v.get()));
+            black_box(v.get());
         }
     }
 
-    Ok(acc)
+    Ok(())
 }
 
-/// End-to-end: parse the input and read every value
-fn sum_all(input: &[u8]) -> TestResult<u128> {
+fn consume_all(input: &[u8]) -> TestResult<()> {
     let blocks = parse_many(input)?;
-    sum_blocks(&blocks)
+    consume_blocks(&blocks)
 }
 
 fn bench_throughput(c: &mut Criterion) {
@@ -77,11 +69,11 @@ fn bench_throughput(c: &mut Criterion) {
 
     let blocks = parse_many(&native_data).expect("input parses");
     group.bench_function("iterate_parsed", |b| {
-        b.iter(|| black_box(sum_blocks(black_box(&blocks)).unwrap()))
+        b.iter(|| consume_blocks(black_box(&blocks)).unwrap())
     });
 
     group.bench_function("chbr_derive_sum", |b| {
-        b.iter(|| black_box(sum_all(black_box(&native_data)).unwrap()))
+        b.iter(|| consume_all(black_box(&native_data)).unwrap())
     });
     group.finish();
 }

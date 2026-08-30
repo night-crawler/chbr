@@ -6,18 +6,18 @@ use bstr::BStr;
 use super::{ReadSlice, Readable, TryRead};
 use crate::ByteExt as _;
 use crate::error::{Error, decode_utf8};
-use crate::mark::{FixedString as FixedStringMark, Mark, StringView};
+use crate::mark::{FixedString as FixedStringMark, Mark};
 
 /// Reads raw ClickHouse `String` values without assuming UTF-8.
 #[derive(Clone, Copy)]
-pub struct Bytes<'a>(pub &'a StringView<'a>);
+pub struct Bytes<'a>(pub &'a [&'a BStr]);
 
 impl<'a> TryFrom<&'a Mark<'a>> for Bytes<'a> {
     type Error = Error;
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
-            Mark::String(strings) => Ok(Self(strings)),
+            Mark::String(strings) => Ok(Self(&strings.data)),
             other => {
                 cold_path();
                 Err(Error::MismatchedType(other.as_str(), "String"))
@@ -29,8 +29,9 @@ impl<'a> TryFrom<&'a Mark<'a>> for Bytes<'a> {
 impl<'a> TryRead<'a> for Bytes<'a> {
     type Item = &'a BStr;
 
+    #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value) = self.0.get(idx) else {
+        let Some(&value) = self.0.get(idx) else {
             cold_path();
             return Err(Error::IndexOutOfBounds(idx, "String"));
         };
@@ -42,7 +43,7 @@ impl<'a> ReadSlice<'a> for Bytes<'a> {
     type Elem = &'a BStr;
 
     fn try_read_slice(&self, range: Range<usize>) -> crate::Result<&'a [Self::Elem]> {
-        let Some(slice) = self.0.data.get(range.clone()) else {
+        let Some(slice) = self.0.get(range.clone()) else {
             cold_path();
             return Err(Error::RangeOutOfBounds(range, "String"));
         };
@@ -54,14 +55,14 @@ impl<'a> ReadSlice<'a> for Bytes<'a> {
 ///
 /// [`TryFrom`] validates the complete column once.
 #[derive(Clone, Copy)]
-pub struct Str<'a>(&'a StringView<'a>);
+pub struct Str<'a>(&'a [&'a BStr]);
 
 impl<'a> TryFrom<&'a Mark<'a>> for Str<'a> {
     type Error = Error;
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         let reader = Bytes::try_from(value)?;
-        for value in &reader.0.data {
+        for value in reader.0 {
             decode_utf8(value)?;
         }
         Ok(Self(reader.0))
@@ -71,8 +72,9 @@ impl<'a> TryFrom<&'a Mark<'a>> for Str<'a> {
 impl<'a> TryRead<'a> for Str<'a> {
     type Item = &'a str;
 
+    #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value) = self.0.get(idx) else {
+        let Some(&value) = self.0.get(idx) else {
             cold_path();
             return Err(Error::IndexOutOfBounds(idx, "String"));
         };
@@ -84,7 +86,7 @@ impl<'a> TryRead<'a> for Str<'a> {
 /// Reads ClickHouse `String` values as `&str` without any UTF-8 validation.
 /// You are responsible for your own UB.
 #[derive(Clone, Copy)]
-pub struct TrustedStr<'a>(&'a StringView<'a>);
+pub struct TrustedStr<'a>(&'a [&'a BStr]);
 
 impl<'a> TryFrom<&'a Mark<'a>> for TrustedStr<'a> {
     type Error = Error;
@@ -100,7 +102,7 @@ impl<'a> TryRead<'a> for TrustedStr<'a> {
 
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value) = self.0.get(idx) else {
+        let Some(&value) = self.0.get(idx) else {
             cold_path();
             return Err(Error::IndexOutOfBounds(idx, "String"));
         };
