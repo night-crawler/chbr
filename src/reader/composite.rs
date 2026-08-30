@@ -2,7 +2,7 @@ use super::{Bytes, FromVariant, ReadSlice, Readable, Str, TrustedStr, TryRead};
 use crate::error::Error;
 use crate::mark;
 use crate::mark::{Mark, Variant as VariantMark};
-use crate::types::{OffsetIndexPair as _, Offsets};
+use crate::types::OffsetIndexPair as _;
 use std::hint::cold_path;
 use std::ops::Range;
 
@@ -182,7 +182,7 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for LcNullable<'a, Inner> {
 
 #[derive(Clone, Copy)]
 pub struct Array<'a, Inner: TryRead<'a>> {
-    pub(crate) offsets: &'a Offsets<'a>,
+    pub(crate) offsets: &'a [crate::zc::U64],
     pub(crate) values: Option<Inner>,
 }
 
@@ -207,7 +207,7 @@ where
                     values => Some(Inner::try_from(values)?),
                 };
                 Ok(Array {
-                    offsets: &arr.offsets,
+                    offsets: arr.offsets.as_slice(),
                     values,
                 })
             }
@@ -304,7 +304,7 @@ impl<'a, Inner: ReadSlice<'a>> ArrayIter<'a, Inner> {
 
 #[derive(Clone, Copy)]
 pub struct Map<'a, K: TryRead<'a>, V: TryRead<'a>> {
-    pub(crate) offsets: &'a Offsets<'a>,
+    pub(crate) offsets: &'a [crate::zc::U64],
     pub(crate) keys: K,
     pub(crate) values: V,
 }
@@ -320,7 +320,7 @@ where
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::Map(m) => Ok(Map {
-                offsets: &m.offsets,
+                offsets: m.offsets.as_slice(),
                 keys: K::try_from(m.keys.as_ref())?,
                 values: V::try_from(m.values.as_ref())?,
             }),
