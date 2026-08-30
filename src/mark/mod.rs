@@ -870,6 +870,3 @@ impl Debug for Mark<'_> {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

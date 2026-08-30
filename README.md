@@ -127,8 +127,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 The standalone examples crate keeps both access styles as executable tests:
 
-- [`examples/tests/basic.rs`](examples/tests/basic.rs) uses `Mark` accessors directly.
-- The other files in [`examples/tests`](examples/tests) exercise one schema apiece through
+- [`examples/tests/procedural`](examples/tests/procedural) drives blocks through `Mark`/`Value`
+  accessors directly, without any derive.
+- [`examples/tests/derive`](examples/tests/derive) exercises one schema apiece through
   `#[derive(FromBlock)]` (and `#[derive(FromVariant)]` for variant schemas).
 
 ```sh

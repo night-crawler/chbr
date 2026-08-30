@@ -23,7 +23,7 @@ pub mod reader;
 pub mod slice;
 pub mod types;
 pub mod value;
-mod zc;
+pub mod zc;
 
 pub use bstr::BStr;
 pub use chbr_derive::{FromBlock, FromVariant};
