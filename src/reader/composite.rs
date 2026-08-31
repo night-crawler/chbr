@@ -230,6 +230,12 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for Array<'a, Inner> {
             cold_path();
             return Err(Error::IndexOutOfBounds(idx, "Array"));
         };
+        if self.values.is_none() && s != e {
+            cold_path();
+            return Err(Error::CorruptedData(
+                "Array values are missing for a non-empty range".to_owned(),
+            ));
+        }
         Ok(ArrayIter {
             inner: self.values,
             range: s..e,
@@ -261,12 +267,10 @@ impl<'a, Inner: TryRead<'a>> Iterator for ArrayIter<'a, Inner> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.range.next()?;
-        let Some(inner) = self.inner else {
-            cold_path();
-            return Some(Err(Error::CorruptedData(
-                "Array values are missing for a non-empty range".to_owned(),
-            )));
-        };
+        // SAFETY:
+        // We construct it so that None can be only when the range is empty, so this line will never
+        // be executed, because it's guarded by the range.next() above.
+        let inner = unsafe { self.inner.as_ref().unwrap_unchecked() };
         Some(inner.try_read(i))
     }
 
@@ -291,13 +295,8 @@ impl<'a, Inner: ReadSlice<'a>> ArrayIter<'a, Inner> {
     pub fn try_as_slice(&self) -> crate::Result<&'a [Inner::Elem]> {
         match self.inner {
             Some(inner) => inner.try_read_slice(self.range.clone()),
-            None if self.range.is_empty() => Ok(&[]),
-            None => {
-                cold_path();
-                Err(Error::CorruptedData(
-                    "Array values are missing for a non-empty range".to_owned(),
-                ))
-            }
+            // The construction invariant guarantees an empty range here.
+            None => Ok(&[]),
         }
     }
 }
