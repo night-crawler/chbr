@@ -83,6 +83,96 @@ impl<'a> LowCardinality<'a> {
     }
 }
 
+/// Iterator over raw string keys of a `LowCardinality` column slice.
+/// Waiting for: <https://github.com/rust-lang/rust/issues/63063>
+pub struct StrIter<'data: 'keys, 'keys> {
+    pub(crate) indices: IndicesIter<'data>,
+    pub(crate) keys: &'keys [&'data BStr],
+}
+
+impl<'data> Iterator for StrIter<'data, '_> {
+    type Item = crate::Result<&'data BStr>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        let index = match self.indices.next()? {
+            Ok(index) => index,
+            Err(error) => {
+                cold_path();
+                return Some(Err(error));
+            }
+        };
+        let Some(value) = self.keys.get(index).copied() else {
+            cold_path();
+            return Some(Err(Error::IndexOutOfBounds(
+                index,
+                "LowCardinality dictionary",
+            )));
+        };
+        Some(Ok(value))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.indices.size_hint()
+    }
+}
+
+impl ExactSizeIterator for StrIter<'_, '_> {}
+
+pub(crate) struct ArrayLcStrIter<'data: 'keys, 'keys> {
+    pub(crate) inner: Option<StrIter<'data, 'keys>>,
+}
+
+impl<'data> Iterator for ArrayLcStrIter<'data, '_> {
+    type Item = crate::Result<&'data BStr>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.as_mut()?.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.inner {
+            Some(it) => it.size_hint(),
+            None => (0, Some(0)),
+        }
+    }
+}
+
+impl ExactSizeIterator for ArrayLcStrIter<'_, '_> {}
+
+#[derive(Clone, Copy, Debug)]
+pub enum Indices<'a> {
+    Empty,
+    U8(&'a [u8]),
+    U16(&'a [zc::U16]),
+    U32(&'a [zc::U32]),
+    U64(&'a [zc::U64]),
+}
+
+impl<'a> TryFrom<Mark<'a>> for Indices<'a> {
+    type Error = Error;
+
+    fn try_from(mark: Mark<'a>) -> Result<Self, Self::Error> {
+        match mark {
+            Mark::Empty => Ok(Self::Empty),
+            Mark::UInt8(indices) => Ok(Self::U8(indices.as_slice())),
+            Mark::UInt16(indices) => Ok(Self::U16(indices.as_slice())),
+            Mark::UInt32(indices) => Ok(Self::U32(indices.as_slice())),
+            Mark::UInt64(indices) => Ok(Self::U64(indices.as_slice())),
+            other => {
+                cold_path();
+                Err(Error::CorruptedData(format!(
+                    "unexpected LowCardinality indices type: {}",
+                    other.as_str()
+                )))
+            }
+        }
+    }
+}
+
 impl<'a> Indices<'a> {
     #[inline(always)]
     pub(crate) fn get(self, index: usize) -> crate::Result<Option<usize>> {
@@ -135,38 +225,38 @@ impl<'a> Indices<'a> {
     }
 
     #[inline]
-    pub(crate) fn iter(self, range: Range<usize>) -> crate::Result<IndexIter<'a>> {
+    pub(crate) fn iter(self, range: Range<usize>) -> crate::Result<IndicesIter<'a>> {
         match self {
             Self::Empty => {
                 if range.start != 0 || range.end != 0 {
                     return Err(Error::RangeOutOfBounds(range, "Empty"));
                 }
-                Ok(IndexIter::U8([].iter()))
+                Ok(IndicesIter::U8([].iter()))
             }
-            Self::U8(indices) => Ok(IndexIter::U8(
+            Self::U8(indices) => Ok(IndicesIter::U8(
                 checked_slice(indices, range, "UInt8")?.iter(),
             )),
-            Self::U16(indices) => Ok(IndexIter::U16(
+            Self::U16(indices) => Ok(IndicesIter::U16(
                 checked_slice(indices, range, "UInt16")?.iter(),
             )),
-            Self::U32(indices) => Ok(IndexIter::U32(
+            Self::U32(indices) => Ok(IndicesIter::U32(
                 checked_slice(indices, range, "UInt32")?.iter(),
             )),
-            Self::U64(indices) => Ok(IndexIter::U64(
+            Self::U64(indices) => Ok(IndicesIter::U64(
                 checked_slice(indices, range, "UInt64")?.iter(),
             )),
         }
     }
 }
 
-pub(crate) enum IndexIter<'a> {
+pub(crate) enum IndicesIter<'a> {
     U8(std::slice::Iter<'a, u8>),
     U16(std::slice::Iter<'a, zc::U16>),
     U32(std::slice::Iter<'a, zc::U32>),
     U64(std::slice::Iter<'a, zc::U64>),
 }
 
-impl Iterator for IndexIter<'_> {
+impl Iterator for IndicesIter<'_> {
     type Item = crate::Result<usize>;
 
     #[inline(always)]
@@ -197,94 +287,4 @@ impl Iterator for IndexIter<'_> {
     }
 }
 
-impl ExactSizeIterator for IndexIter<'_> {}
-
-/// Iterator over raw string keys of a `LowCardinality` column slice.
-/// Waiting for: <https://github.com/rust-lang/rust/issues/63063>
-pub struct StrIter<'data: 'keys, 'keys> {
-    pub(crate) indices: IndexIter<'data>,
-    pub(crate) keys: &'keys [&'data BStr],
-}
-
-impl<'data> Iterator for StrIter<'data, '_> {
-    type Item = crate::Result<&'data BStr>;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        let index = match self.indices.next()? {
-            Ok(index) => index,
-            Err(error) => {
-                cold_path();
-                return Some(Err(error));
-            }
-        };
-        let Some(value) = self.keys.get(index).copied() else {
-            cold_path();
-            return Some(Err(Error::IndexOutOfBounds(
-                index,
-                "LowCardinality dictionary",
-            )));
-        };
-        Some(Ok(value))
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.indices.size_hint()
-    }
-}
-
-impl ExactSizeIterator for StrIter<'_, '_> {}
-
-#[derive(Clone, Copy, Debug)]
-pub enum Indices<'a> {
-    Empty,
-    U8(&'a [u8]),
-    U16(&'a [zc::U16]),
-    U32(&'a [zc::U32]),
-    U64(&'a [zc::U64]),
-}
-
-impl<'a> TryFrom<Mark<'a>> for Indices<'a> {
-    type Error = Error;
-
-    fn try_from(mark: Mark<'a>) -> Result<Self, Self::Error> {
-        match mark {
-            Mark::Empty => Ok(Self::Empty),
-            Mark::UInt8(indices) => Ok(Self::U8(indices.as_slice())),
-            Mark::UInt16(indices) => Ok(Self::U16(indices.as_slice())),
-            Mark::UInt32(indices) => Ok(Self::U32(indices.as_slice())),
-            Mark::UInt64(indices) => Ok(Self::U64(indices.as_slice())),
-            other => {
-                cold_path();
-                Err(Error::CorruptedData(format!(
-                    "unexpected LowCardinality indices type: {}",
-                    other.as_str()
-                )))
-            }
-        }
-    }
-}
-
-pub(crate) struct ArrayLcStrIter<'data: 'keys, 'keys> {
-    pub(crate) inner: Option<StrIter<'data, 'keys>>,
-}
-
-impl<'data> Iterator for ArrayLcStrIter<'data, '_> {
-    type Item = crate::Result<&'data BStr>;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.as_mut()?.next()
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        match &self.inner {
-            Some(it) => it.size_hint(),
-            None => (0, Some(0)),
-        }
-    }
-}
-
-impl ExactSizeIterator for ArrayLcStrIter<'_, '_> {}
+impl ExactSizeIterator for IndicesIter<'_> {}
