@@ -30,11 +30,13 @@ does not expose the RowBinary reader, I had to hack it to have some sort of appl
 - `chbr_derive_direct` read with try_read.
 
 ```bash
-cargo bench --bench refs
-serde                   time:   [26.363 ms 26.447 ms 26.536 ms]
-chbr                    time:   [13.660 ms 13.760 ms 13.868 ms]
-chbr_derive             time:   [10.669 ms 10.767 ms 10.877 ms]
-chbr_derive_direct      time:   [9.6742 ms 9.7298 ms 9.7872 ms]
+# LTO, mimalloc, a mixture of LC strings, arrays, and dates, 100k rows
+# AMD Ryzen 9 7940HS
+cargo bench --bench refs --features mimalloc
+serde                   time:   [18.406 ms 18.484 ms 18.562 ms]
+chbr                    time:   [7.6797 ms 7.7583 ms 7.8431 ms]
+chbr_derive             time:   [8.1552 ms 8.2321 ms 8.3130 ms]
+chbr_derive_direct      time:   [7.1309 ms 7.1904 ms 7.2531 ms]
 ```
 
 ## Quick start
@@ -86,7 +88,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let it = BlocksIterator::new_ordered(&mut blocks, &["id", "tags", "attrs", "payload"])?;
 
     for row in it {
-        // You can be the one implementing a proc macro to avoid doing this
+        // Or use proc macro
         let [id, tags, attrs, payload] = row.cols() else {
             return Err("unexpected column count".into());
         };
@@ -119,6 +121,95 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         println!("id={id} tags={tags:?} attrs={attrs_vec:?} payload={payload}");
+    }
+
+    Ok(())
+}
+```
+
+Or, instead of matching on `Value` and destructuring `row.cols()` by hand, derive a reader.
+
+```rust
+use chbr::parse::block::parse_many;
+use chbr::reader::{Array, ArrayIter, I64, Map, Str, U32, Variant};
+use chbr::{FromBlock, FromVariant};
+
+// Same order as in Variant(Array(Int64), Int64, String)
+#[derive(FromVariant)]
+enum Payload<'a> {
+    Array(ArrayIter<'a, I64<'a>>),
+    Int(i64),
+    Str(&'a str),
+}
+
+#[derive(FromBlock)]
+struct Row<'a> {
+    id: U32<'a>,
+    tags: Array<'a, Str<'a>>,
+    #[col(name = "attrs")]
+    attributes: Map<'a, Str<'a>, Str<'a>>,
+    payload: Variant<'a, Payload<'a>>,
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let data = std::fs::read("testdata/example.native")?;
+    let blocks = parse_many(&data)?;
+
+    // Column lookup by name once per block
+    // Row::rows(&block) does the same for a single block
+    // This example uses generated RowItem (for the `struct Row<'a>` above)
+    for row in Row::iter_blocks(&blocks) {
+        let row = row?;
+
+        // Arrays, maps, nested / !scalar cols are lazy
+        let tags: Vec<&str> = row.tags.try_collect_vec()?;
+        let attrs: Vec<(&str, &str)> = row.attributes.collect::<chbr::Result<_>>()?;
+
+        let payload = match row.payload {
+            Payload::Str(s) => format!("string: {s}"),
+            Payload::Int(n) => format!("int: {n}"),
+            Payload::Array(xs) => format!("array: {:?}", xs.try_collect_vec()?),
+        };
+
+        println!("id={} tags={tags:?} attrs={attrs:?} payload={payload}", row.id);
+    }
+
+    Ok(())
+}
+```
+
+Read data somewhat more manually:
+
+```rust
+use chbr::parse::block::parse_many;
+use chbr::reader::TryRead as _;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let data = std::fs::read("testdata/example.native")?;
+    let blocks = parse_many(&data)?;
+
+    for block in &blocks {
+        let cols = Row::from_block(block)?;
+
+        // Backwards, because we can
+        for i in (0..block.num_rows).rev() {
+            let id = cols.id.try_read(i)?;
+
+            // Not interested in the payload for this one, so it's never touched
+            if id == 2 {
+                continue;
+            }
+
+            let payload = match cols.payload.try_read(i)? {
+                Payload::Str(s) => format!("string: {s}"),
+                Payload::Int(n) => format!("int: {n}"),
+                Payload::Array(xs) => format!("array: {:?}", xs.try_collect_vec()?),
+            };
+
+            // Same row again because why not
+            let tag_count = cols.tags.try_read(i)?.count();
+            println!("id={id} tag_count={tag_count} payload={payload}");
+        }
     }
 
     Ok(())
