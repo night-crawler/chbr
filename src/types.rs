@@ -379,11 +379,11 @@ impl<'a> Type<'a> {
             Type::Ipv6 => Mark::Ipv6(ByteView::try_from(data)?),
 
             Type::Enum8(variants) => Mark::Enum8(Enum8 {
-                variants,
+                variants: variants.into_boxed_slice(),
                 data: ByteView::try_from(data)?,
             }),
             Type::Enum16(variants) => Mark::Enum16(Enum16 {
-                variants,
+                variants: variants.into_boxed_slice(),
                 data: ByteView::try_from(data)?,
             }),
 
@@ -408,7 +408,6 @@ pub struct JsonColumnHeader<'a> {
     pub(crate) _variant_version: u64,
     pub(crate) is_typed: bool,
     pub(crate) type_headers: Vec<TypeHeader<'a>>,
-    pub(crate) mark: Mark<'a>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

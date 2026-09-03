@@ -568,9 +568,9 @@ fn variant_null_rows_and_arity() -> TestResult {
         .collect::<Vec<u8>>();
     // Rows: 1, NULL, 2.
     let mark = Mark::Variant(VariantMark {
-        offsets: vec![0, 0, 1],
+        offsets: vec![0, 0, 1].into(),
         discriminators: &[0, VariantMark::NULL_DISCRIMINATOR, 0],
-        types: vec![Mark::Int64(ByteView::try_from(data.as_slice())?)],
+        types: vec![Mark::Int64(ByteView::try_from(data.as_slice())?)].into(),
     });
 
     let strict: Variant<JustNum> = Variant::try_from(&mark)?;
@@ -678,7 +678,7 @@ fn string_readers_separate_bytes_checked_and_trusted_utf8() -> TestResult {
     let valid = bstr::BStr::new(b"valid");
     let invalid = bstr::BStr::new(b"\xff");
     let mark = mark::Mark::String(mark::StringView {
-        data: vec![valid, invalid],
+        data: vec![valid, invalid].into(),
     });
 
     assert_eq!(mark.get_str(1)?.expect("valid row"), invalid);
@@ -687,7 +687,7 @@ fn string_readers_separate_bytes_checked_and_trusted_utf8() -> TestResult {
     let nullable = mark::Mark::Nullable(mark::Nullable {
         mask: &nullable_mask,
         data: Box::new(mark::Mark::String(mark::StringView {
-            data: vec![invalid],
+            data: vec![invalid].into(),
         })),
     });
     assert_eq!(nullable.get_opt_str(0)?.expect("valid row"), Some(invalid));
@@ -698,7 +698,7 @@ fn string_readers_separate_bytes_checked_and_trusted_utf8() -> TestResult {
         indices: mark::lc::Indices::U8(&lc_indices),
         global_dictionary: None,
         additional_keys: Some(Box::new(mark::Mark::String(mark::StringView {
-            data: vec![invalid],
+            data: vec![invalid].into(),
         }))),
     });
     assert_eq!(low_cardinality.get_str(0)?.expect("valid row"), invalid);
@@ -720,7 +720,9 @@ fn string_readers_separate_bytes_checked_and_trusted_utf8() -> TestResult {
 
     assert!(matches!(Str::try_from(&mark), Err(Error::Utf8Decode(_, _))));
 
-    let valid_mark = mark::Mark::String(mark::StringView { data: vec![valid] });
+    let valid_mark = mark::Mark::String(mark::StringView {
+        data: vec![valid].into(),
+    });
     let checked = Str::try_from(&valid_mark)?;
     assert_eq!(checked.try_read(0)?, "valid");
 

@@ -54,7 +54,7 @@ impl<'a> FixedString<'a> {
 
 #[derive(Debug)]
 pub struct StringView<'a> {
-    pub data: Vec<&'a BStr>,
+    pub data: Box<[&'a BStr]>,
 }
 
 impl<'a> Deref for StringView<'a> {

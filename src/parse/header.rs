@@ -172,7 +172,6 @@ pub fn json<'a>(
             _variant_version: 0,
             is_typed: true,
             type_headers: vec![],
-            mark: Mark::Empty,
         });
     }
     for path in dynamic_paths.data {
@@ -243,7 +242,6 @@ fn json_column<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], JsonColumnHeader
             _variant_version: variant_version,
             is_typed: false,
             type_headers: vec![],
-            mark: Mark::Empty,
         },
     ))
 }

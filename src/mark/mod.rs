@@ -205,9 +205,7 @@ impl<'a> Mark<'a> {
             Mark::Date32(bv) => Ok(Value::Date32Slice(self.checked_slice(bv.as_slice(), idx)?)),
             Mark::Ipv4(bv) => Ok(Value::Ipv4Slice(self.checked_slice(bv.as_slice(), idx)?)),
             Mark::Ipv6(bv) => Ok(Value::Ipv6Slice(self.checked_slice(bv.as_slice(), idx)?)),
-            Mark::String(sv) => Ok(Value::StringSlice(
-                self.checked_slice(sv.data.as_slice(), idx)?,
-            )),
+            Mark::String(sv) => Ok(Value::StringSlice(self.checked_slice(&sv.data, idx)?)),
 
             Mark::Decimal32(d) => Ok(Value::Decimal32Slice {
                 precision: d.precision,
@@ -580,9 +578,9 @@ pub struct Map<'a> {
 
 #[derive(Debug)]
 pub struct Variant<'a> {
-    pub(crate) offsets: Vec<u32>,
+    pub(crate) offsets: Box<[u32]>,
     pub(crate) discriminators: &'a [u8],
-    pub(crate) types: Vec<Mark<'a>>,
+    pub(crate) types: Box<[Mark<'a>]>,
 }
 
 impl Variant<'_> {
@@ -605,7 +603,7 @@ impl Variant<'_> {
 
 #[derive(Debug)]
 pub struct Nested<'a> {
-    pub(crate) col_names: Vec<&'a str>,
+    pub(crate) col_names: Box<[&'a str]>,
     pub(crate) array_of_tuples: Box<Mark<'a>>,
 }
 
@@ -621,7 +619,7 @@ impl Nested<'_> {
 
 #[derive(Debug)]
 pub struct NamedTuple<'a> {
-    pub col_names: Vec<&'a str>,
+    pub col_names: Box<[&'a str]>,
     pub tuple: Box<Mark<'a>>,
 }
 
@@ -700,7 +698,7 @@ impl_get_many!(
 
 #[derive(Debug)]
 pub struct Enum8<'a> {
-    pub(crate) variants: Vec<(&'a str, i8)>,
+    pub(crate) variants: Box<[(&'a str, i8)]>,
     pub(crate) data: ByteView<'a, i8>,
 }
 
@@ -717,7 +715,7 @@ impl Enum8<'_> {
 
 #[derive(Debug)]
 pub struct Enum16<'a> {
-    pub(crate) variants: Vec<(&'a str, i16)>,
+    pub(crate) variants: Box<[(&'a str, i16)]>,
     pub(crate) data: ByteView<'a, zc::I16>,
 }
 
@@ -733,9 +731,9 @@ impl Enum16<'_> {
 
 #[derive(Debug)]
 pub struct Dynamic<'a> {
-    pub(crate) offsets: Vec<u32>,
+    pub(crate) offsets: Box<[u32]>,
     pub(crate) discriminators: &'a [u8],
-    pub(crate) columns: Vec<Mark<'a>>,
+    pub(crate) columns: Box<[Mark<'a>]>,
 }
 
 impl Dynamic<'_> {
@@ -771,7 +769,7 @@ impl Nullable<'_> {
 
 #[derive(Debug)]
 pub struct Tuple<'a> {
-    pub values: Vec<Mark<'a>>,
+    pub values: Box<[Mark<'a>]>,
 }
 
 #[derive(Debug)]
@@ -808,5 +806,60 @@ impl Debug for Mark<'_> {
                 Variant, Nested, NamedTuple, Dynamic, Json,
             ]
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use testresult::TestResult;
+
+    #[test]
+    fn mark_accessors_return_errors() -> TestResult {
+        let bytes = [1_u8, 2];
+        let mark = Mark::UInt8(ByteView::try_from(bytes.as_slice())?);
+        let Value::UInt8Slice(slice) = mark.slice(0..bytes.len())? else {
+            unreachable!("UInt8 mark returned a non-UInt8 slice");
+        };
+        assert_eq!(slice, bytes.as_slice());
+
+        assert!(matches!(
+            Mark::Empty.slice(0..1),
+            Err(Error::RangeOutOfBounds(range, "Empty")) if range == (0..1)
+        ));
+
+        assert!(matches!(
+            mark.slice(1..3),
+            Err(Error::RangeOutOfBounds(range, "UInt8")) if range == (1..3)
+        ));
+
+        assert!(matches!(
+            lc::Indices::try_from(Mark::String(StringView { data: Box::new([]) })),
+            Err(Error::CorruptedData(_))
+        ));
+
+        let indices = [0_u8];
+        let invalid_dictionary = Mark::LowCardinality(lc::LowCardinality {
+            is_nullable: false,
+            indices: lc::Indices::U8(&indices),
+            global_dictionary: None,
+            additional_keys: Some(Box::new(Mark::String(StringView { data: Box::new([]) }))),
+        });
+        let mut values = invalid_dictionary.slice_lc_strs(0..1)?;
+        assert!(matches!(
+            values.next(),
+            Some(Err(Error::IndexOutOfBounds(0, "LowCardinality dictionary")))
+        ));
+
+        let tuple = Mark::Tuple(Tuple {
+            values: Box::new([]),
+        });
+        let oversized_start = u32::MAX as usize + 1;
+        assert!(matches!(
+            tuple.slice(oversized_start..oversized_start),
+            Err(Error::ValueOutOfRange("usize", "u32", _))
+        ));
+
+        Ok(())
     }
 }
