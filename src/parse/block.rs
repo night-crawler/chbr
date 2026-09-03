@@ -55,8 +55,8 @@ pub fn parse_single(input: &[u8]) -> IResult<&[u8], ParsedBlock<'_>> {
         return Ok((
             input,
             ParsedBlock {
-                markers: Vec::new(),
-                col_names: Vec::new(),
+                markers: Box::new([]),
+                col_names: Box::new([]),
                 num_rows: 0,
             },
         ));
@@ -128,8 +128,8 @@ pub fn parse_single(input: &[u8]) -> IResult<&[u8], ParsedBlock<'_>> {
     Ok((
         input,
         ParsedBlock {
-            markers,
-            col_names,
+            markers: markers.into_boxed_slice(),
+            col_names: col_names.into_boxed_slice(),
             num_rows,
         },
     ))
@@ -254,7 +254,7 @@ mod tests {
                 .unwrap_or_else(|e| panic!("zero-row block of {typ} must parse: {e:?}"));
             assert!(rest.is_empty(), "{typ}: trailing bytes");
             assert_eq!(block.num_rows, 0);
-            assert_eq!(block.col_names, ["x"]);
+            assert_eq!(*block.col_names, ["x"]);
         }
         Ok(())
     }

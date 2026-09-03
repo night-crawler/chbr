@@ -2,15 +2,16 @@
 use std::borrow::Cow;
 use std::{hint::cold_path, ops::Range};
 
-use crate::{Error, TinyRange, types::JsonColumnHeader, value::Value};
+use crate::{Error, TinyRange, mark::Mark, value::Value};
 
 #[derive(Debug)]
 pub struct Json<'a> {
-    pub(crate) paths: Vec<&'a str>,
-    pub(crate) headers: Vec<JsonColumnHeader<'a>>,
+    pub(crate) paths: Box<[&'a str]>,
+    /// One column per path, same order as `paths`.
+    pub(crate) columns: Box<[Mark<'a>]>,
     rows: usize,
     #[cfg(feature = "serde1")]
-    nodes: Vec<JsonPathNode<'a>>,
+    nodes: Box<[JsonPathNode<'a>]>,
 }
 
 #[cfg(feature = "serde1")]
@@ -25,46 +26,38 @@ struct JsonPathNode<'a> {
 impl<'a> Json<'a> {
     pub(crate) fn new(
         paths: Vec<&'a str>,
-        headers: Vec<JsonColumnHeader<'a>>,
+        columns: Vec<Mark<'a>>,
         rows: usize,
     ) -> crate::Result<Self> {
-        if paths.len() != headers.len() {
+        if paths.len() != columns.len() {
             return Err(Error::CorruptedData(format!(
-                "JSON has {} paths but {} column headers",
+                "JSON has {} paths but {} columns",
                 paths.len(),
-                headers.len()
+                columns.len()
             )));
         }
 
-        let json = Self {
-            paths,
-            headers,
+        #[cfg(feature = "serde1")]
+        let nodes = {
+            let mut tree = PathTree::new();
+            for (path_index, path) in paths.iter().enumerate() {
+                tree.insert_path(path_index, path)?;
+            }
+            tree.nodes.into_boxed_slice()
+        };
+
+        Ok(Self {
+            paths: paths.into_boxed_slice(),
+            columns: columns.into_boxed_slice(),
             rows,
             #[cfg(feature = "serde1")]
-            nodes: vec![JsonPathNode {
-                key: Cow::Borrowed(""),
-                leaf: None,
-                first_child: None,
-                next_sibling: None,
-            }],
-        };
-        #[cfg(feature = "serde1")]
-        {
-            let mut json = json;
-            for path_index in 0..json.paths.len() {
-                json.insert_path(path_index)?;
-            }
-            Ok(json)
-        }
-        #[cfg(not(feature = "serde1"))]
-        {
-            Ok(json)
-        }
+            nodes,
+        })
     }
 
     #[cfg(feature = "serde1")]
     pub(crate) const fn root(&self) -> usize {
-        0
+        PathTree::ROOT
     }
 
     #[cfg(feature = "serde1")]
@@ -118,18 +111,37 @@ impl<'a> Json<'a> {
         path_index: usize,
         row: usize,
     ) -> crate::Result<Option<Value<'a>>> {
-        let Some(header) = self.headers.get(path_index) else {
+        let Some(column) = self.columns.get(path_index) else {
             return Err(Error::CorruptedData(format!(
-                "JSON path index {path_index} has no column header"
+                "JSON path index {path_index} has no column"
             )));
         };
-        header.mark.get(row)
+        column.get(row)
+    }
+}
+
+#[cfg(feature = "serde1")]
+struct PathTree<'a> {
+    nodes: Vec<JsonPathNode<'a>>,
+}
+
+#[cfg(feature = "serde1")]
+impl<'a> PathTree<'a> {
+    const ROOT: usize = 0;
+
+    fn new() -> Self {
+        Self {
+            nodes: vec![JsonPathNode {
+                key: Cow::Borrowed(""),
+                leaf: None,
+                first_child: None,
+                next_sibling: None,
+            }],
+        }
     }
 
-    #[cfg(feature = "serde1")]
-    fn insert_path(&mut self, path_index: usize) -> crate::Result<()> {
-        let path = self.paths[path_index];
-        let mut parent = self.root();
+    fn insert_path(&mut self, path_index: usize, path: &'a str) -> crate::Result<()> {
+        let mut parent = Self::ROOT;
         for raw_key in path.split('.') {
             let key = decode_key(raw_key);
             parent = match self.find_child(parent, key.as_ref()) {
@@ -146,7 +158,6 @@ impl<'a> Json<'a> {
         Ok(())
     }
 
-    #[cfg(feature = "serde1")]
     fn find_child(&self, parent: usize, key: &str) -> Option<usize> {
         let mut child = self.nodes[parent].first_child;
         while let Some(index) = child {
@@ -159,7 +170,6 @@ impl<'a> Json<'a> {
         None
     }
 
-    #[cfg(feature = "serde1")]
     fn push_child(&mut self, parent: usize, key: Cow<'a, str>) -> usize {
         let index = self.nodes.len();
         self.nodes.push(JsonPathNode {

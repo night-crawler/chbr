@@ -27,7 +27,7 @@ fn reports_mark_accessor_errors() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     assert!(matches!(
-        mark::lc::Indices::try_from(Mark::String(StringView { data: Vec::new() })),
+        mark::lc::Indices::try_from(Mark::String(StringView { data: Box::new([]) })),
         Err(Error::CorruptedData(_))
     ));
 
@@ -36,7 +36,7 @@ fn reports_mark_accessor_errors() -> Result<(), Box<dyn std::error::Error>> {
         is_nullable: false,
         indices: mark::lc::Indices::U8(&indices),
         global_dictionary: None,
-        additional_keys: Some(Box::new(Mark::String(StringView { data: Vec::new() }))),
+        additional_keys: Some(Box::new(Mark::String(StringView { data: Box::new([]) }))),
     });
     let mut values = invalid_dictionary.slice_lc_strs(0..1)?;
     assert!(matches!(
@@ -44,7 +44,9 @@ fn reports_mark_accessor_errors() -> Result<(), Box<dyn std::error::Error>> {
         Some(Err(Error::IndexOutOfBounds(0, "LowCardinality dictionary")))
     ));
 
-    let tuple = Mark::Tuple(Tuple { values: Vec::new() });
+    let tuple = Mark::Tuple(Tuple {
+        values: Box::new([]),
+    });
     let oversized_start = u32::MAX as usize + 1;
     assert!(matches!(
         tuple.slice(oversized_start..oversized_start),

@@ -963,3 +963,57 @@ impl<'a> Iterator for DynamicSliceIterator<'a> {
 }
 
 impl ExactSizeIterator for DynamicSliceIterator<'_> {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mark::{Mark, NamedTuple};
+
+    #[test]
+    fn value_conversions_report_source_and_target_types() {
+        assert!(matches!(
+            bool::try_from(Value::UInt8(1)),
+            Err(Error::MismatchedType("UInt8", "bool"))
+        ));
+        assert!(matches!(
+            <&str>::try_from(Value::UInt8(1)),
+            Err(Error::MismatchedType("UInt8", "&str"))
+        ));
+        assert!(matches!(
+            TupleSliceIterator::try_from(Value::UInt8(1)),
+            Err(Error::MismatchedType("UInt8", "TupleSliceIterator"))
+        ));
+        assert!(matches!(
+            MapSliceIterator::<bool, bool>::try_from(Value::UInt8(1)),
+            Err(Error::MismatchedType("UInt8", "MapSliceIterator"))
+        ));
+
+        let named_tuple = NamedTuple {
+            col_names: Box::new([]),
+            tuple: Box::new(Mark::Empty),
+        };
+        assert!(matches!(
+            NamedTupleIterator::try_from(Value::NamedTuple {
+                mark: &named_tuple,
+                index: 0,
+            }),
+            Err(Error::MismatchedType("non-Tuple", "NamedTupleIterator"))
+        ));
+
+        let mut slice = NamedTupleSliceIterator::try_from(Value::NamedTupleSlice {
+            mark: &named_tuple,
+            range: TinyRange {
+                start: 0,
+                length: 1,
+            },
+        })
+        .expect("NamedTupleSlice must convert before reading its malformed tuple");
+        assert!(matches!(
+            slice.next(),
+            Some(Err(Error::MismatchedType(
+                "non-Tuple",
+                "NamedTupleSliceIterator"
+            )))
+        ));
+    }
+}

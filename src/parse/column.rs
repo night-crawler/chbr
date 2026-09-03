@@ -159,7 +159,7 @@ struct Discriminators<'a> {
     /// Raw discriminators slice
     raw: &'a [u8],
     /// Index of the type's sub-column
-    offsets: Vec<u32>,
+    offsets: Box<[u32]>,
     /// Number of rows in each type's sub-column
     row_counts: Vec<u32>,
 }
@@ -200,7 +200,7 @@ impl<'a> Discriminators<'a> {
             rest,
             Discriminators {
                 raw,
-                offsets,
+                offsets: offsets.into_boxed_slice(),
                 row_counts,
             },
         ))
@@ -209,15 +209,13 @@ impl<'a> Discriminators<'a> {
 
 fn json<'a>(
     ctx: &ParseContext<'a>,
-    JsonHeader {
-        paths,
-        mut col_headers,
-    }: JsonHeader<'a>,
+    JsonHeader { paths, col_headers }: JsonHeader<'a>,
 ) -> IResult<&'a [u8], Mark<'a>> {
     let mut input = ctx.input;
     let num_rows = ctx.num_rows;
 
-    for col_header in &mut col_headers {
+    let mut path_columns = Vec::with_capacity(col_headers.len());
+    for mut col_header in col_headers {
         if col_header.is_typed {
             let Some(typ) = col_header.types.pop() else {
                 cold_path();
@@ -231,7 +229,9 @@ fn json<'a>(
                     "typed JSON path is missing its type header".to_owned(),
                 ));
             };
-            (input, col_header.mark) = typ.decode(ctx.fork(input), type_header)?;
+            let marker;
+            (input, marker) = typ.decode(ctx.fork(input), type_header)?;
+            path_columns.push(marker);
             continue;
         }
 
@@ -248,9 +248,9 @@ fn json<'a>(
         let mut columns = Vec::with_capacity(col_header.types.len());
         for (((index, typ), type_header), read_rows) in col_header
             .types
-            .drain(..)
+            .into_iter()
             .enumerate()
-            .zip(col_header.type_headers.drain(..))
+            .zip(col_header.type_headers)
             .zip(row_counts)
         {
             if matches!(typ, Type::SharedVariant) {
@@ -265,14 +265,14 @@ fn json<'a>(
             debug!("Decoded JSON path type {index} with {read_rows} rows");
             columns.push(marker);
         }
-        col_header.mark = Mark::Dynamic(Dynamic {
+        path_columns.push(Mark::Dynamic(Dynamic {
             offsets,
             discriminators: raw_discriminators,
-            columns,
-        });
+            columns: columns.into_boxed_slice(),
+        }));
     }
 
-    let marker = Mark::Json(Json::new(paths, col_headers, num_rows)?);
+    let marker = Mark::Json(Json::new(paths, path_columns, num_rows)?);
 
     let (input, shared_data_offsets) =
         take_elements(input, num_rows, 8, "JSON shared data offsets")?;
@@ -322,7 +322,7 @@ fn dynamic<'a>(ctx: &ParseContext<'a>, header: DynamicHeader<'a>) -> IResult<&'a
     let marker = Mark::Dynamic(Dynamic {
         offsets,
         discriminators,
-        columns,
+        columns: columns.into_boxed_slice(),
     });
 
     Ok((input, marker))
@@ -459,7 +459,7 @@ fn variant<'a>(
     let marker = Mark::Variant(Variant {
         offsets,
         discriminators,
-        types: markers,
+        types: markers.into_boxed_slice(),
     });
 
     Ok((input, marker))
@@ -501,7 +501,9 @@ fn tuple<'a>(
         markers.push(marker);
     }
 
-    let marker = Tuple { values: markers };
+    let marker = Tuple {
+        values: markers.into_boxed_slice(),
+    };
     Ok((input, Mark::Tuple(marker)))
 }
 
@@ -553,7 +555,12 @@ pub(super) fn string<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> 
     // SAFETY: we set the len that is equal to the allocated capacity
     unsafe { strings.set_len(written) };
 
-    Ok((input, Mark::String(StringView { data: strings })))
+    Ok((
+        input,
+        Mark::String(StringView {
+            data: strings.into_boxed_slice(),
+        }),
+    ))
 }
 
 fn named_tuple<'a>(
@@ -573,7 +580,7 @@ fn named_tuple<'a>(
     let (input, tuple_mark) = tuple(inner_types, ctx, headers)?;
 
     let mark = Mark::NamedTuple(NamedTuple {
-        col_names,
+        col_names: col_names.into_boxed_slice(),
         tuple: Box::new(tuple_mark),
     });
 
@@ -601,7 +608,7 @@ fn nested<'a>(
     let (input, inner_mark) = array_of_tuples.decode(ctx, header)?;
 
     let mark = Mark::Nested(Nested {
-        col_names,
+        col_names: col_names.into_boxed_slice(),
         array_of_tuples: Box::new(inner_mark),
     });
 

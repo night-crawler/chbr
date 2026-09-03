@@ -2,16 +2,16 @@ extern crate self as chbr;
 
 use std::hint::cold_path;
 
+use chrono::NaiveDate;
+use chrono_tz::Tz;
+use log::debug;
+use std::collections::HashSet;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     iter::Peekable,
     net::{Ipv4Addr, Ipv6Addr},
     ops::Range,
 };
-
-use chrono::NaiveDate;
-use chrono_tz::Tz;
-use log::debug;
 use uuid::Uuid;
 
 pub(crate) mod conv;
@@ -222,8 +222,8 @@ impl Decimal128Data {
 }
 
 pub struct ParsedBlock<'a> {
-    pub markers: Vec<mark::Mark<'a>>,
-    pub col_names: Vec<&'a str>,
+    pub markers: Box<[mark::Mark<'a>]>,
+    pub col_names: Box<[&'a str]>,
     pub num_rows: usize,
 }
 
@@ -234,8 +234,8 @@ impl<'a> ParsedBlock<'a> {
 
     fn reorder(&mut self, order: &HashMap<&str, usize>) -> Result<()> {
         let num_cols = self.col_names.len();
-        let col_names = std::mem::replace(&mut self.col_names, Vec::with_capacity(num_cols));
-        let markers = std::mem::replace(&mut self.markers, Vec::with_capacity(num_cols));
+        let col_names = std::mem::take(&mut self.col_names).into_iter();
+        let markers = std::mem::take(&mut self.markers).into_iter();
 
         let mut triples = Vec::with_capacity(num_cols);
         let mut num_used = 0;
@@ -266,10 +266,14 @@ impl<'a> ParsedBlock<'a> {
 
         triples.sort_unstable_by_key(|(_, _, sort_key)| *sort_key);
 
+        let mut col_names = Vec::with_capacity(num_cols);
+        let mut markers = Vec::with_capacity(num_cols);
         for (col_name, marker, _) in triples {
-            self.col_names.push(col_name);
-            self.markers.push(marker);
+            col_names.push(col_name);
+            markers.push(marker);
         }
+        self.col_names = col_names.into_boxed_slice();
+        self.markers = markers.into_boxed_slice();
 
         Ok(())
     }
@@ -427,5 +431,50 @@ pub(crate) mod common {
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
         Ok(buf)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::slice::ByteView;
+
+    fn block<'a>(names: &[&'a str], cells: &'a [u8]) -> ParsedBlock<'a> {
+        let markers = cells
+            .iter()
+            .map(|cell| mark::Mark::UInt8(ByteView::try_from(std::slice::from_ref(cell)).unwrap()))
+            .collect();
+        ParsedBlock {
+            markers,
+            col_names: names.into(),
+            num_rows: 1,
+        }
+    }
+
+    fn cells(block: &ParsedBlock<'_>) -> Vec<u8> {
+        block
+            .markers
+            .iter()
+            .map(|mark| mark.get_u8(0).unwrap().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn reorder_moves_markers_with_names_and_keeps_unrequested_tail() -> Result<()> {
+        let mut blocks = [block(&["a", "b", "c", "d", "e"], &[0, 1, 2, 3, 4])];
+        reorder_block_cols(&mut blocks, &["e", "c", "a"])?;
+        assert_eq!(*blocks[0].col_names, ["e", "c", "a", "b", "d"]);
+        assert_eq!(cells(&blocks[0]), [4, 2, 0, 1, 3]);
+        Ok(())
+    }
+
+    #[test]
+    fn reorder_reports_missing_requested_columns() {
+        let mut blocks = [block(&["a", "b"], &[0, 1])];
+        let err = reorder_block_cols(&mut blocks, &["b", "zzz"]).unwrap_err();
+        assert!(
+            matches!(&err, Error::InvalidColumnOrder(msg) if msg.contains("zzz")),
+            "{err}"
+        );
     }
 }

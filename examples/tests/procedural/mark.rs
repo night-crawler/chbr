@@ -1,17 +1,14 @@
 use std::{collections::HashMap, str::FromStr as _};
 
-use chbr::mark::{self, Mark, StringView, Tuple};
-use chbr::slice::ByteView;
 use chbr::{
-    BStr, Bf16Data, Error, TinyRange,
+    BStr, Bf16Data,
     parse::block::parse_single,
     reader::{JsonIterator, JsonSliceIterator},
     value::{
         ArraySliceIterator, BoolSliceIterator, DynamicSliceIterator, Enum8SliceIterator,
         Enum16SliceIterator, FixedStringSliceIterator, LowCardinalitySliceIterator, MapIterator,
-        MapSliceIterator, NamedTupleIterator, NamedTupleSliceIterator, NestedIterator,
-        NestedSliceIterator, NullableSliceIterator, TupleSliceIterator, Value,
-        VariantSliceIterator,
+        MapSliceIterator, NestedIterator, NestedSliceIterator, NullableSliceIterator,
+        TupleSliceIterator, Value, VariantSliceIterator,
     },
     zc,
 };
@@ -1720,99 +1717,4 @@ fn dynamic_arr() -> TestResult {
     }
 
     Ok(())
-}
-
-#[test]
-fn mark_accessors_return_errors() -> TestResult {
-    let bytes = [1_u8, 2];
-    let mark = Mark::UInt8(ByteView::try_from(bytes.as_slice())?);
-    let Value::UInt8Slice(slice) = mark.slice(0..bytes.len())? else {
-        unreachable!("UInt8 mark returned a non-UInt8 slice");
-    };
-    assert_eq!(slice, bytes.as_slice());
-
-    assert!(matches!(
-        Mark::Empty.slice(0..1),
-        Err(Error::RangeOutOfBounds(range, "Empty")) if range == (0..1)
-    ));
-
-    assert!(matches!(
-        mark.slice(1..3),
-        Err(Error::RangeOutOfBounds(range, "UInt8")) if range == (1..3)
-    ));
-
-    assert!(matches!(
-        mark::lc::Indices::try_from(Mark::String(StringView { data: Vec::new() })),
-        Err(Error::CorruptedData(_))
-    ));
-
-    let indices = [0_u8];
-    let invalid_dictionary = Mark::LowCardinality(mark::lc::LowCardinality {
-        is_nullable: false,
-        indices: mark::lc::Indices::U8(&indices),
-        global_dictionary: None,
-        additional_keys: Some(Box::new(Mark::String(StringView { data: Vec::new() }))),
-    });
-    let mut values = invalid_dictionary.slice_lc_strs(0..1)?;
-    assert!(matches!(
-        values.next(),
-        Some(Err(Error::IndexOutOfBounds(0, "LowCardinality dictionary")))
-    ));
-
-    let tuple = Mark::Tuple(Tuple { values: Vec::new() });
-    let oversized_start = u32::MAX as usize + 1;
-    assert!(matches!(
-        tuple.slice(oversized_start..oversized_start),
-        Err(Error::ValueOutOfRange("usize", "u32", _))
-    ));
-
-    Ok(())
-}
-
-#[test]
-fn value_conversions_report_source_and_target_types() {
-    assert!(matches!(
-        bool::try_from(Value::UInt8(1)),
-        Err(Error::MismatchedType("UInt8", "bool"))
-    ));
-    assert!(matches!(
-        <&str>::try_from(Value::UInt8(1)),
-        Err(Error::MismatchedType("UInt8", "&str"))
-    ));
-    assert!(matches!(
-        TupleSliceIterator::try_from(Value::UInt8(1)),
-        Err(Error::MismatchedType("UInt8", "TupleSliceIterator"))
-    ));
-    assert!(matches!(
-        MapSliceIterator::<bool, bool>::try_from(Value::UInt8(1)),
-        Err(Error::MismatchedType("UInt8", "MapSliceIterator"))
-    ));
-
-    let named_tuple = mark::NamedTuple {
-        col_names: Vec::new(),
-        tuple: Box::new(Mark::Empty),
-    };
-    assert!(matches!(
-        NamedTupleIterator::try_from(Value::NamedTuple {
-            mark: &named_tuple,
-            index: 0,
-        }),
-        Err(Error::MismatchedType("non-Tuple", "NamedTupleIterator"))
-    ));
-
-    let mut slice = NamedTupleSliceIterator::try_from(Value::NamedTupleSlice {
-        mark: &named_tuple,
-        range: TinyRange {
-            start: 0,
-            length: 1,
-        },
-    })
-    .expect("NamedTupleSlice must convert before reading its malformed tuple");
-    assert!(matches!(
-        slice.next(),
-        Some(Err(Error::MismatchedType(
-            "non-Tuple",
-            "NamedTupleSliceIterator"
-        )))
-    ));
 }
