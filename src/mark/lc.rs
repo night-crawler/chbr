@@ -19,9 +19,9 @@ impl<'a> LowCardinality<'a> {
         range: Range<usize>,
     ) -> crate::Result<LowCardinalitySliceIterator<'_>> {
         let Some(additional_keys) = self.additional_keys.as_ref() else {
-            return Err(Error::MismatchedType(
-                "LowCardinalitySliceIterator",
-                "LowCardinalitySlice with no additional keys",
+            cold_path();
+            return Err(Error::CorruptedData(
+                "LowCardinality marker without additional keys".to_owned(),
             ));
         };
 
