@@ -75,9 +75,10 @@ pub struct TinyRange {
 
 impl From<TinyRange> for Range<usize> {
     fn from(value: TinyRange) -> Self {
+        let start = value.start as usize;
         Range {
-            start: value.start as usize,
-            end: (value.start + value.length) as usize,
+            start,
+            end: start + value.length as usize,
         }
     }
 }
@@ -458,6 +459,16 @@ mod tests {
             .iter()
             .map(|mark| mark.get_u8(0).unwrap().unwrap())
             .collect()
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn tiny_range_round_trips_when_end_exceeds_u32_max() -> Result<()> {
+        let range = (u32::MAX as usize - 1)..(u32::MAX as usize + 10);
+        let tiny = TinyRange::try_from(range.clone())?;
+        assert_eq!(tiny, TinyRange { start: u32::MAX - 1, length: 11 });
+        assert_eq!(Range::<usize>::from(tiny), range);
+        Ok(())
     }
 
     #[test]
