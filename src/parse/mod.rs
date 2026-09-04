@@ -145,5 +145,25 @@ fn parse_offsets(input: &[u8], num_rows: usize) -> IResult<&[u8], Offsets<'_>> {
     let (input, offsets) = take_elements(input, num_rows, size_of::<u64>(), "offset byte length")?;
     let offsets = ByteView::<zc::U64>::try_from(offsets)?;
 
+    if cfg!(debug_assertions) {
+        check_monotonic(offsets.as_slice())?;
+    }
+
     Ok((input, offsets))
+}
+
+fn check_monotonic(offsets: &[zc::U64]) -> Result<(), Error> {
+    let mut prev = 0u64;
+    for (i, offset) in offsets.iter().enumerate() {
+        let cur = offset.get();
+        if cur < prev {
+            cold_path();
+            return Err(Error::CorruptedData(format!(
+                "offsets not monotonic: offset[{i}] = {cur} < offset[{}] = {prev}",
+                i - 1
+            )));
+        }
+        prev = cur;
+    }
+    Ok(())
 }
