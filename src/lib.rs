@@ -210,6 +210,13 @@ impl Decimal64Data {
 
 impl Decimal128Data {
     pub(crate) fn with_precision(&self, precision: u8) -> Result<rust_decimal::Decimal> {
+        if u32::from(precision) > rust_decimal::Decimal::MAX_SCALE {
+            cold_path();
+            return Err(Error::NotImplemented(format!(
+                "Decimal128 with scale {precision} (rust_decimal supports at most {})",
+                rust_decimal::Decimal::MAX_SCALE
+            )));
+        }
         let value = self.0.get();
         match rust_decimal::Decimal::try_from_i128_with_scale(value, u32::from(precision)) {
             Ok(value) => Ok(value),
@@ -470,5 +477,28 @@ mod tests {
             matches!(&err, Error::InvalidColumnOrder(msg) if msg.contains("zzz")),
             "{err}"
         );
+    }
+
+    #[test]
+    fn decimal128_unsupported_scale_is_not_implemented() {
+        let data = Decimal128Data(zc::I128::new(1));
+        for scale in [29u8, 38] {
+            let err = data.with_precision(scale).unwrap_err();
+            assert!(
+                matches!(&err, Error::NotImplemented(msg) if msg.contains(&format!("scale {scale}"))),
+                "{err}"
+            );
+        }
+        assert_eq!(
+            data.with_precision(28).unwrap(),
+            rust_decimal::Decimal::try_from_i128_with_scale(1, 28).unwrap()
+        );
+    }
+
+    #[test]
+    fn decimal128_value_overflow_stays_overflow() {
+        let data = Decimal128Data(zc::I128::new(i128::MAX));
+        let err = data.with_precision(0).unwrap_err();
+        assert!(matches!(err, Error::Overflow(_)), "{err}");
     }
 }
