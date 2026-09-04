@@ -54,6 +54,43 @@ fn array_map_sample_typed() -> TestResult {
 }
 
 #[test]
+fn datetime_timezone_forms() -> TestResult {
+    let buf = load("./testdata/datetime_tz.native")?;
+    let (_, block) = parse_single(&buf)?;
+
+    let a = DateTime::try_from(&block.markers[0])?.try_read(0)?;
+    let b = DateTime::try_from(&block.markers[1])?.try_read(0)?;
+    let c = DateTime64::try_from(&block.markers[2])?.try_read(0)?;
+    let d = DateTime64::try_from(&block.markers[3])?.try_read(0)?;
+    let e = DateTime64::try_from(&block.markers[4])?.try_read(0)?;
+    let f = Nullable::<DateTime64>::try_from(&block.markers[5])?.try_read(0)?;
+    let g: Vec<_> = Array::<DateTime>::try_from(&block.markers[6])?
+        .try_read(0)?
+        .collect::<Result<_, _>>()?;
+    let h = Nullable::<DateTime>::try_from(&block.markers[7])?.try_read(0)?;
+
+    assert_eq!(a.timezone(), chrono_tz::UTC);
+    assert_eq!(a.timestamp(), 1_700_000_000);
+    assert_eq!(b.timezone(), chrono_tz::UTC);
+    assert_eq!(b.timestamp(), 1_700_000_000);
+    assert_eq!(c.timezone(), chrono_tz::UTC);
+    assert_eq!(c.timestamp_millis(), 1_700_000_000_123);
+    assert_eq!(d.timezone(), chrono_tz::Asia::Tokyo);
+    assert_eq!(d.timestamp_micros(), 1_700_000_000_123_456);
+    assert_eq!(d.to_rfc3339(), "2023-11-15T07:13:20.123456+09:00");
+    assert_eq!(e.timestamp_millis(), 1_700_000_000_500);
+    assert_eq!(f, None);
+    assert_eq!(g.len(), 1);
+    assert_eq!(g[0].timezone(), chrono_tz::UTC);
+    assert_eq!(g[0].timestamp(), 1_700_000_000);
+    let h = h.expect("h is non-null");
+    assert_eq!(h.timezone(), chrono_tz::Europe::Berlin);
+    assert_eq!(h.to_rfc3339(), "2023-11-14T23:13:20+01:00");
+
+    Ok(())
+}
+
+#[test]
 fn array_all_empty_rows_from_fixture() -> TestResult {
     let buf = load("./testdata/array_lc_string_empty.native")?;
     let (_, block) = parse_single(&buf)?;

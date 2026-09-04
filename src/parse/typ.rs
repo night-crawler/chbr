@@ -135,30 +135,48 @@ fn parse_inet_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     .parse(input)
 }
 
-fn parse_datetime64(input: &[u8]) -> IResult<&[u8], Type<'_>> {
-    let (input, (precision, tz)) = preceded(
-        tag("DateTime64"),
-        delimited(
-            ws(char('(')),
-            separated_pair(
-                map_res(digit1, parse_num::<u8>),
-                ws(char(',')),
-                delimited(ws(char('\'')), take_while1(|c| c != b'\''), ws(char('\''))),
-            ),
-            ws(char(')')),
-        ),
+/// `'Europe/Berlin'` -> [`Tz`]
+fn quoted_tz(input: &[u8]) -> IResult<&[u8], Tz> {
+    map_res(
+        delimited(ws(char('\'')), take_while1(|c| c != b'\''), ws(char('\''))),
+        |tz: &[u8]| {
+            // SAFETY: I hope caller validated the input as UTF-8 before parsing
+            Tz::from_str(unsafe { std::str::from_utf8_unchecked(tz) })
+                .map_err(|_| nom::error::Error::new(tz, ErrorKind::Fail))
+        },
     )
-    .parse(input)?;
+    .parse(input)
+}
 
-    let tz = unsafe { std::str::from_utf8_unchecked(tz) };
+/// `DateTime64(N)` or `DateTime64(N, 'tz')`
+fn parse_datetime64(input: &[u8]) -> IResult<&[u8], Type<'_>> {
+    map(
+        preceded(
+            tag("DateTime64"),
+            delimited(
+                ws(char('(')),
+                pair(
+                    map_res(digit1, parse_num::<u8>),
+                    opt(preceded(ws(char(',')), quoted_tz)),
+                ),
+                ws(char(')')),
+            ),
+        ),
+        |(precision, tz)| Type::DateTime64(precision, tz.unwrap_or(UTC)),
+    )
+    .parse(input)
+}
 
-    let Ok(tz) = Tz::from_str(tz) else {
-        return Err(nom::Err::Error(nom::error::Error::new(
-            input,
-            ErrorKind::Fail,
-        )));
-    };
-    Ok((input, Type::DateTime64(precision, tz)))
+/// `DateTime('tz')`
+fn parse_datetime_tz(input: &[u8]) -> IResult<&[u8], Type<'_>> {
+    map(
+        preceded(
+            tag("DateTime"),
+            delimited(ws(char('(')), quoted_tz, ws(char(')'))),
+        ),
+        Type::DateTime,
+    )
+    .parse(input)
 }
 
 fn parse_tuple(input: &[u8]) -> IResult<&[u8], Type<'_>> {
@@ -180,6 +198,7 @@ fn parse_date_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     alt((
         parse_datetime64,
         map(tag("DateTime64"), |_| Type::DateTime64(3, UTC)),
+        parse_datetime_tz,
         map(tag("DateTime"), |_| Type::DateTime(UTC)),
         map(tag("Date32"), |_| Type::Date32),
         map(tag("Date"), |_| Type::Date),
@@ -642,5 +661,34 @@ mod tests {
     fn json_without_arguments() {
         assert_eq!(Type::from_bytes(b"JSON").unwrap(), Type::Json(vec![]));
         assert_eq!(Type::from_bytes(b"JSON()").unwrap(), Type::Json(vec![]));
+    }
+
+    #[test]
+    fn datetime_forms() {
+        use chrono_tz::{Asia::Tokyo, Europe::Berlin};
+        assert_eq!(Type::from_bytes(b"DateTime").unwrap(), Type::DateTime(UTC));
+        assert_eq!(
+            Type::from_bytes(b"DateTime('Europe/Berlin')").unwrap(),
+            Type::DateTime(Berlin)
+        );
+        assert_eq!(
+            Type::from_bytes(b"DateTime64").unwrap(),
+            Type::DateTime64(3, UTC)
+        );
+        assert_eq!(
+            Type::from_bytes(b"DateTime64(6)").unwrap(),
+            Type::DateTime64(6, UTC)
+        );
+        assert_eq!(
+            Type::from_bytes(b"DateTime64(9, 'Asia/Tokyo')").unwrap(),
+            Type::DateTime64(9, Tokyo)
+        );
+        assert_eq!(
+            Type::from_bytes(b"Nullable(DateTime64(3))").unwrap(),
+            Type::Nullable(Box::new(Type::DateTime64(3, UTC)))
+        );
+        assert!(Type::from_bytes(b"DateTime('Mars/Olympus')").is_err());
+        assert!(Type::from_bytes(b"DateTime64(3, 'Mars/Olympus')").is_err());
+        assert!(Type::from_bytes(b"DateTime64('UTC')").is_err());
     }
 }

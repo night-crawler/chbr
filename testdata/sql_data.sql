@@ -538,6 +538,26 @@ insert into uuid_and_dates (id, date, date32, datetime, datetime64) values
 
 select * from uuid_and_dates order by id;
 
+-- datetime_tz.native: every DateTime type spelling the server emits.
+-- Note: `FORMAT Native` via clickhouse-client/HTTP (client revision 0) strips the
+-- zone from a top-level DateTime('tz') -> `DateTime`; nested ones survive.
+drop table if exists datetime_tz;
+create table datetime_tz (
+    a DateTime,
+    b DateTime('Europe/Berlin'),
+    c DateTime64(3),
+    d DateTime64(6, 'Asia/Tokyo'),
+    e DateTime64,
+    f Nullable(DateTime64(9)),
+    g Array(DateTime('UTC'))
+) engine = Memory;
+
+insert into datetime_tz values
+    (1700000000, 1700000000, 1700000000.123, 1700000000.123456, 1700000000.5, NULL, [1700000000]);
+
+select a, b, c, d, e, f, g, cast(b, 'Nullable(DateTime(''Europe/Berlin''))') as h
+from datetime_tz format Native;
+
 create table lol (
                      datetime64 DateTime64(2, 'UTC') default now()
 
