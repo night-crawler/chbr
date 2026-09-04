@@ -182,7 +182,7 @@ impl DateTime64Data {
         &self,
         tz: Tz,
         precision: u8,
-    ) -> Option<chrono::DateTime<Tz>> {
+    ) -> Result<chrono::DateTime<Tz>> {
         conv::datetime64_tz(self.0.get(), precision, tz)
     }
 }
