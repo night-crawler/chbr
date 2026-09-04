@@ -9,7 +9,6 @@ serde1 = ["dep:serde"]
 mimalloc = ["dep:mimalloc"]
 
 [dependencies]
-unsigned-varint = { version = "0.8", features = ["std"] }
 thiserror = "2"
 chrono = "0.4"
 chrono-tz = "0.10"

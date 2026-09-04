@@ -2,9 +2,6 @@ use std::{fmt::Debug, ops::Range};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("UInt decode error")]
-    VarUIntDecode(#[from] unsigned_varint::decode::Error),
-
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
