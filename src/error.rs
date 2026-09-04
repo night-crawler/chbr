@@ -2,9 +2,6 @@ use std::{fmt::Debug, ops::Range};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
-
     #[error("Parse error: {0}")]
     Parse(String),
 
@@ -22,9 +19,6 @@ pub enum Error {
 
     #[error("Not implemented: {0}")]
     NotImplemented(String),
-
-    #[error("Programming error: {0}")]
-    ProgrammingError(String),
 
     #[error("Utf8 decode error: {0}; bytes: {1:0x?}")]
     Utf8Decode(std::str::Utf8Error, Vec<u8>),
