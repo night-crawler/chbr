@@ -342,7 +342,10 @@ where
             .expect("bug: an empty array iterator has an empty range");
         let (start, end) = match mark.offsets.offset_indices(slice_idx) {
             Ok(Some(indices)) => indices,
-            Ok(None) => return None,
+            Ok(None) => {
+                cold_path();
+                return Some(Err(Error::IndexOutOfBounds(slice_idx, "ArraySlice")));
+            }
             Err(error) => return Some(Err(error)),
         };
         let value = match mark.values.slice(start..end) {
@@ -565,7 +568,10 @@ where
         let slice_idx = self.range.next()?;
         let (start, end) = match self.offsets.offset_indices(slice_idx) {
             Ok(Some(indices)) => indices,
-            Ok(None) => return None,
+            Ok(None) => {
+                cold_path();
+                return Some(Err(Error::IndexOutOfBounds(slice_idx, "MapSlice")));
+            }
             Err(error) => return Some(Err(error)),
         };
 
