@@ -254,6 +254,12 @@ fn json<'a>(
             .zip(row_counts)
         {
             if matches!(typ, Type::SharedVariant) {
+                if read_rows != 0 {
+                    cold_path();
+                    return Err(Error::NotImplemented(format!(
+                        "JSON path with {read_rows} values in SharedVariant"
+                    )));
+                }
                 columns.push(Mark::Empty);
                 continue;
             }
@@ -303,12 +309,18 @@ fn dynamic<'a>(ctx: &ParseContext<'a>, header: DynamicHeader<'a>) -> IResult<&'a
 
     let mut columns = Vec::with_capacity(types.len());
     for ((i, typ), header) in types.into_iter().enumerate().zip(header.headers) {
+        let read_rows = row_counts[i] as usize;
         if matches!(typ, Type::SharedVariant) {
+            if read_rows != 0 {
+                cold_path();
+                return Err(Error::NotImplemented(format!(
+                    "Dynamic with {read_rows} values in SharedVariant"
+                )));
+            }
             columns.push(Mark::Empty);
             continue;
         }
 
-        let read_rows = row_counts[i] as usize;
         debug!(
             "Decoding dynamic column {i}: {typ:?}, {header:?}; remainder: {}; read rows: \
              {read_rows}",

@@ -228,6 +228,22 @@ pub enum Type<'a> {
     Dynamic,
     Json(Vec<Field<'a>>),
 
+    /// From `src/Columns/ColumnDynamic.h`:
+    ///
+    /// > When new values are inserted into Dynamic column, the internal Variant type and
+    /// > column are extended if the inserted value has new type. When the limit on number of
+    /// > dynamic types is exceeded, all values with new types are inserted into special
+    /// > shared variant with type String that contains values and their types in binary
+    /// > format.
+    /// >
+    /// > When max_dynamic_types = 0, we will have only shared variant and insert all values
+    /// > into it.
+    ///
+    /// From `src/Columns/ColumnDynamic.cpp`:
+    ///
+    /// > Shared variant will contain String values but we cannot use usual String type
+    /// > because we can have regular variant with type String. To solve it, we use String
+    /// > type with custom name for shared variant.
     SharedVariant,
 }
 

@@ -192,6 +192,7 @@ mod tests {
         variant_arr => "./testdata/variant_arr.native",
         dynamic_arr => "./testdata/dynamic_arr.native",
         named_tuple => "./testdata/named_tuple.native",
+        dynamic_max_types => "./testdata/dynamic_max_types.native",
     }
 
     fn var_str(out: &mut Vec<u8>, s: &str) {
@@ -230,6 +231,28 @@ mod tests {
             Some(chbr::value::Value::Int64(42))
         ));
         assert!(dynamic.get(1)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn populated_shared_variant_rejected() -> TestResult {
+        for (file, expected) in [
+            (
+                "./testdata/dynamic_shared_variant.native",
+                "Dynamic with 3 values in SharedVariant",
+            ),
+            (
+                "./testdata/json_shared_variant.native",
+                "JSON path with 3 values in SharedVariant",
+            ),
+        ] {
+            let buf = load(file)?;
+            match parse_many(&buf) {
+                Err(crate::Error::NotImplemented(message)) => assert_eq!(message, expected),
+                Err(other) => panic!("{file}: expected NotImplemented, got {other:?}"),
+                Ok(_) => panic!("{file}: expected NotImplemented, parsed successfully"),
+            }
+        }
         Ok(())
     }
 

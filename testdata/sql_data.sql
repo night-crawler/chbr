@@ -558,9 +558,19 @@ insert into datetime_tz values
 select a, b, c, d, e, f, g, cast(b, 'Nullable(DateTime(''Europe/Berlin''))') as h
 from datetime_tz format Native;
 
-create table lol (
-                     datetime64 DateTime64(2, 'UTC') default now()
+-- max_types=0 forces every value into the SharedVariant String sub-column.
+select number as id, cast(number * 10, 'Dynamic(max_types=0)') as d, toString(number) as after
+from numbers(3) format Native;
 
+select number as id, cast(concat('{"a":', toString(number * 10), '}'), 'JSON(max_dynamic_types=0)') as j,
+       toString(number) as after
+from numbers(3) format Native;
+
+select number as id, cast(number * 10, 'Dynamic(max_types=2)') as d, toString(number) as after
+from numbers(3) format Native;
+
+create table lol (
+    datetime64 DateTime64(2, 'UTC') default now()
 ) engine = MergeTree order by tuple();
 
 

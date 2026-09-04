@@ -298,7 +298,18 @@ fn parse_json(input: &[u8]) -> IResult<&[u8], Type<'_>> {
 
 fn parse_other_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     alt((
-        map(tag("Dynamic"), |_| Type::Dynamic),
+        // `Dynamic` | `Dynamic(max_types=32)` -> Type::Dynamic
+        map(
+            pair(
+                tag("Dynamic"),
+                opt(delimited(
+                    ws(char('(')),
+                    pair(tag("max_types"), preceded(ws(char('=')), digit1)),
+                    ws(char(')')),
+                )),
+            ),
+            |_| Type::Dynamic,
+        ),
         map(tag("SharedVariant"), |_| Type::SharedVariant),
     ))
     .parse(input)
@@ -574,6 +585,19 @@ mod tests {
                 Type::UInt64
             ])
         );
+    }
+
+    #[test]
+    fn dynamic_max_types() {
+        for input in [
+            &b"Dynamic"[..],
+            b"Dynamic(max_types=0)",
+            b"Dynamic(max_types = 5)",
+        ] {
+            let (rest, typ) = parse_type(input).unwrap();
+            assert!(rest.is_empty(), "{}", String::from_utf8_lossy(input));
+            assert_eq!(typ, Type::Dynamic);
+        }
     }
 
     #[test]
