@@ -91,20 +91,25 @@ macro_rules! define_opt_getters {
     ($( ($suffix:ident, $ret_type:ty) ),+ $(,)?) => {
         paste::paste! {
             $(
-
+                /// Outer `None`: index out of range. Inner `None`: NULL.
                 #[inline(always)]
                 pub fn [<get_opt_ $suffix:lower>](&self, index: usize) -> crate::Result<Option<Option<$ret_type>>> {
                     let Mark::Nullable(Nullable { mask, data }) = self else {
-                        let value = self.[<get_ $suffix:lower>](index)?;
-                        return Ok(Some(value));
+                        // convenience wrapper for non-nullable columns
+                        return match self.[<get_ $suffix:lower>](index)? {
+                            Some(value) => Ok(Some(Some(value))),
+                            None => Ok(None),
+                        };
                     };
 
-                    if mask.get(index) == Some(&1) {
-                        return Ok(Some(None));
+                    match mask.get(index) {
+                        None => Ok(None),
+                        Some(1) => Ok(Some(None)),
+                        Some(_) => match data.[<get_ $suffix:lower>](index)? {
+                            Some(value) => Ok(Some(Some(value))),
+                            None => Ok(None),
+                        },
                     }
-
-                    let value = data.[<get_ $suffix:lower>](index)?;
-                    Ok(Some(value))
                 }
             )+
         }

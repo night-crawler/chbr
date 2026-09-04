@@ -40,6 +40,15 @@ impl<'a> LowCardinality<'a> {
 
     #[inline(always)]
     pub(crate) fn get_str(&self, index: usize) -> crate::Result<Option<&'a BStr>> {
+        match self.get_opt_str(index)? {
+            Some(Some(value)) => Ok(Some(value)),
+            Some(None) | None => Ok(None),
+        }
+    }
+
+    /// Outer `None`: index out of range. Inner `None`: NULL
+    #[inline(always)]
+    pub(crate) fn get_opt_str(&self, index: usize) -> crate::Result<Option<Option<&'a BStr>>> {
         let Some(keys) = &self.additional_keys else {
             cold_path();
             return Err(Error::CorruptedData(
@@ -51,14 +60,17 @@ impl<'a> LowCardinality<'a> {
             return Ok(None);
         };
         if value_index == 0 && self.is_nullable {
-            return Ok(None);
+            return Ok(Some(None));
         }
 
         let Mark::String(keys) = keys.as_ref() else {
             cold_path();
             return Err(Error::MismatchedType(keys.as_str(), "&BStr"));
         };
-        Ok(keys.get(value_index))
+        match keys.get(value_index) {
+            Some(value) => Ok(Some(Some(value))),
+            None => Ok(None),
+        }
     }
 
     pub(crate) fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
