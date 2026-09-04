@@ -289,6 +289,13 @@ fn nullable_string() -> TestResult {
         );
     }
 
+    // Out of range is the outer None; NULL (index 1) is the inner None.
+    assert_eq!(strings_marker.get_opt_str(expected_col.len())?, None);
+    assert_eq!(strings_marker.get_opt_str(1)?, Some(None));
+    // Same contract for non-nullable columns via the convenience path.
+    assert_eq!(block.markers[0].get_opt_i64(block.num_rows)?, None);
+    assert_eq!(block.markers[0].get_opt_i64(0)?, Some(Some(0)));
+
     Ok(())
 }
 
@@ -1407,6 +1414,10 @@ fn nullable_lc_str() -> TestResult {
             "Mismatch at index {i} (get_opt_str)"
         );
     }
+
+    // Out of range is the outer None; NULL (index 1) is the inner None.
+    assert_eq!(nlc_str_marker.get_opt_str(expected.len())?, None);
+    assert_eq!(nlc_str_marker.get_opt_str(1)?, Some(None));
 
     Ok(())
 }

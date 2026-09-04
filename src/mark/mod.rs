@@ -362,19 +362,29 @@ impl<'a> Mark<'a> {
         }
     }
 
+    /// Outer `None`: index out of range. Inner `None`: NULL.
     #[inline(always)]
     pub fn get_opt_str(&self, index: usize) -> crate::Result<Option<Option<&'a BStr>>> {
-        let Mark::Nullable(Nullable { mask, data }) = self else {
-            // convenience wrapper
-            let value = self.get_str(index)?;
-            return Ok(Some(value));
+        let (mask, data) = match self {
+            Mark::Nullable(Nullable { mask, data }) => (mask, data.as_ref()),
+            Mark::LowCardinality(lc) => return lc.get_opt_str(index),
+            // convenience wrapper for non-nullable columns
+            mark => {
+                return match mark.get_str(index)? {
+                    Some(value) => Ok(Some(Some(value))),
+                    None => Ok(None),
+                };
+            }
         };
 
-        if mask.get(index) == Some(&1) {
-            return Ok(Some(None));
+        match mask.get(index) {
+            None => Ok(None),
+            Some(1) => Ok(Some(None)),
+            Some(_) => match data.get_str(index)? {
+                Some(value) => Ok(Some(Some(value))),
+                None => Ok(None),
+            },
         }
-
-        Ok(Some(data.get_str(index)?))
     }
 
     #[expect(clippy::needless_pass_by_value)]
