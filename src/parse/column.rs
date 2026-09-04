@@ -352,7 +352,7 @@ fn lc<'a>(inner: &Type<'a>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a
             ctx.input,
             Mark::LowCardinality(mark::lc::LowCardinality {
                 is_nullable: inner.is_nullable(),
-                indices: mark::lc::Indices::Empty,
+                indices: mark::lc::Indices::U8(&[]),
                 global_dictionary: None,
                 additional_keys: Some(Box::new(Mark::Empty)),
             }),
