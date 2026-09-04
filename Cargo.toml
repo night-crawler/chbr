@@ -16,7 +16,7 @@ nom = { version = "8", features = ["std"] }
 zerocopy = { version = "0.8", features = ["std", "derive"] }
 log = "0.4"
 rust_decimal = "1.37.1"
-uuid = { version = "1.16", features = ["v4"] }
+uuid = "1.16"
 half = { version = "2.6", features = ["zerocopy"] }
 paste = "1"
 serde = { version = "1", optional = true }
