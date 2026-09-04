@@ -230,7 +230,8 @@ mod tests {
             dynamic.get(0)?,
             Some(chbr::value::Value::Int64(42))
         ));
-        assert!(dynamic.get(1)?.is_none());
+        assert!(matches!(dynamic.get(1)?, Some(chbr::value::Value::Empty)));
+        assert!(dynamic.get(2)?.is_none());
         Ok(())
     }
 

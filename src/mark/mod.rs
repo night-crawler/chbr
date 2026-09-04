@@ -584,10 +584,14 @@ impl Variant<'_> {
     /// Discriminator byte marking a NULL row.
     pub(crate) const NULL_DISCRIMINATOR: u8 = 255;
 
+    /// `Ok(None)` is out of range, `Ok(Some(Value::Empty))` is a NULL row
     pub(crate) fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         let Some(&discriminator) = self.discriminators.get(index) else {
             return Ok(None);
         };
+        if discriminator == Self::NULL_DISCRIMINATOR {
+            return Ok(Some(Value::Empty));
+        }
         let Some(&in_type_index) = self.offsets.get(index) else {
             return Ok(None);
         };
@@ -734,10 +738,18 @@ pub struct Dynamic<'a> {
 }
 
 impl Dynamic<'_> {
+    pub(crate) fn is_null(&self, index: usize) -> bool {
+        self.discriminators.get(index) == Some(&Variant::NULL_DISCRIMINATOR)
+    }
+
+    /// `Ok(None)` is out of range; `Ok(Some(Value::Empty))` is a NULL row.
     pub(crate) fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
         let Some(&discriminator) = self.discriminators.get(index) else {
             return Ok(None);
         };
+        if discriminator == Variant::NULL_DISCRIMINATOR {
+            return Ok(Some(Value::Empty));
+        }
         let Some(&in_type_index) = self.offsets.get(index) else {
             return Ok(None);
         };

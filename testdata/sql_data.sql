@@ -1109,3 +1109,44 @@ insert into named_tuple (id, tup) values
     (5, ('fig', 50));
 
 select * from named_tuple order by id;
+
+-- Variant/Dynamic are implicitly nullable: a row may hold none of the alternatives.
+-- Discriminator 255 marks such rows; nothing is written to any sub-column.
+-- Dumped to variant_null.native / dynamic_null.native.
+SET allow_experimental_variant_type = 1;
+drop table if exists variant_null_sample;
+create table variant_null_sample
+(
+    id  Int64,
+    var Variant(Int64, String, Array(Int64)),
+    arr Array(Variant(Int64, String))
+) engine = MergeTree order by tuple();
+
+insert into variant_null_sample (id, var, arr) values
+    (0, 1, [CAST(1::Int64, 'Variant(Int64, String)'), CAST(NULL, 'Variant(Int64, String)'), CAST('a', 'Variant(Int64, String)')]),
+    (1, NULL, []),
+    (2, 'a', [CAST(NULL, 'Variant(Int64, String)')]),
+    (3, [1, 2, 3], [CAST('b', 'Variant(Int64, String)')]),
+    (4, NULL, [CAST(NULL, 'Variant(Int64, String)'), CAST(NULL, 'Variant(Int64, String)')]);
+
+optimize table variant_null_sample final;
+
+select id, var, arr from variant_null_sample order by id format Native;
+
+drop table if exists dynamic_null_sample;
+create table dynamic_null_sample
+(
+    id  Int64,
+    dyn Dynamic,
+    arr Array(Dynamic)
+) engine = MergeTree order by tuple();
+
+insert into dynamic_null_sample (id, dyn, arr) values
+    (0, 42::Int64, [CAST(1::Int64, 'Dynamic'), CAST(NULL, 'Dynamic'), CAST('a', 'Dynamic')]),
+    (1, CAST(NULL, 'Dynamic'), []),
+    (2, 'x', [CAST(NULL, 'Dynamic')]),
+    (3, CAST(NULL, 'Dynamic'), [CAST(NULL, 'Dynamic'), CAST(NULL, 'Dynamic')]);
+
+optimize table dynamic_null_sample final;
+
+select id, dyn, arr from dynamic_null_sample order by id format Native;

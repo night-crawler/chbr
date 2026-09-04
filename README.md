@@ -60,7 +60,8 @@ ORDER BY id;
 INSERT INTO chbr_example VALUES
     (1, ['fast', 'cpu'], {'region': 'eu', 'host': 'a1'}, 'hello'),
     (2, [], {'region': 'us'}, 42),
-    (3, ['gpu'], {}, [1, 2, 3]);
+    (3, ['gpu'], {}, [1, 2, 3]),
+    (4, ['idle'], {'region': 'ap'}, NULL);
 "
 ```
 
@@ -76,7 +77,7 @@ clickhouse-client --host 127.0.0.1 --port 9001 \
 Parse it:
 
 ```rust
-use chbr::{BlocksIterator, parse::block::parse_many, value::Value};
+use chbr::{BStr, BlocksIterator, parse::block::parse_many, value::Value};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data = std::fs::read("testdata/example.native")?;
@@ -94,11 +95,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let i = row.row_index();
 
-        // Parse u32 using accessor method avoiding fat Value creation 
+        // Parse u32 using accessor method avoiding fat Value creation.
+        // Outer Result: type mismatch / malformed data; Option: index out of range.
         let id = id.get_u32(i)?.expect("valid row index");
 
         // Extract a str arr
-        let tags: &[&str] = tags.get(i).expect("valid row index").try_into()?;
+        let tags: &[&BStr] = tags.get(i)?.expect("valid row index").try_into()?;
 
         // Convenience method for maps
         let mut attrs_vec = vec![];
@@ -109,14 +111,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // Fat Value TryFrom path for Variant(Array(Int64), Int64, String)
-        let payload = match payload.get(i).expect("valid row index") {
+        // Fat Value TryFrom path for Variant(Array(Int64), Int64, String).
+        // Variant is implicitly nullable; a NULL row is Value::Empty.
+        let payload = match payload.get(i)?.expect("valid row index") {
             Value::String(s) => format!("string: {s}"),
             Value::Int64(n) => format!("int: {n}"),
             Value::Int64Slice(xs) => {
                 let xs = xs.iter().map(|x| x.get()).collect::<Vec<i64>>();
                 format!("array: {xs:?}")
             }
+            Value::Empty => "null".to_owned(),
             other => format!("unexpected: {other:?}"),
         };
 
@@ -131,7 +135,7 @@ Or, instead of matching on `Value` and destructuring `row.cols()` by hand, deriv
 
 ```rust
 use chbr::parse::block::parse_many;
-use chbr::reader::{Array, ArrayIter, I64, Map, Str, U32, Variant};
+use chbr::reader::{Array, ArrayIter, I64, Map, Str, U32, VariantNullable};
 use chbr::{FromBlock, FromVariant};
 
 // Same order as in Variant(Array(Int64), Int64, String)
@@ -148,7 +152,8 @@ struct Row<'a> {
     tags: Array<'a, Str<'a>>,
     #[col(name = "attrs")]
     attributes: Map<'a, Str<'a>, Str<'a>>,
-    payload: Variant<'a, Payload<'a>>,
+    // Variant is implicitly nullable; `Variant<'a, Payload<'a>>` errors on NULL rows instead.
+    payload: VariantNullable<'a, Payload<'a>>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -166,9 +171,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let attrs: Vec<(&str, &str)> = row.attributes.collect::<chbr::Result<_>>()?;
 
         let payload = match row.payload {
-            Payload::Str(s) => format!("string: {s}"),
-            Payload::Int(n) => format!("int: {n}"),
-            Payload::Array(xs) => format!("array: {:?}", xs.try_collect_vec()?),
+            Some(Payload::Str(s)) => format!("string: {s}"),
+            Some(Payload::Int(n)) => format!("int: {n}"),
+            Some(Payload::Array(xs)) => format!("array: {:?}", xs.try_collect_vec()?),
+            None => "null".to_owned(),
         };
 
         println!("id={} tags={tags:?} attrs={attrs:?} payload={payload}", row.id);
@@ -201,9 +207,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             let payload = match cols.payload.try_read(i)? {
-                Payload::Str(s) => format!("string: {s}"),
-                Payload::Int(n) => format!("int: {n}"),
-                Payload::Array(xs) => format!("array: {:?}", xs.try_collect_vec()?),
+                Some(Payload::Str(s)) => format!("string: {s}"),
+                Some(Payload::Int(n)) => format!("int: {n}"),
+                Some(Payload::Array(xs)) => format!("array: {:?}", xs.try_collect_vec()?),
+                None => "null".to_owned(),
             };
 
             // Same row again because why not
