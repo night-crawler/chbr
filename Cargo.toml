@@ -63,6 +63,11 @@ harness = false
 name = "throughput"
 harness = false
 
+# Fixed-work driver for `scripts/perf_rows.py`; not a criterion bench.
+[[bench]]
+name = "rows"
+harness = false
+
 [[bench]]
 name = "json"
 harness = false
