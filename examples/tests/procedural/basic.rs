@@ -35,6 +35,7 @@ fn basic() -> Result<(), Box<dyn std::error::Error>> {
                 let values = values.iter().map(|value| value.get()).collect::<Vec<_>>();
                 format!("array: {values:?}")
             }
+            Value::Empty => "null".to_owned(),
             other => format!("unexpected: {other:?}"),
         };
 
@@ -49,6 +50,7 @@ fn basic() -> Result<(), Box<dyn std::error::Error>> {
             r#"id=1 tags=["fast", "cpu"] attrs=[("region", "eu"), ("host", "a1")] payload=string: hello"#,
             r#"id=2 tags=[] attrs=[("region", "us")] payload=int: 42"#,
             r#"id=3 tags=["gpu"] attrs=[] payload=array: [1, 2, 3]"#,
+            r#"id=4 tags=["idle"] attrs=[("region", "ap")] payload=null"#,
         ]
     );
 

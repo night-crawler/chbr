@@ -116,6 +116,12 @@ impl<'a> Json<'a> {
                 "JSON path index {path_index} has no column"
             )));
         };
+        // The path is absent from this row (JSON has no null distinct from a missing key)
+        if let Mark::Dynamic(dynamic) = column
+            && dynamic.is_null(row)
+        {
+            return Ok(None);
+        }
         column.get(row)
     }
 }
