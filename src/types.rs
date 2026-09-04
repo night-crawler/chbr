@@ -362,20 +362,20 @@ impl<'a> Type<'a> {
             Type::Float32 => Mark::Float32(ByteView::try_from(data)?),
             Type::Float64 => Mark::Float64(ByteView::try_from(data)?),
             Type::BFloat16 => Mark::BFloat16(ByteView::try_from(data)?),
-            Type::Decimal32(precision) => Mark::Decimal32(Decimal32 {
-                precision,
+            Type::Decimal32(scale) => Mark::Decimal32(Decimal32 {
+                scale,
                 data: ByteView::try_from(data)?,
             }),
-            Type::Decimal64(precision) => Mark::Decimal64(Decimal64 {
-                precision,
+            Type::Decimal64(scale) => Mark::Decimal64(Decimal64 {
+                scale,
                 data: ByteView::try_from(data)?,
             }),
-            Type::Decimal128(precision) => Mark::Decimal128(Decimal128 {
-                precision,
+            Type::Decimal128(scale) => Mark::Decimal128(Decimal128 {
+                scale,
                 data: ByteView::try_from(data)?,
             }),
-            Type::Decimal256(precision) => Mark::Decimal256(Decimal256 {
-                precision,
+            Type::Decimal256(scale) => Mark::Decimal256(Decimal256 {
+                scale,
                 data: ByteView::try_from(data)?,
             }),
             Type::FixedString(size) => Mark::FixedString(FixedString { size, data }),

@@ -343,7 +343,7 @@ impl<'a> TryRead<'a> for DateTime64<'a> {
 }
 
 macro_rules! col_decimal {
-    ($($name:ident, $variant:ident, $mark:ty, |$v:ident, $precision:ident| $conv:expr;)+) => {
+    ($($name:ident, $variant:ident, $mark:ty, |$v:ident, $scale:ident| $conv:expr;)+) => {
         $(
             #[derive(Clone, Copy)]
             pub struct $name<'a>(pub &'a $mark);
@@ -372,7 +372,7 @@ macro_rules! col_decimal {
                         cold_path();
                         return Err(Error::IndexOutOfBounds(idx, stringify!($variant)));
                     };
-                    let $precision = self.0.precision;
+                    let $scale = self.0.scale;
                     $conv
                 }
             }
@@ -381,9 +381,9 @@ macro_rules! col_decimal {
 }
 
 col_decimal! {
-    Decimal32, Decimal32, Decimal32Mark<'a>, |v, p| Ok(v.with_precision(p));
-    Decimal64, Decimal64, Decimal64Mark<'a>, |v, p| Ok(v.with_precision(p));
-    Decimal128, Decimal128, Decimal128Mark<'a>, |v, p| v.with_precision(p);
+    Decimal32, Decimal32, Decimal32Mark<'a>, |v, s| Ok(v.with_scale(s));
+    Decimal64, Decimal64, Decimal64Mark<'a>, |v, s| Ok(v.with_scale(s));
+    Decimal128, Decimal128, Decimal128Mark<'a>, |v, s| v.with_scale(s);
 }
 
 /// It's an escape hatch for runtime-typed columns like [`Mark::Variant`], [`Mark::Dynamic`],
