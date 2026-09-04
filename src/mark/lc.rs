@@ -186,13 +186,17 @@ impl<'a> Indices<'a> {
         }
     }
 
-    pub(crate) const fn is_empty(self) -> bool {
+    pub(crate) const fn len(self) -> usize {
         match self {
-            Self::U8(indices) => indices.is_empty(),
-            Self::U16(indices) => indices.is_empty(),
-            Self::U32(indices) => indices.is_empty(),
-            Self::U64(indices) => indices.is_empty(),
+            Self::U8(indices) => indices.len(),
+            Self::U16(indices) => indices.len(),
+            Self::U32(indices) => indices.len(),
+            Self::U64(indices) => indices.len(),
         }
+    }
+
+    pub(crate) const fn is_empty(self) -> bool {
+        self.len() == 0
     }
 
     pub(crate) fn all_zero(self) -> bool {

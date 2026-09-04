@@ -1,8 +1,7 @@
 #[cfg(feature = "serde1")]
 use std::borrow::Cow;
-use std::{hint::cold_path, ops::Range};
 
-use crate::{Error, TinyRange, mark::Mark, value::Value};
+use crate::{Error, mark::Mark, value::Value};
 
 #[derive(Debug)]
 pub struct Json<'a> {
@@ -80,6 +79,10 @@ impl<'a> Json<'a> {
         self.nodes[node].next_sibling
     }
 
+    pub(crate) const fn len(&self) -> usize {
+        self.rows
+    }
+
     pub(crate) const fn contains_row(&self, row: usize) -> bool {
         row < self.rows
     }
@@ -93,17 +96,6 @@ impl<'a> Json<'a> {
         } else {
             None
         }
-    }
-
-    pub(crate) fn slice(&'a self, range: Range<usize>) -> crate::Result<Value<'a>> {
-        if range.start > range.end || range.end > self.rows {
-            cold_path();
-            return Err(Error::RangeOutOfBounds(range, "Json"));
-        }
-        Ok(Value::JsonSlice {
-            mark: self,
-            range: TinyRange::try_from(range)?,
-        })
     }
 
     pub(crate) fn value(

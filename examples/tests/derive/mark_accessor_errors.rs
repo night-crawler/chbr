@@ -1,9 +1,9 @@
-use chbr::FromBlock;
 use chbr::error::Error;
 use chbr::mark::{self, Mark, StringView, Tuple};
 use chbr::parse::block::parse_single;
 use chbr::reader::I64;
 use chbr::slice::ByteView;
+use chbr::{FromBlock, TinyRange};
 
 #[derive(FromBlock)]
 struct MissingColumn<'a> {
@@ -45,11 +45,16 @@ fn reports_mark_accessor_errors() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     let tuple = Mark::Tuple(Tuple {
-        values: Box::new([]),
+        values: Box::new([Mark::UInt8(ByteView::try_from(bytes.as_slice())?)]),
     });
+    assert!(matches!(
+        tuple.slice(1..3),
+        Err(Error::RangeOutOfBounds(range, "Tuple")) if range == (1..3)
+    ));
+
     let oversized_start = u32::MAX as usize + 1;
     assert!(matches!(
-        tuple.slice(oversized_start..oversized_start),
+        TinyRange::try_from(oversized_start..oversized_start),
         Err(Error::ValueOutOfRange("usize", "u32", _))
     ));
 

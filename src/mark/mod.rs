@@ -7,7 +7,7 @@ pub use string::{FixedString, StringView};
 
 use crate::{
     Bf16Data, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
-    Decimal128Data, Decimal256Data, Error, I256, Ipv4Data, Ipv6Data, U256, UuidData,
+    Decimal128Data, Decimal256Data, Error, I256, Ipv4Data, Ipv6Data, TinyRange, U256, UuidData,
     macros::{define_int_getters, define_ip_getters, define_opt_getters, define_slice_fns},
     slice::ByteView,
     types::{OffsetIndexPair as _, Offsets},
@@ -126,6 +126,67 @@ impl<'a> Mark<'a> {
         Ok(slice)
     }
 
+    #[inline(always)]
+    fn checked_range(&self, len: usize, range: Range<usize>) -> crate::Result<TinyRange> {
+        if range.start > range.end || range.end > len {
+            cold_path();
+            return Err(Error::RangeOutOfBounds(range, self.as_str()));
+        }
+        range.try_into()
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Mark::Empty => 0,
+            Mark::Bool(bv) => bv.data.len(),
+            Mark::Int8(bv) => bv.len(),
+            Mark::Int16(bv) => bv.len(),
+            Mark::Int32(bv) => bv.len(),
+            Mark::Int64(bv) => bv.len(),
+            Mark::Int128(bv) => bv.len(),
+            Mark::Int256(bv) => bv.len(),
+            Mark::UInt8(bv) => bv.len(),
+            Mark::UInt16(bv) => bv.len(),
+            Mark::UInt32(bv) => bv.len(),
+            Mark::UInt64(bv) => bv.len(),
+            Mark::UInt128(bv) => bv.len(),
+            Mark::UInt256(bv) => bv.len(),
+            Mark::Float32(bv) => bv.len(),
+            Mark::Float64(bv) => bv.len(),
+            Mark::BFloat16(bv) => bv.len(),
+            Mark::Decimal32(d) => d.data.len(),
+            Mark::Decimal64(d) => d.data.len(),
+            Mark::Decimal128(d) => d.data.len(),
+            Mark::Decimal256(d) => d.data.len(),
+            Mark::String(sv) => sv.data.len(),
+            Mark::FixedString(fs) => fs.data.len().checked_div(fs.size).unwrap_or(0),
+            Mark::Uuid(bv) => bv.len(),
+            Mark::Date(bv) => bv.len(),
+            Mark::Date32(bv) => bv.len(),
+            Mark::DateTime(d) => d.data.len(),
+            Mark::DateTime64(d) => d.data.len(),
+            Mark::Ipv4(bv) => bv.len(),
+            Mark::Ipv6(bv) => bv.len(),
+            Mark::Enum8(e) => e.data.len(),
+            Mark::Enum16(e) => e.data.len(),
+            Mark::LowCardinality(lc) => lc.indices.len(),
+            Mark::Array(a) => a.offsets.len(),
+            // We trust that CH always reports equal lengths for tuple
+            Mark::Tuple(t) => t.values.first().map_or(0, Mark::len),
+            Mark::Nullable(n) => n.mask.len(),
+            Mark::Map(m) => m.offsets.len(),
+            Mark::Variant(v) => v.discriminators.len(),
+            Mark::Nested(n) => n.array_of_tuples.len(),
+            Mark::NamedTuple(n) => n.tuple.len(),
+            Mark::Dynamic(d) => d.discriminators.len(),
+            Mark::Json(j) => j.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn get(&'a self, index: usize) -> crate::Result<Option<Value<'a>>> {
         match self {
             Mark::Empty => Ok(None),
@@ -225,7 +286,7 @@ impl<'a> Mark<'a> {
             }),
             Mark::FixedString(mark) => Ok(Value::FixedStringSlice {
                 mark,
-                range: idx.try_into()?,
+                range: self.checked_range(self.len(), idx)?,
             }),
 
             Mark::DateTime(d) => Ok(Value::DateTime32Slice {
@@ -239,49 +300,52 @@ impl<'a> Mark<'a> {
             }),
             Mark::Enum8(mark) => Ok(Value::Enum8Slice {
                 mark,
-                range: idx.try_into()?,
+                range: self.checked_range(mark.data.len(), idx)?,
             }),
             Mark::Enum16(mark) => Ok(Value::Enum16Slice {
                 mark,
-                range: idx.try_into()?,
+                range: self.checked_range(mark.data.len(), idx)?,
             }),
             Mark::LowCardinality(mark) => Ok(Value::LowCardinalitySlice {
-                range: idx.try_into()?,
+                range: self.checked_range(mark.indices.len(), idx)?,
                 mark,
             }),
             Mark::Array(mark) => Ok(Value::ArraySlice {
                 mark,
-                range: idx.try_into()?,
+                range: self.checked_range(mark.offsets.len(), idx)?,
             }),
             Mark::Tuple(mark) => Ok(Value::TupleSlice {
                 mark,
-                range: idx.try_into()?,
+                range: self.checked_range(self.len(), idx)?,
             }),
             Mark::Nullable(mark) => Ok(Value::NullableSlice {
                 mark,
-                range: idx.try_into()?,
+                range: self.checked_range(mark.mask.len(), idx)?,
             }),
             Mark::Map(mark) => Ok(Value::MapSlice {
                 mark,
-                range: idx.try_into()?,
+                range: self.checked_range(mark.offsets.len(), idx)?,
             }),
             Mark::Nested(mark) => Ok(Value::NestedSlice {
                 mark,
-                range: idx.try_into()?,
+                range: self.checked_range(mark.array_of_tuples.len(), idx)?,
             }),
             Mark::NamedTuple(mark) => Ok(Value::NamedTupleSlice {
                 mark,
-                range: idx.try_into()?,
+                range: self.checked_range(mark.tuple.len(), idx)?,
             }),
             Mark::Variant(mark) => Ok(Value::VariantSlice {
                 mark,
-                range: idx.try_into()?,
+                range: self.checked_range(mark.discriminators.len(), idx)?,
             }),
             Mark::Dynamic(mark) => Ok(Value::DynamicSlice {
                 mark,
-                range: idx.try_into()?,
+                range: self.checked_range(mark.discriminators.len(), idx)?,
             }),
-            Mark::Json(mark) => mark.slice(idx),
+            Mark::Json(mark) => Ok(Value::JsonSlice {
+                mark,
+                range: self.checked_range(mark.len(), idx)?,
+            }),
         }
     }
 
@@ -860,12 +924,36 @@ mod tests {
             Some(Err(Error::IndexOutOfBounds(0, "LowCardinality dictionary")))
         ));
 
-        let tuple = Mark::Tuple(Tuple {
-            values: Box::new([]),
+        // Composite marks bound-check the row range before handing it to a slice iterator.
+        let offsets = 1_u64.to_le_bytes();
+        let array = Mark::Array(Array {
+            offsets: ByteView::try_from(offsets.as_slice())?,
+            values: Box::new(Mark::UInt8(ByteView::try_from(bytes.as_slice())?)),
         });
+        assert_eq!(array.len(), 1);
+        assert!(matches!(array.slice(0..1)?, Value::ArraySlice { .. }));
+        assert!(matches!(
+            array.slice(0..2),
+            Err(Error::RangeOutOfBounds(range, "Array")) if range == (0..2)
+        ));
+        let reversed = Range { start: 1, end: 0 };
+        assert!(matches!(
+            array.slice(reversed.clone()),
+            Err(Error::RangeOutOfBounds(range, "Array")) if range == reversed
+        ));
+
+        let tuple = Mark::Tuple(Tuple {
+            values: Box::new([Mark::UInt8(ByteView::try_from(bytes.as_slice())?)]),
+        });
+        assert_eq!(tuple.len(), 2);
+        assert!(matches!(
+            tuple.slice(1..3),
+            Err(Error::RangeOutOfBounds(range, "Tuple")) if range == (1..3)
+        ));
+
         let oversized_start = u32::MAX as usize + 1;
         assert!(matches!(
-            tuple.slice(oversized_start..oversized_start),
+            TinyRange::try_from(oversized_start..oversized_start),
             Err(Error::ValueOutOfRange("usize", "u32", _))
         ));
 
