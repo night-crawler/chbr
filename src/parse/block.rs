@@ -298,4 +298,23 @@ mod tests {
             Ok(_) => panic!("huge dynamic type count must error"),
         }
     }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn non_monotonic_offsets_rejected() {
+        let mut b = vec![1u8, 2]; // 1 column, 2 rows
+        var_str(&mut b, "a");
+        var_str(&mut b, "Array(UInt8)");
+        b.extend_from_slice(&5u64.to_le_bytes());
+        b.extend_from_slice(&2u64.to_le_bytes());
+        b.extend_from_slice(&[0, 1]); // last offset = 2 -> inner decoded with 2 rows
+
+        match parse_single(&b) {
+            Err(err) => assert!(
+                err.to_string().contains("offsets not monotonic"),
+                "unexpected error: {err}"
+            ),
+            Ok(_) => panic!("non-monotonic offsets must error"),
+        }
+    }
 }
