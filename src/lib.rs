@@ -322,7 +322,6 @@ pub(crate) fn reorder_block_cols(blocks: &mut [ParsedBlock<'_>], order: &[&str])
 pub struct BlockRow<'data: 'iter, 'iter> {
     col_names: &'iter [&'data str],
     cols: &'iter [mark::Mark<'data>],
-    col_index: usize,
     row_index: usize,
 }
 
@@ -337,10 +336,6 @@ impl<'data, 'iter> BlockRow<'data, 'iter> {
 
     pub const fn row_index(&self) -> usize {
         self.row_index
-    }
-
-    pub const fn col_index(&self) -> usize {
-        self.col_index
     }
 }
 
@@ -359,7 +354,6 @@ impl<'data, 'iter> Iterator for BlocksIterator<'data, 'iter> {
             let block_row = BlockRow {
                 col_names: &block.col_names,
                 cols: &block.markers,
-                col_index: 0,
                 row_index: self.block_row,
             };
             self.block_row += 1;
