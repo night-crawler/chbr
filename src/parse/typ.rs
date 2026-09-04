@@ -62,6 +62,14 @@ fn parse_decimal_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     )
     .parse(input)?;
 
+    if scale > precision {
+        cold_path();
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            ErrorKind::Fail,
+        )));
+    }
+
     let typ = match precision {
         0..10 => Type::Decimal32(scale),
         10..19 => Type::Decimal64(scale),
@@ -504,8 +512,20 @@ mod tests {
     #[test]
     fn decimal() {
         let input = b"Decimal(9, 9)";
-        let result = parse_decimal_type(input);
-        assert!(result.is_ok());
+        let (_, typ) = parse_decimal_type(input).unwrap();
+        assert_eq!(typ, Type::Decimal32(9));
+    }
+
+    #[test]
+    fn decimal_scale_exceeds_precision() {
+        assert!(parse_decimal_type(b"Decimal(9, 10)").is_err());
+        assert!(parse_decimal_type(b"Decimal(18, 30)").is_err());
+        assert!(parse_decimal_type(b"Decimal(38, 40)").is_err());
+    }
+
+    #[test]
+    fn decimal_precision_out_of_range() {
+        assert!(parse_decimal_type(b"Decimal(77, 0)").is_err());
     }
 
     #[test]
