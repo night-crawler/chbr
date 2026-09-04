@@ -145,7 +145,6 @@ impl ExactSizeIterator for ArrayLcStrIter<'_, '_> {}
 
 #[derive(Clone, Copy, Debug)]
 pub enum Indices<'a> {
-    Empty,
     U8(&'a [u8]),
     U16(&'a [zc::U16]),
     U32(&'a [zc::U32]),
@@ -157,7 +156,7 @@ impl<'a> TryFrom<Mark<'a>> for Indices<'a> {
 
     fn try_from(mark: Mark<'a>) -> Result<Self, Self::Error> {
         match mark {
-            Mark::Empty => Ok(Self::Empty),
+            Mark::Empty => Ok(Self::U8(&[])),
             Mark::UInt8(indices) => Ok(Self::U8(indices.as_slice())),
             Mark::UInt16(indices) => Ok(Self::U16(indices.as_slice())),
             Mark::UInt32(indices) => Ok(Self::U32(indices.as_slice())),
@@ -177,7 +176,6 @@ impl<'a> Indices<'a> {
     #[inline(always)]
     pub(crate) fn get(self, index: usize) -> crate::Result<Option<usize>> {
         match self {
-            Self::Empty => Ok(None),
             Self::U8(indices) => Ok(indices.get(index).copied().map(usize::from)),
             Self::U16(indices) => Ok(indices.get(index).map(|value| usize::from(value.get()))),
             Self::U32(indices) => Ok(indices.get(index).map(|value| value.get() as usize)),
@@ -190,7 +188,6 @@ impl<'a> Indices<'a> {
 
     pub(crate) const fn is_empty(self) -> bool {
         match self {
-            Self::Empty => true,
             Self::U8(indices) => indices.is_empty(),
             Self::U16(indices) => indices.is_empty(),
             Self::U32(indices) => indices.is_empty(),
@@ -200,7 +197,6 @@ impl<'a> Indices<'a> {
 
     pub(crate) fn all_zero(self) -> bool {
         match self {
-            Self::Empty => true,
             Self::U8(indices) => indices.iter().all(|&value| value == 0),
             Self::U16(indices) => indices.iter().all(|value| value.get() == 0),
             Self::U32(indices) => indices.iter().all(|value| value.get() == 0),
@@ -210,13 +206,6 @@ impl<'a> Indices<'a> {
 
     pub(crate) fn slice(self, range: Range<usize>) -> crate::Result<Value<'a>> {
         match self {
-            Self::Empty => {
-                if range.start != 0 || range.end != 0 {
-                    cold_path();
-                    return Err(Error::RangeOutOfBounds(range, "Empty"));
-                }
-                Ok(Value::Empty)
-            }
             Self::U8(indices) => Ok(Value::UInt8Slice(checked_slice(indices, range, "UInt8")?)),
             Self::U16(indices) => Ok(Value::UInt16Slice(checked_slice(indices, range, "UInt16")?)),
             Self::U32(indices) => Ok(Value::UInt32Slice(checked_slice(indices, range, "UInt32")?)),
@@ -227,12 +216,6 @@ impl<'a> Indices<'a> {
     #[inline]
     pub(crate) fn iter(self, range: Range<usize>) -> crate::Result<IndicesIter<'a>> {
         match self {
-            Self::Empty => {
-                if range.start != 0 || range.end != 0 {
-                    return Err(Error::RangeOutOfBounds(range, "Empty"));
-                }
-                Ok(IndicesIter::U8([].iter()))
-            }
             Self::U8(indices) => Ok(IndicesIter::U8(
                 checked_slice(indices, range, "UInt8")?.iter(),
             )),
