@@ -68,7 +68,7 @@ INSERT INTO chbr_example VALUES
 Dump the table in `Native` format:
 
 ```sh
-clickhouse-client --host 127.0.0.1 --port 9001 \
+clickhouse-client --host 127.0.0.1 --port 9000 \
     --database qweqwe --user lol --password wut \
     --query "SELECT * FROM chbr_example ORDER BY id FORMAT Native" \
     > testdata/example.native
