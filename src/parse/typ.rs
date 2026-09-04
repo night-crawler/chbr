@@ -7,7 +7,7 @@ use nom::{
     branch::alt,
     bytes::complete::{tag, take_while1},
     character::complete::{alphanumeric1, char, digit1, multispace0, multispace1},
-    combinator::{map, map_res, opt, recognize},
+    combinator::{map, map_res, opt, recognize, verify},
     error::{ErrorKind, FromExternalError as _, ParseError},
     multi::{many0, separated_list0, separated_list1},
     sequence::{delimited, pair, preceded, separated_pair},
@@ -428,60 +428,54 @@ fn parse_pairs<'a>(
     Ok((input, pairs))
 }
 
-fn parse_enum8(input: &[u8]) -> IResult<&[u8], Type<'_>> {
+fn parse_enum_variants<'a, T>(
+    name: &'static str,
+    input: &'a [u8],
+) -> IResult<&'a [u8], Vec<(&'a str, T)>>
+where
+    T: FromStr + PartialOrd,
+{
     map(
-        preceded(
-            tag("Enum8"),
-            delimited(
-                ws(char('(')),
-                separated_list1(
-                    ws(char(',')),
-                    separated_pair(
-                        delimited(ws(char('\'')), take_while1(|c| c != b'\''), ws(char('\''))),
-                        ws(char('=')),
-                        map_res(recognize(pair(opt(char('-')), digit1)), parse_num::<i8>),
+        verify(
+            preceded(
+                tag(name),
+                delimited(
+                    ws(char('(')),
+                    separated_list1(
+                        ws(char(',')),
+                        separated_pair(
+                            delimited(ws(char('\'')), take_while1(|c| c != b'\''), ws(char('\''))),
+                            ws(char('=')),
+                            map_res(recognize(pair(opt(char('-')), digit1)), parse_num::<T>),
+                        ),
                     ),
+                    ws(char(')')),
                 ),
-                ws(char(')')),
             ),
+            |pairs: &Vec<(&[u8], T)>| pairs.windows(2).all(|w| w[0].1 < w[1].1),
         ),
         |pairs| {
-            let mut enum_values = Vec::new();
-            for (name, value) in pairs {
-                let name_str = unsafe { std::str::from_utf8_unchecked(name) };
-                enum_values.push((name_str, value));
-            }
-            Type::Enum8(enum_values)
+            pairs
+                .into_iter()
+                .map(|(name, id)| (unsafe { std::str::from_utf8_unchecked(name) }, id))
+                .collect()
         },
+    )
+    .parse(input)
+}
+
+fn parse_enum8(input: &[u8]) -> IResult<&[u8], Type<'_>> {
+    map(
+        |input| parse_enum_variants::<i8>("Enum8", input),
+        Type::Enum8,
     )
     .parse(input)
 }
 
 fn parse_enum16(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     map(
-        preceded(
-            tag("Enum16"),
-            delimited(
-                ws(char('(')),
-                separated_list1(
-                    ws(char(',')),
-                    separated_pair(
-                        delimited(ws(char('\'')), take_while1(|c| c != b'\''), ws(char('\''))),
-                        ws(char('=')),
-                        map_res(digit1, parse_num::<i16>),
-                    ),
-                ),
-                ws(char(')')),
-            ),
-        ),
-        |pairs| {
-            let mut enum_values = Vec::new();
-            for (name, value) in pairs {
-                let name_str = unsafe { std::str::from_utf8_unchecked(name) };
-                enum_values.push((name_str, value));
-            }
-            Type::Enum16(enum_values)
-        },
+        |input| parse_enum_variants::<i16>("Enum16", input),
+        Type::Enum16,
     )
     .parse(input)
 }
@@ -647,6 +641,23 @@ mod tests {
         let input = b"Enum16('Foo' = 1000, 'Bar' = 2000)";
         let (_, typ) = parse_type(input).unwrap();
         assert_eq!(typ, Type::Enum16(vec![("Foo", 1000), ("Bar", 2000)]));
+    }
+
+    #[test]
+    fn enum16_negative() {
+        let input = b"Enum16('Min' = -32768, 'Neg' = -5000, 'Pos' = 5000)";
+        let (_, typ) = parse_type(input).unwrap();
+        assert_eq!(
+            typ,
+            Type::Enum16(vec![("Min", -32768), ("Neg", -5000), ("Pos", 5000)])
+        );
+    }
+
+    #[test]
+    fn enum_rejects_unsorted_or_duplicate_ids() {
+        assert!(parse_type(b"Enum8('B' = 2, 'A' = 1)").is_err());
+        assert!(parse_type(b"Enum16('A' = 1, 'B' = 1)").is_err());
+        assert!(parse_type(b"Enum8('Blue' = -23, 'Green' = 2, 'Red' = 11)").is_ok());
     }
 
     #[test]

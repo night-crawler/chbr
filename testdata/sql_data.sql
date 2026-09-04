@@ -839,6 +839,21 @@ insert into enums_sample (id, e8, e16) values
 
 select * from enums_sample order by id;
 
+create table enums_negative_sample (
+    id Int64,
+    e8 Enum8('Pos' = 5, 'Neg' = -5, 'Min' = -128) default 'Pos',
+    e16 Enum16('Pos' = 5000, 'Neg' = -5000, 'Min' = -32768) default 'Pos'
+) engine = MergeTree order by tuple();
+
+insert into enums_negative_sample (id, e8, e16) values
+    (0, 'Pos', 'Pos'),
+    (1, 'Neg', 'Neg'),
+    (2, 'Min', 'Min'),
+    (3, 'Neg', 'Pos');
+
+select * from enums_negative_sample order by id;
+
+
 
 create table enums_array_sample (
     id Int64,
