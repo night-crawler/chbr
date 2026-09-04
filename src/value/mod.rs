@@ -68,19 +68,19 @@ pub enum Value<'a> {
     BFloat16Slice(&'a [Bf16Data]),
 
     Decimal32Slice {
-        precision: u8,
+        scale: u8,
         slice: &'a [Decimal32Data],
     },
     Decimal64Slice {
-        precision: u8,
+        scale: u8,
         slice: &'a [Decimal64Data],
     },
     Decimal128Slice {
-        precision: u8,
+        scale: u8,
         slice: &'a [Decimal128Data],
     },
     Decimal256Slice {
-        precision: u8,
+        scale: u8,
         slice: &'a [Decimal256Data],
     },
 

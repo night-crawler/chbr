@@ -310,9 +310,9 @@ impl<'a> TryFrom<Value<'a>> for Decimal {
 
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::Decimal32(index, mark) => Ok(mark.data[index].with_precision(mark.precision)),
-            Value::Decimal64(index, mark) => Ok(mark.data[index].with_precision(mark.precision)),
-            Value::Decimal128(index, mark) => mark.data[index].with_precision(mark.precision),
+            Value::Decimal32(index, mark) => Ok(mark.data[index].with_scale(mark.scale)),
+            Value::Decimal64(index, mark) => Ok(mark.data[index].with_scale(mark.scale)),
+            Value::Decimal128(index, mark) => mark.data[index].with_scale(mark.scale),
             Value::Decimal256(_, _) => {
                 cold_path();
                 Err(Error::NotImplemented(
@@ -426,7 +426,7 @@ impl Iterator for DateTime64SliceIterator<'_> {
 
 impl ExactSizeIterator for DateTime64SliceIterator<'_> {}
 pub struct Decimal32SliceIterator<'a> {
-    precision: u8,
+    scale: u8,
     slice: std::slice::Iter<'a, Decimal32Data>,
 }
 
@@ -435,8 +435,8 @@ impl<'a> TryFrom<Value<'a>> for Decimal32SliceIterator<'a> {
 
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::Decimal32Slice { precision, slice } => Ok(Self {
-                precision,
+            Value::Decimal32Slice { scale, slice } => Ok(Self {
+                scale,
                 slice: slice.iter(),
             }),
             other => Err(other.mismatched_type(short_type_name::<Self>())),
@@ -448,7 +448,7 @@ impl Iterator for Decimal32SliceIterator<'_> {
     type Item = Decimal;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.slice.next().map(|v| v.with_precision(self.precision))
+        self.slice.next().map(|v| v.with_scale(self.scale))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -459,7 +459,7 @@ impl Iterator for Decimal32SliceIterator<'_> {
 impl ExactSizeIterator for Decimal32SliceIterator<'_> {}
 
 pub struct Decimal64SliceIterator<'a> {
-    precision: u8,
+    scale: u8,
     slice: std::slice::Iter<'a, Decimal64Data>,
 }
 
@@ -468,8 +468,8 @@ impl<'a> TryFrom<Value<'a>> for Decimal64SliceIterator<'a> {
 
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::Decimal64Slice { precision, slice } => Ok(Self {
-                precision,
+            Value::Decimal64Slice { scale, slice } => Ok(Self {
+                scale,
                 slice: slice.iter(),
             }),
             other => Err(other.mismatched_type(short_type_name::<Self>())),
@@ -481,7 +481,7 @@ impl Iterator for Decimal64SliceIterator<'_> {
     type Item = Decimal;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.slice.next().map(|v| v.with_precision(self.precision))
+        self.slice.next().map(|v| v.with_scale(self.scale))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -492,7 +492,7 @@ impl Iterator for Decimal64SliceIterator<'_> {
 impl ExactSizeIterator for Decimal64SliceIterator<'_> {}
 
 pub struct Decimal128SliceIterator<'a> {
-    precision: u8,
+    scale: u8,
     slice: std::slice::Iter<'a, Decimal128Data>,
 }
 
@@ -501,8 +501,8 @@ impl<'a> TryFrom<Value<'a>> for Decimal128SliceIterator<'a> {
 
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
-            Value::Decimal128Slice { precision, slice } => Ok(Self {
-                precision,
+            Value::Decimal128Slice { scale, slice } => Ok(Self {
+                scale,
                 slice: slice.iter(),
             }),
             other => Err(other.mismatched_type(short_type_name::<Self>())),
@@ -514,7 +514,7 @@ impl Iterator for Decimal128SliceIterator<'_> {
     type Item = crate::Result<Decimal>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.slice.next().map(|v| v.with_precision(self.precision))
+        self.slice.next().map(|v| v.with_scale(self.scale))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

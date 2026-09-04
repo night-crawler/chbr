@@ -770,22 +770,22 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
             }
             mark::Mark::Decimal32(value) => visitor.visit_string(
                 at!(value.data.get(cell.row))
-                    .with_precision(value.precision)
+                    .with_scale(value.scale)
                     .to_string(),
             ),
             mark::Mark::Decimal64(value) => visitor.visit_string(
                 at!(value.data.get(cell.row))
-                    .with_precision(value.precision)
+                    .with_scale(value.scale)
                     .to_string(),
             ),
             mark::Mark::Decimal128(value) => visitor.visit_string(
                 at!(value.data.get(cell.row))
-                    .with_precision(value.precision)?
+                    .with_scale(value.scale)?
                     .to_string(),
             ),
             mark::Mark::Decimal256(value) => {
                 let formatted =
-                    format_wide_number(at!(value.data.get(cell.row)).0.0, true, value.precision);
+                    format_wide_number(at!(value.data.get(cell.row)).0.0, true, value.scale);
                 visitor.visit_str(formatted.as_str())
             }
             mark::Mark::String(value) => {
@@ -1514,7 +1514,7 @@ mod serde_tests {
                 mark::Mark::Ipv4(ByteView::<Ipv4Data>::try_from(address_bytes.as_slice())?),
                 mark::Mark::Uuid(ByteView::try_from(uuid_bytes.as_slice())?),
                 mark::Mark::Decimal64(mark::Decimal64 {
-                    precision: 2,
+                    scale: 2,
                     data: ByteView::try_from(decimal_bytes.as_slice())?,
                 }),
                 mark::Mark::DateTime(mark::DateTime {
@@ -1567,7 +1567,7 @@ mod serde_tests {
                 mark::Mark::Int256(ByteView::try_from(i256_min.as_slice())?),
                 mark::Mark::UInt256(ByteView::try_from(u256_max.as_slice())?),
                 mark::Mark::Decimal256(mark::Decimal256 {
-                    precision: 4,
+                    scale: 4,
                     data: ByteView::try_from(decimal.as_slice())?,
                 }),
             ],
@@ -1598,7 +1598,7 @@ mod serde_tests {
                 mark::Mark::Array(mark::Array {
                     offsets: ByteView::try_from(array_offsets.as_slice())?,
                     values: Box::new(mark::Mark::Decimal256(mark::Decimal256 {
-                        precision: 4,
+                        scale: 4,
                         data: ByteView::try_from(decimal.as_slice())?,
                     })),
                 }),

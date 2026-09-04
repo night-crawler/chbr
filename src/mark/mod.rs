@@ -269,19 +269,19 @@ impl<'a> Mark<'a> {
             Mark::String(sv) => Ok(Value::StringSlice(self.checked_slice(&sv.data, idx)?)),
 
             Mark::Decimal32(d) => Ok(Value::Decimal32Slice {
-                precision: d.precision,
+                scale: d.scale,
                 slice: self.checked_slice(d.data.as_slice(), idx)?,
             }),
             Mark::Decimal64(d) => Ok(Value::Decimal64Slice {
-                precision: d.precision,
+                scale: d.scale,
                 slice: self.checked_slice(d.data.as_slice(), idx)?,
             }),
             Mark::Decimal128(d) => Ok(Value::Decimal128Slice {
-                precision: d.precision,
+                scale: d.scale,
                 slice: self.checked_slice(d.data.as_slice(), idx)?,
             }),
             Mark::Decimal256(d) => Ok(Value::Decimal256Slice {
-                precision: d.precision,
+                scale: d.scale,
                 slice: self.checked_slice(d.data.as_slice(), idx)?,
             }),
             Mark::FixedString(mark) => Ok(Value::FixedStringSlice {
@@ -506,7 +506,7 @@ impl<'a> Mark<'a> {
             Mark::Empty => &[],
             other => {
                 cold_path();
-                return Err(Error::MismatchedType(other.as_str(), "Int8"));
+                return Err(Error::MismatchedType(other.as_str(), "Bool"));
             }
         };
 
@@ -732,25 +732,25 @@ impl Array<'_> {
 
 #[derive(Debug)]
 pub struct Decimal32<'a> {
-    pub(crate) precision: u8,
+    pub(crate) scale: u8,
     pub(crate) data: ByteView<'a, Decimal32Data>,
 }
 
 #[derive(Debug)]
 pub struct Decimal64<'a> {
-    pub(crate) precision: u8,
+    pub(crate) scale: u8,
     pub(crate) data: ByteView<'a, Decimal64Data>,
 }
 
 #[derive(Debug)]
 pub struct Decimal128<'a> {
-    pub(crate) precision: u8,
+    pub(crate) scale: u8,
     pub(crate) data: ByteView<'a, Decimal128Data>,
 }
 
 #[derive(Debug)]
 pub struct Decimal256<'a> {
-    pub(crate) precision: u8,
+    pub(crate) scale: u8,
     pub(crate) data: ByteView<'a, Decimal256Data>,
 }
 
