@@ -2,15 +2,13 @@ use crate::zc;
 use core::hint::cold_path;
 use core::{
     fmt,
-    marker::PhantomData,
     mem::size_of,
     ops::{Index, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive},
 };
 
 #[repr(transparent)]
 pub struct ByteView<'a, T: zc::Unaligned + zc::FromBytes + Copy> {
-    bytes: &'a [u8],
-    _pd: PhantomData<&'a T>,
+    data: &'a [T],
 }
 
 impl<'a, T: zc::Unaligned + zc::FromBytes + Copy> TryFrom<&'a [u8]> for ByteView<'a, T> {
@@ -18,10 +16,15 @@ impl<'a, T: zc::Unaligned + zc::FromBytes + Copy> TryFrom<&'a [u8]> for ByteView
 
     fn try_from(bytes: &'a [u8]) -> Result<Self, Self::Error> {
         if bytes.len().is_multiple_of(size_of::<T>()) {
-            Ok(Self {
-                bytes,
-                _pd: PhantomData,
-            })
+            let len = bytes.len() / size_of::<T>();
+            // SAFETY:
+            //  - `T` is read-only
+            //  - Mem is initialized
+            //  - `T: Unaligned` guarantees `&T` is valid at any address
+            //  - `T: FromBytes` guarantees that initialized bytes are valid `T`
+            // - `len * size_of::<T>() == bytes.len()`
+            let data = unsafe { core::slice::from_raw_parts(bytes.as_ptr().cast::<T>(), len) };
+            Ok(Self { data })
         } else {
             cold_path();
             Err(Self::Error::Length(bytes.len()))
@@ -32,7 +35,7 @@ impl<'a, T: zc::Unaligned + zc::FromBytes + Copy> TryFrom<&'a [u8]> for ByteView
 impl<'a, T: zc::Unaligned + zc::FromBytes + Copy> ByteView<'a, T> {
     #[inline]
     pub(crate) const fn len(&self) -> usize {
-        self.bytes.len() / size_of::<T>()
+        self.data.len()
     }
 
     #[expect(dead_code)]
@@ -41,14 +44,13 @@ impl<'a, T: zc::Unaligned + zc::FromBytes + Copy> ByteView<'a, T> {
     }
 
     #[inline(always)]
-    pub(crate) fn get(&self, index: usize) -> Option<&T> {
-        self.as_slice().get(index)
+    pub(crate) fn get(&self, index: usize) -> Option<&'a T> {
+        self.data.get(index)
     }
 
     #[inline(always)]
     pub(crate) const fn as_slice(&self) -> &'a [T] {
-        let n_elements = self.len();
-        unsafe { core::slice::from_raw_parts(self.bytes.as_ptr().cast::<T>(), n_elements) }
+        self.data
     }
 }
 
@@ -56,14 +58,7 @@ impl<T: zc::Unaligned + zc::FromBytes + Copy> Index<usize> for ByteView<'_, T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
-        let size = size_of::<T>();
-        assert!(index < self.len(), "index out of bounds");
-
-        // SAFETY:
-        // - `idx` has been bounds-checked.
-        // - `size` is the exact size of `T`.
-        // - `T: Unaligned` promises that `&T` is valid at any address.
-        unsafe { &*self.bytes.as_ptr().add(index * size).cast::<T>() }
+        &self.data[index]
     }
 }
 
@@ -73,8 +68,8 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ByteView")
-            .field("len_bytes", &self.bytes.len())
-            .field("data", &self.as_slice())
+            .field("len_bytes", &size_of_val(self.data))
+            .field("data", &self.data)
             .finish()
     }
 }
