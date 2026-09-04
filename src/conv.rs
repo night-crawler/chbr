@@ -1,7 +1,9 @@
-use std::sync::LazyLock;
+use std::{hint::cold_path, sync::LazyLock};
 
 use chrono::{DateTime, Duration, NaiveDate, TimeZone as _, Utc};
 use chrono_tz::{Tz, TzOffset};
+
+use crate::Error;
 
 const EPOCH_DATE: NaiveDate = NaiveDate::from_yo_opt(1970, 1).expect("1970 day 1 is a valid date");
 
@@ -60,16 +62,49 @@ pub fn datetime32_resolved(secs: u32, tz: Tz, utc_offset: Option<TzOffset>) -> D
     }
 }
 
-pub fn datetime64(timestamp: i64, precision: u8) -> Option<DateTime<Utc>> {
-    let pow = 10i64.checked_pow(u32::from(precision))?;
-    let secs = timestamp / pow;
-    let rem_ms = (timestamp % pow).abs();
-    let nsec = rem_ms.checked_mul(1_000_000)?;
-    let nsec = u32::try_from(nsec).ok()?;
-    DateTime::<Utc>::from_timestamp(secs, nsec)
+pub fn datetime64(timestamp: i64, precision: u8) -> crate::Result<DateTime<Utc>> {
+    const POW10: [i64; 10] = [
+        1,
+        10,
+        100,
+        1_000,
+        10_000,
+        100_000,
+        1_000_000,
+        10_000_000,
+        100_000_000,
+        1_000_000_000,
+    ];
+
+    let Some(&pow) = POW10.get(usize::from(precision)) else {
+        cold_path();
+        return Err(Error::ValueOutOfRange(
+            "u8",
+            "DateTime64 precision (0..=9)",
+            precision.to_string(),
+        ));
+    };
+    let secs = timestamp.div_euclid(pow);
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "0 <= rem_euclid(pow) < pow, so the product is < 10^9 and fits u32"
+    )]
+    let nsec = (timestamp.rem_euclid(pow) * POW10[9 - usize::from(precision)]) as u32;
+    match DateTime::<Utc>::from_timestamp(secs, nsec) {
+        Some(dt) => Ok(dt),
+        None => {
+            cold_path();
+            Err(Error::ValueOutOfRange(
+                "DateTime64",
+                "DateTime<Utc>",
+                timestamp.to_string(),
+            ))
+        }
+    }
 }
 
-pub fn datetime64_tz(timestamp: i64, precision: u8, tz: Tz) -> Option<DateTime<Tz>> {
+pub fn datetime64_tz(timestamp: i64, precision: u8, tz: Tz) -> crate::Result<DateTime<Tz>> {
     datetime64_resolved(timestamp, precision, tz, utc_alias_offset(tz))
 }
 
@@ -79,9 +114,9 @@ pub fn datetime64_resolved(
     precision: u8,
     tz: Tz,
     utc_offset: Option<TzOffset>,
-) -> Option<DateTime<Tz>> {
+) -> crate::Result<DateTime<Tz>> {
     let dt_utc = datetime64(timestamp, precision)?;
-    Some(match utc_offset {
+    Ok(match utc_offset {
         Some(offset) => DateTime::from_naive_utc_and_offset(dt_utc.naive_utc(), offset),
         None => dt_utc.with_timezone(&tz),
     })
@@ -131,5 +166,73 @@ mod tests {
             "GMT",
             "GMT column rendered with the wrong abbreviation"
         );
+    }
+
+    #[test]
+    fn datetime64_scales_every_precision() {
+        // 2023-11-14T22:13:20.123456789Z at each precision.
+        let base = i64::from(SECS);
+        let cases: [(u8, i64, u32); 10] = [
+            (0, base, 0),
+            (1, base * 10 + 1, 100_000_000),
+            (2, base * 100 + 12, 120_000_000),
+            (3, base * 1_000 + 123, 123_000_000),
+            (4, base * 10_000 + 1_234, 123_400_000),
+            (5, base * 100_000 + 12_345, 123_450_000),
+            (6, base * 1_000_000 + 123_456, 123_456_000),
+            (7, base * 10_000_000 + 1_234_567, 123_456_700),
+            (8, base * 100_000_000 + 12_345_678, 123_456_780),
+            (9, base * 1_000_000_000 + 123_456_789, 123_456_789),
+        ];
+        for (precision, ts, nanos) in cases {
+            let dt = datetime64(ts, precision).unwrap_or_else(|e| panic!("p{precision}: {e}"));
+            assert_eq!(dt.timestamp(), base, "seconds wrong at p{precision}");
+            assert_eq!(
+                dt.timestamp_subsec_nanos(),
+                nanos,
+                "fraction wrong at p{precision}"
+            );
+        }
+    }
+
+    #[test]
+    fn datetime64_negative_floors_toward_neg_inf() {
+        let dt = datetime64(-1_500, 3).unwrap();
+        assert_eq!(
+            dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            "1969-12-31T23:59:58.500Z"
+        );
+        // Whole == 0 case from ClickHouse writeDateTimeText: -0.877 -> 23:59:59.123.
+        let dt = datetime64(-877, 3).unwrap();
+        assert_eq!(
+            dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            "1969-12-31T23:59:59.123Z"
+        );
+        // Exact negative second has no fraction.
+        let dt = datetime64(-1_000_000, 6).unwrap();
+        assert_eq!(
+            dt.to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+            "1969-12-31T23:59:59.000000Z"
+        );
+    }
+
+    #[test]
+    fn datetime64_rejects_precision_above_nine() {
+        assert!(matches!(
+            datetime64(0, 10),
+            Err(Error::ValueOutOfRange("u8", _, _))
+        ));
+        assert!(matches!(
+            datetime64(0, u8::MAX),
+            Err(Error::ValueOutOfRange("u8", _, _))
+        ));
+    }
+
+    #[test]
+    fn datetime64_rejects_unrepresentable_timestamp() {
+        assert!(matches!(
+            datetime64(i64::MAX, 0),
+            Err(Error::ValueOutOfRange("DateTime64", _, _))
+        ));
     }
 }

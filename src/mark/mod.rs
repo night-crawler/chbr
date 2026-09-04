@@ -333,10 +333,7 @@ impl<'a> Mark<'a> {
                 let Some(dt) = d.data.get(index) else {
                     return Ok(None);
                 };
-                let Some(dt) = dt.with_tz_and_precision(d.tz, d.precision) else {
-                    cold_path();
-                    return Err(Error::Overflow("DateTime64 value out of range".to_owned()));
-                };
+                let dt = dt.with_tz_and_precision(d.tz, d.precision)?;
                 Ok(Some(dt.with_timezone(&tz)))
             }
             _ => {

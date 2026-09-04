@@ -333,22 +333,12 @@ impl<'a> TryRead<'a> for DateTime64<'a> {
             cold_path();
             return Err(Error::IndexOutOfBounds(idx, "DateTime64"));
         };
-        match crate::conv::datetime64_resolved(
+        crate::conv::datetime64_resolved(
             value.0.get(),
             self.mark.precision,
             self.mark.tz,
             self.cached_offset,
-        ) {
-            Some(dt) => Ok(dt),
-            None => {
-                cold_path();
-                Err(Error::ValueOutOfRange(
-                    "DateTime64",
-                    "DateTime<Tz>",
-                    value.0.get().to_string(),
-                ))
-            }
-        }
+        )
     }
 }
 

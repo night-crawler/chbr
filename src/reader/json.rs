@@ -819,11 +819,8 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
                 visitor.visit_string(value.to_rfc3339())
             }
             mark::Mark::DateTime64(value) => {
-                let Some(value) =
-                    at!(value.data.get(cell.row)).with_tz_and_precision(value.tz, value.precision)
-                else {
-                    return Err(Error::Overflow("DateTime64 value out of range".to_owned()).into());
-                };
+                let value = at!(value.data.get(cell.row))
+                    .with_tz_and_precision(value.tz, value.precision)?;
                 visitor.visit_string(value.to_rfc3339())
             }
             mark::Mark::Ipv4(value) => {

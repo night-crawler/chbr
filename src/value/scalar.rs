@@ -122,12 +122,7 @@ impl TryFrom<Value<'_>> for chrono::DateTime<Tz> {
                     .data
                     .get(index)
                     .expect("bug: we checked the boundary before creating the Value")
-                    .with_tz_and_precision(d.tz, d.precision);
-                let Some(value) = value else {
-                    cold_path();
-                    return Err(Error::Overflow("DateTime64 value out of range".to_owned()));
-                };
-
+                    .with_tz_and_precision(d.tz, d.precision)?;
                 Ok(value)
             }
             other => Err(other.mismatched_type(short_type_name::<Self>())),
@@ -416,7 +411,7 @@ impl<'a> TryFrom<Value<'a>> for DateTime64SliceIterator<'a> {
 }
 
 impl Iterator for DateTime64SliceIterator<'_> {
-    type Item = Option<chrono::DateTime<Tz>>;
+    type Item = crate::Result<chrono::DateTime<Tz>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.slice
