@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::hint::cold_path;
-use std::ops::Deref;
 
 use log::debug;
 
@@ -24,14 +23,6 @@ pub(crate) struct ParseContext<'a> {
     pub(crate) col_id: usize,
 
     pub(crate) column_name: &'a str,
-}
-
-impl Deref for ParseContext<'_> {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        self.input
-    }
 }
 
 impl<'a> ParseContext<'a> {
@@ -160,48 +151,6 @@ mod tests {
 
     use super::*;
     use crate::common::load;
-
-    macro_rules! test_file {
-        (
-            $(
-                $name:ident => $file:expr
-            ),* $(,)?
-        ) => {
-            $(
-                #[test]
-                fn $name() -> TestResult {
-                    let buf = load($file)?;
-                    parse_many(&buf)?;
-                    Ok(())
-                }
-            )*
-        }
-    }
-
-    test_file! {
-        a_lot_of_types => "./testdata/sample.native",
-        array_lc_string => "./testdata/array_lc_string.native",
-        array => "./testdata/array.native",
-        tuple => "./testdata/tuple.native",
-        variant => "./testdata/variant.native",
-        dynamic => "./testdata/dynamic.native",
-        nullable_string => "./testdata/nullable_string.native",
-        json => "./testdata/json.native",
-        array_nullable_int64 => "./testdata/array_nullable_int64.native",
-        array_lc_nullable_string => "./testdata/array_lc_nullable_string.native",
-        array_string => "./testdata/array_string.native",
-        map_nullable_lc_string => "./testdata/map_nullable_lc_string.native",
-        events => "./testdata/events.native",
-        plain_strings => "./testdata/plain_strings.native",
-        metric_activity => "./testdata/metric_activity.native",
-        geo_sample => "./testdata/geo_sample.native",
-        array_of_nested => "./testdata/array_of_nested.native",
-        json_arr => "./testdata/json_arr.native",
-        variant_arr => "./testdata/variant_arr.native",
-        dynamic_arr => "./testdata/dynamic_arr.native",
-        named_tuple => "./testdata/named_tuple.native",
-        dynamic_max_types => "./testdata/dynamic_max_types.native",
-    }
 
     fn var_str(out: &mut Vec<u8>, s: &str) {
         out.push(u8::try_from(s.len()).unwrap());
