@@ -538,9 +538,39 @@ insert into uuid_and_dates (id, date, date32, datetime, datetime64) values
 
 select * from uuid_and_dates order by id;
 
-create table lol (
-                     datetime64 DateTime64(2, 'UTC') default now()
+-- datetime_tz.native: every DateTime type spelling the server emits.
+-- Note: `FORMAT Native` via clickhouse-client/HTTP (client revision 0) strips the
+-- zone from a top-level DateTime('tz') -> `DateTime`; nested ones survive.
+drop table if exists datetime_tz;
+create table datetime_tz (
+    a DateTime,
+    b DateTime('Europe/Berlin'),
+    c DateTime64(3),
+    d DateTime64(6, 'Asia/Tokyo'),
+    e DateTime64,
+    f Nullable(DateTime64(9)),
+    g Array(DateTime('UTC'))
+) engine = Memory;
 
+insert into datetime_tz values
+    (1700000000, 1700000000, 1700000000.123, 1700000000.123456, 1700000000.5, NULL, [1700000000]);
+
+select a, b, c, d, e, f, g, cast(b, 'Nullable(DateTime(''Europe/Berlin''))') as h
+from datetime_tz format Native;
+
+-- max_types=0 forces every value into the SharedVariant String sub-column.
+select number as id, cast(number * 10, 'Dynamic(max_types=0)') as d, toString(number) as after
+from numbers(3) format Native;
+
+select number as id, cast(concat('{"a":', toString(number * 10), '}'), 'JSON(max_dynamic_types=0)') as j,
+       toString(number) as after
+from numbers(3) format Native;
+
+select number as id, cast(number * 10, 'Dynamic(max_types=2)') as d, toString(number) as after
+from numbers(3) format Native;
+
+create table lol (
+    datetime64 DateTime64(2, 'UTC') default now()
 ) engine = MergeTree order by tuple();
 
 
@@ -801,6 +831,20 @@ insert into fixed_string_array (id, arr) values
 select * from fixed_string_array order by id;
 
 
+create table fixed_string_binary (
+    id Int64,
+    fb FixedString(4)
+) engine = MergeTree order by tuple();
+
+insert into fixed_string_binary (id, fb) values
+    (0, unhex('01000000')),
+    (1, unhex('00000000')),
+    (2, unhex('deadbeef')),
+    (3, 'ab');
+
+select * from fixed_string_binary order by id;
+
+
 drop table enums_sample;
 
 create table enums_sample (
@@ -818,6 +862,21 @@ insert into enums_sample (id, e8, e16) values
     (5, 'Blue', 'Bar');
 
 select * from enums_sample order by id;
+
+create table enums_negative_sample (
+    id Int64,
+    e8 Enum8('Pos' = 5, 'Neg' = -5, 'Min' = -128) default 'Pos',
+    e16 Enum16('Pos' = 5000, 'Neg' = -5000, 'Min' = -32768) default 'Pos'
+) engine = MergeTree order by tuple();
+
+insert into enums_negative_sample (id, e8, e16) values
+    (0, 'Pos', 'Pos'),
+    (1, 'Neg', 'Neg'),
+    (2, 'Min', 'Min'),
+    (3, 'Neg', 'Pos');
+
+select * from enums_negative_sample order by id;
+
 
 
 create table enums_array_sample (
@@ -1048,3 +1107,198 @@ values (0, [1, 2, 3]),
        (5, [toDateTime('2023-01-01 12:00:00'), toDateTime('2023-01-02 12:00:00')])
        (6, ['{"sample": true}'::JSON])
 ;
+
+create table named_tuple
+(
+    id  Int64,
+    tup Tuple(name String, rank Int64)
+) engine = MergeTree order by tuple();
+
+insert into named_tuple (id, tup) values
+    (0, ('apple', 0)),
+    (1, ('banana', 10)),
+    (2, ('cherry', 20)),
+    (3, ('date', 30)),
+    (4, ('elderberry', 40)),
+    (5, ('fig', 50));
+
+select * from named_tuple order by id;
+
+-- Variant/Dynamic are implicitly nullable: a row may hold none of the alternatives.
+-- Discriminator 255 marks such rows; nothing is written to any sub-column.
+-- Dumped to variant_null.native / dynamic_null.native.
+SET allow_experimental_variant_type = 1;
+drop table if exists variant_null_sample;
+create table variant_null_sample
+(
+    id  Int64,
+    var Variant(Int64, String, Array(Int64)),
+    arr Array(Variant(Int64, String))
+) engine = MergeTree order by tuple();
+
+insert into variant_null_sample (id, var, arr) values
+    (0, 1, [CAST(1::Int64, 'Variant(Int64, String)'), CAST(NULL, 'Variant(Int64, String)'), CAST('a', 'Variant(Int64, String)')]),
+    (1, NULL, []),
+    (2, 'a', [CAST(NULL, 'Variant(Int64, String)')]),
+    (3, [1, 2, 3], [CAST('b', 'Variant(Int64, String)')]),
+    (4, NULL, [CAST(NULL, 'Variant(Int64, String)'), CAST(NULL, 'Variant(Int64, String)')]);
+
+optimize table variant_null_sample final;
+
+select id, var, arr from variant_null_sample order by id format Native;
+
+drop table if exists dynamic_null_sample;
+create table dynamic_null_sample
+(
+    id  Int64,
+    dyn Dynamic,
+    arr Array(Dynamic)
+) engine = MergeTree order by tuple();
+
+insert into dynamic_null_sample (id, dyn, arr) values
+    (0, 42::Int64, [CAST(1::Int64, 'Dynamic'), CAST(NULL, 'Dynamic'), CAST('a', 'Dynamic')]),
+    (1, CAST(NULL, 'Dynamic'), []),
+    (2, 'x', [CAST(NULL, 'Dynamic')]),
+    (3, CAST(NULL, 'Dynamic'), [CAST(NULL, 'Dynamic'), CAST(NULL, 'Dynamic')]);
+
+optimize table dynamic_null_sample final;
+
+select id, dyn, arr from dynamic_null_sample order by id format Native;
+
+select
+    number as id,
+    [] as arr,
+    NULL as n,
+    [NULL] as arr_n,
+    [[]] as arr_arr
+from numbers(3) format Native;
+
+select tuple(1)::Tuple(_id UInt64) as t1, tuple(2, 'x')::Tuple(`my field` UInt64, `1x` String) as t2 format Native;
+
+set flatten_nested=0;
+select [(1, 'x'), (2, 'y')]::Nested(`my field` UInt64, `1x` String) as n format Native;
+
+select
+    toIntervalNanosecond(1) as ns,
+    toIntervalMicrosecond(2) as us,
+    toIntervalMillisecond(3) as ms,
+    toIntervalSecond(4) as s,
+    toIntervalMinute(5) as mi,
+    toIntervalHour(6) as h,
+    toIntervalDay(7) as d,
+    toIntervalWeek(8) as w,
+    toIntervalMonth(9) as mo,
+    toIntervalQuarter(10) as q,
+    toIntervalYear(11) as y,
+    [toIntervalSecond(-1), toIntervalSecond(1)] as arr,
+    if(number = 0, NULL, toIntervalHour(number)) as n
+from numbers(2) format Native;
+
+select toIntervalDay(1) as i, sumState(toUInt64(1)) as s format Native;
+
+select CAST('{"a":{"b":"x"},"c":1}', 'JSON(a.b LowCardinality(String))') as j format Native;
+
+select CAST('{"a":[{"x":1}],"b":2}', 'JSON') as j format Native;
+select CAST('{"b":[{"x":1}],"a":2}', 'JSON') as j format Native;
+
+select CAST(['a', NULL, 'b'], 'Array(LowCardinality(Nullable(String)))') as arr format Native;
+
+select toUUID('61f0c404-5cb3-11e7-907b-a6006ad3dba0') as u, toIPv6('2001:db8::1') as ip6, toIPv4('192.168.1.2') as ip4 format Native;
+
+drop table if exists simple_agg;
+create table simple_agg
+(
+    x SimpleAggregateFunction(sum, UInt64),
+    y SimpleAggregateFunction(anyLast, Nullable(String))
+) engine = AggregatingMergeTree order by tuple();
+insert into simple_agg values (7, 'a');
+select * from simple_agg format Native;
+
+select
+    CAST([1, 2], 'SimpleAggregateFunction(groupArrayArray(3), Array(UInt64))') as a,
+    CAST('a', 'SimpleAggregateFunction(anyLast, LowCardinality(String))') as lc,
+    CAST(map('k', 5), 'SimpleAggregateFunction(sumMap, Map(String, UInt64))') as m
+format Native;
+
+-- Every array in `t` and every map in `m` is empty; a column length derived from the array
+-- elements or the map entries would be 0 instead of 2.
+select
+    ([]::Array(UInt8), toUInt8(number)) as t,
+    map()::Map(String, UInt8) as m,
+    (toUInt8(number), '')::Tuple(a UInt8, b String) as nt
+from numbers(2) format Native;
+
+select
+    number as id,
+    reinterpret(toUInt8(number), 'Bool') as b,
+    arrayMap(x -> reinterpret(toUInt8(x), 'Bool'), [number, 0, 255]) as arr
+from numbers(4) format Native;
+
+set enable_time_time64_type=1;
+select
+    toTime('12:34:56') as t,
+    toTime('-01:02:03') as neg,
+    toTime64('12:34:56.789', 3) as t3,
+    toTime64('-00:00:01.5', 6) as neg6,
+    toTime64('999:59:59.999999999', 9) as t9,
+    toTime64('00:00:07', 0) as t0,
+    [toTime('00:00:01'), toTime('-00:00:02')] as arr,
+    if(number = 0, NULL, toTime64('01:00:00', 3)) as n
+from numbers(2) format Native;
+
+drop table if exists geometry_sample;
+create table geometry_sample
+(
+    id  Int64,
+    geo Geometry,
+    mp  MultiPoint,
+    arr Array(Geometry)
+) engine = MergeTree order by id;
+
+insert into geometry_sample values
+    (1, readWKT('POINT(1 2)'), readWKT('MULTIPOINT(1 1,2 2,3 3)'), [readWKT('POINT(1 2)'), NULL]),
+    (2, readWKT('LINESTRING(0 0,1 1,2 0)'), [], []),
+    (3, readWKT('MULTILINESTRING((0 0,1 1),(2 2,3 3,4 2))'), [(7, 7)], [readWKT('LINESTRING(0 0,1 1)')]),
+    (4, readWKT('POLYGON((0 0,10 0,10 10,0 10,0 0),(4 4,5 4,5 5,4 5,4 4))'), [], [NULL]),
+    (5, readWKT('MULTIPOLYGON(((0 0,1 0,1 1,0 0)),((5 5,6 5,6 6,5 5),(5.2 5.2,5.5 5.2,5.5 5.5,5.2 5.2)))'), [], []),
+    (6, CAST([(0, 0), (1, 0), (1, 1)], 'Ring'), [], []),
+    (7, readWKT('MULTIPOINT(1 1,2 2,3 3)'), [], [readWKT('MULTIPOINT(9 9)')]),
+    (8, NULL, [], []);
+
+optimize table geometry_sample final;
+
+select id, geo, mp, arr from geometry_sample order by id format Native;
+
+
+set flatten_nested = 0;
+drop table if exists empty_arrays;
+create table empty_arrays
+(
+    id        Int64,
+    a_bool    Array(Bool),
+    a_str     Array(String),
+    a_fs      Array(FixedString(2)),
+    a_e8      Array(Enum8('a' = 1, 'b' = 2)),
+    a_dt64    Array(DateTime64(3, 'UTC')),
+    a_dec     Array(Decimal64(2)),
+    a_lc      Array(LowCardinality(String)),
+    a_lcn     Array(LowCardinality(Nullable(String))),
+    a_n       Array(Nullable(Int64)),
+    a_a       Array(Array(UInt8)),
+    a_t       Array(Tuple(String, UInt8)),
+    a_nt      Array(Tuple(a String, b UInt8)),
+    a_m       Array(Map(String, UInt8)),
+    n         Nested(x UInt8, y String),
+    a_v       Array(Variant(Int64, String)),
+    a_d       Array(Dynamic),
+    v         Variant(Array(Int64), Int64),
+    d         Dynamic,
+    d_nothing Dynamic
+) engine = Memory;
+
+insert into empty_arrays values
+    (0, [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], []::Array(Int64)::Dynamic, array()::Dynamic),
+    (1, [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], NULL::Variant(Array(Int64), Int64), NULL::Dynamic, NULL::Dynamic),
+    (2, [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], 7::Int64, 7::Int64::Dynamic, 7::Int64::Dynamic);
+
+select * from empty_arrays order by id format Native;

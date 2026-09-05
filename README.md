@@ -18,6 +18,27 @@ This crate is an attempt to implement a random access iterator over CH blocks.
 It supposedly supports all CH types, supposedly correctly, including stuff like `Dynamic`,
 `JSON`, `LowCardinality`, etc.
 
+## Perf
+
+Keep in mind that it still needs the whole block in memory, and, for example, if you use the official `clickhouse-rs`,
+you will need to allocate memory for all blocks and only then parse/process it. Since the original `clickhouse-rs`
+does not expose the RowBinary reader, I had to hack it to have some sort of apples-to-apples comparison.
+
+- `serde` means `clickhouse-rs` deserializer from a pinned version I need to update some day
+- `chbr` means manual read with column sorting
+- `chbr_derive` - derive a struct and use the generated `*Item` column to access
+- `chbr_derive_direct` read with try_read.
+
+```bash
+# LTO, mimalloc, a mixture of LC strings, arrays, and dates, 100k rows
+# AMD Ryzen 9 7940HS
+cargo bench --bench refs --features mimalloc
+serde                   time:   [18.406 ms 18.484 ms 18.562 ms]
+chbr                    time:   [7.6797 ms 7.7583 ms 7.8431 ms]
+chbr_derive             time:   [8.1552 ms 8.2321 ms 8.3130 ms]
+chbr_derive_direct      time:   [7.1309 ms 7.1904 ms 7.2531 ms]
+```
+
 ## Quick start
 
 Create a table and populate:
@@ -39,14 +60,15 @@ ORDER BY id;
 INSERT INTO chbr_example VALUES
     (1, ['fast', 'cpu'], {'region': 'eu', 'host': 'a1'}, 'hello'),
     (2, [], {'region': 'us'}, 42),
-    (3, ['gpu'], {}, [1, 2, 3]);
+    (3, ['gpu'], {}, [1, 2, 3]),
+    (4, ['idle'], {'region': 'ap'}, NULL);
 "
 ```
 
 Dump the table in `Native` format:
 
 ```sh
-clickhouse-client --host 127.0.0.1 --port 9001 \
+clickhouse-client --host 127.0.0.1 --port 9000 \
     --database qweqwe --user lol --password wut \
     --query "SELECT * FROM chbr_example ORDER BY id FORMAT Native" \
     > testdata/example.native
@@ -55,7 +77,7 @@ clickhouse-client --host 127.0.0.1 --port 9001 \
 Parse it:
 
 ```rust
-use chbr::{BlocksIterator, parse::block::parse_many, value::Value};
+use chbr::{BStr, BlocksIterator, parse::block::parse_many, value::Value};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data = std::fs::read("testdata/example.native")?;
@@ -67,17 +89,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let it = BlocksIterator::new_ordered(&mut blocks, &["id", "tags", "attrs", "payload"])?;
 
     for row in it {
-        // You can be the one implementing a proc macro to avoid doing this
+        // Or use proc macro
         let [id, tags, attrs, payload] = row.cols() else {
             return Err("unexpected column count".into());
         };
         let i = row.row_index();
 
-        // Parse u32 using accessor method avoiding fat Value creation 
+        // Parse u32 using accessor method avoiding fat Value creation.
+        // Outer Result: type mismatch / malformed data; Option: index out of range.
         let id = id.get_u32(i)?.expect("valid row index");
 
         // Extract a str arr
-        let tags: &[&str] = tags.get(i).expect("valid row index").try_into()?;
+        let tags: &[&BStr] = tags.get(i)?.expect("valid row index").try_into()?;
 
         // Convenience method for maps
         let mut attrs_vec = vec![];
@@ -88,14 +111,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // Fat Value TryFrom path for Variant(Array(Int64), Int64, String)
-        let payload = match payload.get(i).expect("valid row index") {
+        // Fat Value TryFrom path for Variant(Array(Int64), Int64, String).
+        // Variant is implicitly nullable; a NULL row is Value::Empty.
+        let payload = match payload.get(i)?.expect("valid row index") {
             Value::String(s) => format!("string: {s}"),
             Value::Int64(n) => format!("int: {n}"),
             Value::Int64Slice(xs) => {
                 let xs = xs.iter().map(|x| x.get()).collect::<Vec<i64>>();
                 format!("array: {xs:?}")
             }
+            Value::Empty => "null".to_owned(),
             other => format!("unexpected: {other:?}"),
         };
 
@@ -106,17 +131,114 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-See same example in [`examples/basic.rs`](examples/basic.rs), and `testdata/example.native`.
+Or, instead of matching on `Value` and destructuring `row.cols()` by hand, derive a reader.
+
+```rust
+use chbr::parse::block::parse_many;
+use chbr::reader::{Array, ArrayIter, I64, Map, Str, U32, VariantNullable};
+use chbr::{FromBlock, FromVariant};
+
+// Same order as in Variant(Array(Int64), Int64, String)
+#[derive(FromVariant)]
+enum Payload<'a> {
+    Array(ArrayIter<'a, I64<'a>>),
+    Int(i64),
+    Str(&'a str),
+}
+
+#[derive(FromBlock)]
+struct Row<'a> {
+    id: U32<'a>,
+    tags: Array<'a, Str<'a>>,
+    #[col(name = "attrs")]
+    attributes: Map<'a, Str<'a>, Str<'a>>,
+    // Variant is implicitly nullable; `Variant<'a, Payload<'a>>` errors on NULL rows instead.
+    payload: VariantNullable<'a, Payload<'a>>,
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let data = std::fs::read("testdata/example.native")?;
+    let blocks = parse_many(&data)?;
+
+    // Column lookup by name once per block
+    // Row::rows(&block) does the same for a single block
+    // This example uses generated RowItem (for the `struct Row<'a>` above)
+    for row in Row::iter_blocks(&blocks) {
+        let row = row?;
+
+        // Arrays, maps, nested / !scalar cols are lazy
+        let tags: Vec<&str> = row.tags.try_collect_vec()?;
+        let attrs: Vec<(&str, &str)> = row.attributes.collect::<chbr::Result<_>>()?;
+
+        let payload = match row.payload {
+            Some(Payload::Str(s)) => format!("string: {s}"),
+            Some(Payload::Int(n)) => format!("int: {n}"),
+            Some(Payload::Array(xs)) => format!("array: {:?}", xs.try_collect_vec()?),
+            None => "null".to_owned(),
+        };
+
+        println!("id={} tags={tags:?} attrs={attrs:?} payload={payload}", row.id);
+    }
+
+    Ok(())
+}
+```
+
+Read data somewhat more manually:
+
+```rust
+use chbr::parse::block::parse_many;
+use chbr::reader::TryRead as _;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let data = std::fs::read("testdata/example.native")?;
+    let blocks = parse_many(&data)?;
+
+    for block in &blocks {
+        let cols = Row::from_block(block)?;
+
+        // Backwards, because we can
+        for i in (0..block.num_rows).rev() {
+            let id = cols.id.try_read(i)?;
+
+            // Not interested in the payload for this one, so it's never touched
+            if id == 2 {
+                continue;
+            }
+
+            let payload = match cols.payload.try_read(i)? {
+                Some(Payload::Str(s)) => format!("string: {s}"),
+                Some(Payload::Int(n)) => format!("int: {n}"),
+                Some(Payload::Array(xs)) => format!("array: {:?}", xs.try_collect_vec()?),
+                None => "null".to_owned(),
+            };
+
+            // Same row again because why not
+            let tag_count = cols.tags.try_read(i)?.count();
+            println!("id={id} tag_count={tag_count} payload={payload}");
+        }
+    }
+
+    Ok(())
+}
+```
+
+The standalone examples crate keeps both access styles as executable tests:
+
+- [`examples/tests/procedural`](examples/tests/procedural) drives blocks through `Mark`/`Value`
+  accessors directly, without any derive.
+- [`examples/tests/derive`](examples/tests/derive) exercises one schema apiece through
+  `#[derive(FromBlock)]` (and `#[derive(FromVariant)]` for variant schemas).
 
 ```sh
-cargo run --example basic
+cargo test -p chbr-examples
 ```
 
-Output:
+## ~Slop~ LLM policy
 
-```text
-id=1 tags=["fast", "cpu"] attrs=[("region", "eu"), ("host", "a1")] payload=string: hello
-id=2 tags=[] attrs=[("region", "us")] payload=int: 42
-id=3 tags=["gpu"] attrs=[] payload=array: [1, 2, 3]
-```
+- Every commit I didn't do myself I explicitly prefix with `slop:`
+- Around 100% of new added tests are LLM-generated
+- Derive examples are 100% LLM generated
 
+Newer types I don't use in production were slopped (JSON/Dynamic). Everything else has been initially written in the
+pre-slop era.

@@ -1,13 +1,18 @@
-use std::hint::unreachable_unchecked;
+use std::hint::cold_path;
 
 use log::debug;
 
 use crate::{
     Error,
-    mark::Mark,
     parse::{
-        IResult, block::ParseContext, column::string, consts::LOW_CARDINALITY_VERSION, parse_u64,
-        parse_var_str, parse_var_str_type, parse_varuint, typ::parse_type,
+        IResult,
+        block::ParseContext,
+        column::string,
+        consts::{
+            DYNAMIC_SERIALIZATION_V1, DYNAMIC_SERIALIZATION_V2, JSON_SERIALIZATION_V1,
+            JSON_SERIALIZATION_V2, LOW_CARDINALITY_VERSION, MAX_DYNAMIC_TYPES,
+        },
+        parse_u64, parse_var_str, parse_varuint,
     },
     types::{DynamicHeader, Field, JsonColumnHeader, JsonHeader, MapHeader, Type, TypeHeader},
 };
@@ -18,6 +23,7 @@ pub fn variant<'a>(
 ) -> IResult<&'a [u8], Vec<TypeHeader<'a>>> {
     let (input, mode) = parse_u64::<u64>(ctx.input)?;
     if mode != 0 {
+        cold_path();
         return Err(Error::Parse(format!(
             "Variant mode {mode} is not supported, only 0 is allowed"
         )));
@@ -25,15 +31,31 @@ pub fn variant<'a>(
     many(&ctx.fork(input), inner.iter())
 }
 
+// Reads what `SerializationDynamic::serializeBinaryBulkStatePrefix` writes.
 pub fn dynamic<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], DynamicHeader<'a>> {
     let (mut input, version) = parse_u64::<u64>(ctx.input)?;
-    if version == 1 {
-        let legacy_columns: u64;
-        (input, legacy_columns) = parse_varuint(input)?;
-        debug!("Legacy columns: {legacy_columns}");
+    match version {
+        DYNAMIC_SERIALIZATION_V1 => {
+            let legacy_max_types: u64;
+            (input, legacy_max_types) = parse_varuint(input)?;
+            debug!("Legacy max_dynamic_types: {legacy_max_types}");
+        }
+        DYNAMIC_SERIALIZATION_V2 => {}
+        other => {
+            cold_path();
+            return Err(Error::NotImplemented(format!(
+                "Dynamic serialization version {other}"
+            )));
+        }
     }
 
     let (mut input, num_types) = parse_varuint::<usize>(input)?;
+    if num_types > MAX_DYNAMIC_TYPES {
+        cold_path();
+        return Err(Error::CorruptedData(format!(
+            "Dynamic column has too many types: {num_types} (max {MAX_DYNAMIC_TYPES})"
+        )));
+    }
     let mut type_names = Vec::with_capacity(num_types + 1);
     for _ in 0..num_types {
         let t;
@@ -48,13 +70,13 @@ pub fn dynamic<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], DynamicHeader<'a
 
     let mut types = Vec::with_capacity(num_types + 1);
     for name in type_names {
-        let typ;
-        (_, typ) = parse_type(name.as_bytes())?;
-        types.push(typ);
+        types.push(Type::from_bytes(name.as_bytes())?);
     }
 
     debug!("Dynamic types: {types:?}");
 
+    // No statistics precede the Variant prefix: `NativeWriter` leaves `write_statistics` at
+    // `StatisticsMode::NONE`.
     let headers;
     (input, headers) = variant(&ctx.fork(input), &types)?;
 
@@ -120,73 +142,76 @@ pub fn lc<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], TypeHeader<'a>> {
         return Ok((input, TypeHeader::Empty));
     }
 
-    Err(Error::Parse(format!(
-        "LowCardinality version {version} is not supported, only {LOW_CARDINALITY_VERSION} is \
-         allowed"
-    )))
+    Err({
+        cold_path();
+        Error::Parse(format!(
+            "LowCardinality version {version} is not supported, only {LOW_CARDINALITY_VERSION} is \
+             allowed"
+        ))
+    })
 }
 
-pub fn json<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], JsonHeader<'a>> {
-    let (input, version) = parse_u64::<u64>(ctx.input)?;
+// Reads what `SerializationObject::serializeBinaryBulkStatePrefix` writes for V1/V2, in order:
+//   1. structure: version, [V1: max dynamic paths], num dynamic paths, dynamic path names;
+//   2. the prefix of every typed path, in name order;
+//   3. for every dynamic path, in name order, a complete `Dynamic` prefix
+//      (`SerializationDynamic::serializeBinaryBulkStatePrefix`, which in turn nests the
+//      `Variant` prefix: mode + every variant's prefix);
+//   4. the shared data prefix.
+pub fn json<'a>(
+    ctx: &ParseContext<'a>,
+    typed_paths: &[Field<'a>],
+) -> IResult<&'a [u8], JsonHeader<'a>> {
+    debug_assert!(
+        typed_paths.is_sorted_by_key(|field| field.name),
+        "typed path prefixes are written in name order"
+    );
+    let (mut input, version) = parse_u64::<u64>(ctx.input)?;
     debug!("JSON version: {version}");
-
-    let (input, num_paths_old) = parse_varuint::<u64>(input)?;
-    debug!("num_paths_old: {num_paths_old}");
-
-    let (input, num_paths) = parse_varuint(input)?;
-    let (mut input, paths) = string(&ctx.fork(input).with_num_rows(num_paths))?;
-    let Mark::String(paths) = paths else {
-        unsafe { unreachable_unchecked() };
-    };
-
-    let mut col_headers = Vec::with_capacity(num_paths);
-
-    for _ in 0..num_paths {
-        let header;
-        (input, header) = json_column(&ctx.fork(input))?;
-        col_headers.push(header);
+    match version {
+        JSON_SERIALIZATION_V1 => {
+            let max_dynamic_paths: u64;
+            (input, max_dynamic_paths) = parse_varuint(input)?;
+            debug!("JSON max dynamic paths: {max_dynamic_paths}");
+        }
+        JSON_SERIALIZATION_V2 => {}
+        other => {
+            cold_path();
+            return Err(Error::NotImplemented(format!(
+                "JSON serialization version {other}"
+            )));
+        }
     }
 
-    let (input, type_headers) = many(
-        &ctx.fork(input),
-        col_headers.iter().map(|ch| ch.typ.as_ref()),
-    )?;
+    let (input, num_dynamic_paths) = parse_varuint(input)?;
+    let (mut input, dynamic_paths) = string(&ctx.fork(input).with_num_rows(num_dynamic_paths))?;
 
-    let header = JsonHeader {
-        paths,
-        col_headers,
-        type_headers,
-    };
+    let cap = typed_paths.len() + num_dynamic_paths.min(input.len());
+    let mut paths = Vec::with_capacity(cap);
+    let mut col_headers = Vec::with_capacity(cap);
+    for field in typed_paths {
+        paths.push(field.name);
+    }
+    for path in dynamic_paths.data {
+        paths.push(crate::error::decode_utf8(path)?);
+    }
 
-    Ok((input, header))
-}
+    for field in typed_paths {
+        let header;
+        (input, header) = field.typ.decode_header(&ctx.fork(input))?;
+        col_headers.push(JsonColumnHeader::Typed {
+            typ: field.typ.clone(),
+            header,
+        });
+    }
+    for _ in 0..num_dynamic_paths {
+        let header;
+        (input, header) = dynamic(&ctx.fork(input))?;
+        col_headers.push(JsonColumnHeader::Dynamic(header));
+    }
+    // The shared data prefix is that of `Map(String, String)`, which is empty.
 
-fn json_column<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], JsonColumnHeader<'a>> {
-    let (input, version) = parse_u64(ctx.input)?;
-    let (input, max_types) = parse_varuint(input)?;
-    let (input, total_types) = parse_varuint(input)?;
-    let (input, typ) = parse_var_str_type(input)?;
-    let (input, variant) = parse_u64(input)?;
-
-    Ok((
-        input,
-        JsonColumnHeader {
-            path_version: version,
-            max_types,
-            total_types,
-            typ: Box::new(typ),
-            variant_version: variant,
-            mark: Mark::Empty,
-            discriminators: &[],
-
-            // The JSON header has been parsed and initialized with num_rows coming from the top
-            // level. In case it's a stand-alone JSON, then everything is fine: we could initialize
-            // the right number of offsets here. But if we have Array(JSON), then on this level
-            // we get num_rows of the Array itself, and not the number of rows we need to read of
-            // the JSON itself. For this reason, this field will be resized later.
-            offsets: vec![],
-        },
-    ))
+    Ok((input, JsonHeader { paths, col_headers }))
 }
 
 fn many<'a, 'b>(

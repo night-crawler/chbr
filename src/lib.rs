@@ -1,42 +1,60 @@
+extern crate self as chbr;
+
+use std::hint::cold_path;
+
+use chrono::NaiveDate;
+use chrono_tz::Tz;
+use log::debug;
+use std::collections::HashSet;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     iter::Peekable,
     net::{Ipv4Addr, Ipv6Addr},
     ops::Range,
 };
-
-use chrono::{NaiveDate, TimeZone};
-use chrono_tz::Tz;
-use log::debug;
 use uuid::Uuid;
-use zerocopy::little_endian::{I32, I64, I128, U16, U32, U64};
 
-use crate::{
-    conv::{date16, date32, datetime32, datetime32_tz, datetime64_tz},
-    mark::Mark,
-    value::Value,
-};
-
-pub mod conv;
+pub(crate) mod conv;
 pub mod error;
-pub mod index;
+pub mod interval;
 mod macros;
 pub mod mark;
 pub mod parse;
+pub mod reader;
 pub mod slice;
-pub mod types;
+pub(crate) mod types;
 pub mod value;
+pub mod zc;
 
+pub use bstr::BStr;
+pub use chbr_derive::{FromBlock, FromVariant};
 pub use error::Error;
+pub use interval::Interval;
+// Same name as the derive macro on purpose (macro vs type namespace):
+// `use crate::FromBlock;` imports both, serde-style.
+pub use reader::{FromBlock, FromVariant};
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+fn mark_by_name<'a, T>(col_names: &[&str], columns: &'a [T], name: &str) -> Result<&'a T> {
+    let column = col_names
+        .iter()
+        .zip(columns)
+        .find_map(|(column_name, column)| (*column_name == name).then_some(column));
+    match column {
+        Some(column) => Ok(column),
+        None => {
+            cold_path();
+            Err(Error::ColumnNotFound(name.to_owned()))
+        }
+    }
+}
 
 pub(crate) trait ByteExt {
     fn rtrim_zeros(&self) -> &[u8];
 }
 
 impl ByteExt for [u8] {
-    #[inline(always)]
     fn rtrim_zeros(&self) -> &[u8] {
         let mut end = self.len();
         while end > 0 && self[end - 1] == 0 {
@@ -49,8 +67,8 @@ impl ByteExt for [u8] {
 /// This range represents a starting offset and a length, as opposed to the
 /// Rust's range, which stores start and end positions.
 /// In particular, this range encodes row numbers/offsets within a ClickHouse block,
-/// so it should not be wildly huge. Nevertheless, if the end position exceeds `u32::MAX`,
-/// we still have a good chance of not failing to convert the Range<usize> to TinyRange.
+/// so it should not be wildly huge. Nevertheless, if the end position exceeds [`u32::MAX`],
+/// we still have a good chance of not failing to convert the [`Range<usize>`] to [`TinyRange`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TinyRange {
     pub start: u32,
@@ -58,11 +76,11 @@ pub struct TinyRange {
 }
 
 impl From<TinyRange> for Range<usize> {
-    #[inline(always)]
     fn from(value: TinyRange) -> Self {
+        let start = value.start as usize;
         Range {
-            start: value.start as usize,
-            end: (value.start + value.length) as usize,
+            start,
+            end: start + value.length as usize,
         }
     }
 }
@@ -70,20 +88,37 @@ impl From<TinyRange> for Range<usize> {
 impl TryFrom<Range<usize>> for TinyRange {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Range<usize>) -> std::result::Result<Self, Self::Error> {
-        let start = u32::try_from(value.start)
-            .map_err(|_| Error::ValueOutOfRange("usize", "u32", value.start.to_string()))?;
+        let Ok(start) = u32::try_from(value.start) else {
+            cold_path();
+            return Err(Error::ValueOutOfRange(
+                "usize",
+                "u32",
+                value.start.to_string(),
+            ));
+        };
 
-        let length = u32::try_from(value.end - value.start).map_err(|_| {
-            Error::ValueOutOfRange("usize", "u32", (value.end - value.start).to_string())
-        })?;
+        let Some(raw_length) = value.end.checked_sub(value.start) else {
+            cold_path();
+            return Err(Error::ValueOutOfRange(
+                "Range<usize>",
+                "TinyRange",
+                format!("{}..{}", value.start, value.end),
+            ));
+        };
+        let Ok(length) = u32::try_from(raw_length) else {
+            cold_path();
+            return Err(Error::ValueOutOfRange(
+                "usize",
+                "u32",
+                raw_length.to_string(),
+            ));
+        };
 
         Ok(TinyRange { start, length })
     }
 }
 
-#[macro_export]
 macro_rules! transparent_newtype {
     ( $( $vis:vis $name:ident ( $inner:ty ) ; )+ ) => {
         $(
@@ -101,12 +136,11 @@ macro_rules! transparent_newtype {
                 zerocopy::FromBytes,
                 zerocopy::Unaligned,
             )]
-            $vis struct $name(pub $inner);
+            $vis struct $name(pub(crate) $inner);
         )+
     };
 }
 
-#[macro_export]
 macro_rules! impl_from {
     ( $src:ty => $dst:ty , |$v:ident| $body:expr ) => {
         impl From<$src> for $dst {
@@ -121,16 +155,16 @@ macro_rules! impl_from {
 transparent_newtype! {
     pub I256 ([u8; 32]);
     pub U256 ([u8; 32]);
-    pub UuidData([U64; 2]);
-    pub Ipv4Data (U32);
+    pub UuidData([zc::U64; 2]);
+    pub Ipv4Data (zc::U32);
     pub Ipv6Data ([u8; 16]);
-    pub Date16Data (U16);
-    pub Date32Data (I32);
-    pub DateTime32Data (U32);
-    pub DateTime64Data (I64);
-    pub Decimal32Data (I32);
-    pub Decimal64Data (I64);
-    pub Decimal128Data (I128);
+    pub Date16Data (zc::U16);
+    pub Date32Data (zc::I32);
+    pub DateTime32Data (zc::U32);
+    pub DateTime64Data (zc::I64);
+    pub Decimal32Data (zc::I32);
+    pub Decimal64Data (zc::I64);
+    pub Decimal128Data (zc::I128);
     pub Decimal256Data (I256);
     pub Bf16Data ([u8; 2]);
 }
@@ -142,61 +176,76 @@ impl_from!(UuidData => Uuid, |d| {
     let [hi, lo] = d.0;
     Uuid::from_u64_pair(hi.get(), lo.get())
 });
-impl_from!(Date16Data => NaiveDate, |d| date16(d.0.get()));
-impl_from!(Date32Data => NaiveDate, |d| date32(d.0.get()));
-impl_from!(DateTime32Data => chrono::DateTime<chrono::Utc>, |d| datetime32(d.0.get()));
+impl_from!(Date16Data => NaiveDate, |d| conv::date16(d.0.get()));
+impl_from!(Date32Data => NaiveDate, |d| conv::date32(d.0.get()));
+impl_from!(DateTime32Data => chrono::DateTime<chrono::Utc>, |d| conv::datetime32(d.0.get()));
 
 impl DateTime64Data {
-    #[inline(always)]
-    pub fn with_tz_and_precision(&self, tz: Tz, precision: u8) -> Option<chrono::DateTime<Tz>> {
-        datetime64_tz(self.0.get(), precision, tz)
+    pub(crate) fn with_tz_and_precision(
+        &self,
+        tz: Tz,
+        precision: u8,
+    ) -> Result<chrono::DateTime<Tz>> {
+        conv::datetime64_tz(self.0.get(), precision, tz)
     }
 }
 
 impl DateTime32Data {
     #[inline(always)]
-    pub fn with_tz(&self, tz: Tz) -> chrono::DateTime<Tz> {
-        datetime32_tz(self.0.get(), tz)
+    pub(crate) fn with_tz(&self, tz: Tz) -> chrono::DateTime<Tz> {
+        conv::datetime32_tz(self.0.get(), tz)
     }
 }
 
 impl Decimal32Data {
-    #[inline(always)]
-    pub fn with_precision(&self, precision: u8) -> rust_decimal::Decimal {
+    pub(crate) fn with_scale(&self, scale: u8) -> rust_decimal::Decimal {
         let value = self.0.get();
-        rust_decimal::Decimal::new(i64::from(value), u32::from(precision))
+        rust_decimal::Decimal::new(i64::from(value), u32::from(scale))
     }
 }
 
 impl Decimal64Data {
-    #[inline(always)]
-    pub fn with_precision(&self, precision: u8) -> rust_decimal::Decimal {
+    pub(crate) fn with_scale(&self, scale: u8) -> rust_decimal::Decimal {
         let value = self.0.get();
-        rust_decimal::Decimal::new(value, u32::from(precision))
+        rust_decimal::Decimal::new(value, u32::from(scale))
     }
 }
 
 impl Decimal128Data {
-    #[inline(always)]
-    pub fn with_precision(&self, precision: u8) -> Result<rust_decimal::Decimal> {
+    pub(crate) fn with_scale(&self, scale: u8) -> Result<rust_decimal::Decimal> {
+        if u32::from(scale) > rust_decimal::Decimal::MAX_SCALE {
+            cold_path();
+            return Err(Error::NotImplemented(format!(
+                "Decimal128 with scale {scale} (rust_decimal supports at most {})",
+                rust_decimal::Decimal::MAX_SCALE
+            )));
+        }
         let value = self.0.get();
-        let value = rust_decimal::Decimal::try_from_i128_with_scale(value, u32::from(precision))
-            .map_err(|_| Error::Overflow(value.to_string()))?;
-        Ok(value)
+        match rust_decimal::Decimal::try_from_i128_with_scale(value, u32::from(scale)) {
+            Ok(value) => Ok(value),
+            Err(_) => {
+                cold_path();
+                Err(Error::Overflow(value.to_string()))
+            }
+        }
     }
 }
 
 pub struct ParsedBlock<'a> {
-    pub markers: Vec<Mark<'a>>,
-    pub col_names: Vec<&'a str>,
+    pub markers: Box<[mark::Mark<'a>]>,
+    pub col_names: Box<[&'a str]>,
     pub num_rows: usize,
 }
 
-impl ParsedBlock<'_> {
+impl<'a> ParsedBlock<'a> {
+    pub fn mark(&self, name: &str) -> Result<&mark::Mark<'a>> {
+        mark_by_name(&self.col_names, &self.markers, name)
+    }
+
     fn reorder(&mut self, order: &HashMap<&str, usize>) -> Result<()> {
         let num_cols = self.col_names.len();
-        let col_names = std::mem::replace(&mut self.col_names, Vec::with_capacity(num_cols));
-        let markers = std::mem::replace(&mut self.markers, Vec::with_capacity(num_cols));
+        let col_names = std::mem::take(&mut self.col_names).into_iter();
+        let markers = std::mem::take(&mut self.markers).into_iter();
 
         let mut triples = Vec::with_capacity(num_cols);
         let mut num_used = 0;
@@ -212,6 +261,7 @@ impl ParsedBlock<'_> {
         }
 
         if num_used < order.len() {
+            cold_path();
             let present_columns = triples
                 .iter()
                 .map(|(name, _, _)| *name)
@@ -226,31 +276,34 @@ impl ParsedBlock<'_> {
 
         triples.sort_unstable_by_key(|(_, _, sort_key)| *sort_key);
 
+        let mut col_names = Vec::with_capacity(num_cols);
+        let mut markers = Vec::with_capacity(num_cols);
         for (col_name, marker, _) in triples {
-            self.col_names.push(col_name);
-            self.markers.push(marker);
+            col_names.push(col_name);
+            markers.push(marker);
         }
+        self.col_names = col_names.into_boxed_slice();
+        self.markers = markers.into_boxed_slice();
 
         Ok(())
     }
 }
 
 #[derive(Clone)]
-pub struct BlocksIterator<'a> {
-    blocks: Peekable<std::slice::Iter<'a, ParsedBlock<'a>>>,
+pub struct BlocksIterator<'data: 'iter, 'iter> {
+    blocks: Peekable<std::slice::Iter<'iter, ParsedBlock<'data>>>,
     block_row: usize,
 }
 
-impl<'a> BlocksIterator<'a> {
-    #[inline]
-    pub fn new(blocks: &'a [ParsedBlock<'a>]) -> Self {
+impl<'data, 'iter> BlocksIterator<'data, 'iter> {
+    pub fn new(blocks: &'iter [ParsedBlock<'data>]) -> Self {
         Self {
             blocks: blocks.iter().peekable(),
             block_row: 0,
         }
     }
 
-    pub fn new_ordered(blocks: &'a mut [ParsedBlock<'a>], order: &[&str]) -> Result<Self> {
+    pub fn new_ordered(blocks: &'iter mut [ParsedBlock<'data>], order: &[&str]) -> Result<Self> {
         reorder_block_cols(blocks, order)?;
         Ok(Self {
             blocks: blocks.iter().peekable(),
@@ -259,7 +312,7 @@ impl<'a> BlocksIterator<'a> {
     }
 }
 
-pub fn reorder_block_cols(blocks: &mut [ParsedBlock<'_>], order: &[&str]) -> Result<()> {
+pub(crate) fn reorder_block_cols(blocks: &mut [ParsedBlock<'_>], order: &[&str]) -> Result<()> {
     let order_map = order
         .iter()
         .enumerate()
@@ -276,58 +329,32 @@ pub fn reorder_block_cols(blocks: &mut [ParsedBlock<'_>], order: &[&str]) -> Res
     Ok(())
 }
 
-pub struct BlockRow<'a> {
-    col_names: &'a [&'a str],
-    cols: &'a [Mark<'a>],
-    col_index: usize,
+pub struct BlockRow<'data: 'iter, 'iter> {
+    col_names: &'iter [&'data str],
+    cols: &'iter [mark::Mark<'data>],
     row_index: usize,
 }
 
-impl<'a> BlockRow<'a> {
-    pub const fn cols(&self) -> &'a [Mark<'a>] {
+impl<'data, 'iter> BlockRow<'data, 'iter> {
+    pub const fn cols(&self) -> &'iter [mark::Mark<'data>] {
         self.cols
     }
 
-    pub const fn col_names(&self) -> &'a [&'a str] {
+    pub const fn col_names(&self) -> &'iter [&'data str] {
         self.col_names
     }
 
     pub const fn row_index(&self) -> usize {
         self.row_index
     }
-
-    pub const fn col_index(&self) -> usize {
-        self.col_index
-    }
 }
 
-impl<'a> Iterator for BlockRow<'a> {
-    type Item = (&'a str, ColumnAccessor<'a>);
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        let col_name = self.col_names.get(self.col_index)?;
-        let marker = self.cols.get(self.col_index)?;
-
-        self.col_index += 1;
-
-        Some((
-            col_name,
-            ColumnAccessor {
-                col_name,
-                marker,
-                row_index: self.row_index,
-            },
-        ))
-    }
-}
-
-impl<'a> Iterator for BlocksIterator<'a> {
-    type Item = BlockRow<'a>;
+impl<'data, 'iter> Iterator for BlocksIterator<'data, 'iter> {
+    type Item = BlockRow<'data, 'iter>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            let block = self.blocks.peek()?;
+            let block = *self.blocks.peek()?;
             if self.block_row >= block.num_rows {
                 self.blocks.next();
                 self.block_row = 0;
@@ -337,7 +364,6 @@ impl<'a> Iterator for BlocksIterator<'a> {
             let block_row = BlockRow {
                 col_names: &block.col_names,
                 cols: &block.markers,
-                col_index: 0,
                 row_index: self.block_row,
             };
             self.block_row += 1;
@@ -345,93 +371,32 @@ impl<'a> Iterator for BlocksIterator<'a> {
             break Some(block_row);
         }
     }
-}
 
-pub struct ColumnAccessor<'a> {
-    pub col_name: &'a str,
-    pub marker: &'a Mark<'a>,
-    row_index: usize,
-}
-
-/// Provides access to the column value and allows to avoid constructing new
-/// Value instances. For small types it can have a large performance impact.
-impl<'a> ColumnAccessor<'a> {
-    #[inline]
-    pub fn get(self) -> Value<'a> {
-        // row index is private and created by us, so it should always be valid, thus safe
-        // to unwrap
-        self.marker.get(self.row_index).unwrap()
-    }
-
-    #[inline]
-    pub fn into_str(self) -> Result<&'a str> {
-        let str = self.marker.get_str(self.row_index)?;
-        Ok(str.unwrap())
-    }
-
-    #[inline]
-    pub fn into_opt_str(self) -> Result<Option<&'a str>> {
-        let str = self.marker.get_opt_str(self.row_index)?;
-        Ok(str.unwrap())
-    }
-
-    #[inline]
-    pub fn into_datetime<T: TimeZone>(self, tz: T) -> Result<chrono::DateTime<T>> {
-        let dt = self.marker.get_datetime(self.row_index, tz)?;
-        Ok(dt.unwrap())
-    }
-
-    #[inline]
-    pub fn into_uuid(self) -> Result<Uuid> {
-        let uuid = self.marker.get_uuid(self.row_index)?;
-        Ok(uuid.unwrap())
-    }
-
-    #[inline]
-    pub fn into_ipv4(self) -> Result<Ipv4Addr> {
-        let ipv4 = self.marker.get_ipv4(self.row_index)?;
-        Ok(ipv4.unwrap())
-    }
-
-    #[inline]
-    pub fn into_ipv6(self) -> Result<Ipv6Addr> {
-        let ipv6 = self.marker.get_ipv6(self.row_index)?;
-        Ok(ipv6.unwrap())
-    }
-
-    #[inline]
-    pub fn into_opt_ipv6(self) -> Result<Option<Ipv6Addr>> {
-        let ipv6 = self.marker.get_opt_ipv6(self.row_index)?;
-        Ok(ipv6.unwrap())
-    }
-
-    #[inline]
-    pub fn into_bool(self) -> Result<bool> {
-        let value = self.marker.get_bool(self.row_index)?;
-        Ok(value.unwrap())
-    }
-
-    #[inline]
-    pub fn into_f64(self) -> Result<f64> {
-        let value = self.marker.get_f64(self.row_index)?;
-        Ok(value.unwrap())
-    }
-
-    #[inline]
-    pub fn into_array_lc_strs(self) -> Result<impl Iterator<Item = &'a str>> {
-        let it = self.marker.get_array_lc_strs(self.row_index)?.unwrap();
-        Ok(it.into_iter())
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let mut blocks = self.blocks.clone();
+        let mut remaining = match blocks.next() {
+            Some(block) => block.num_rows.saturating_sub(self.block_row),
+            None => 0,
+        };
+        for block in blocks {
+            remaining += block.num_rows;
+        }
+        (remaining, Some(remaining))
     }
 }
 
-pub fn iter_blocks<'a>(blocks: &'a [ParsedBlock]) -> BlocksIterator<'a> {
+impl ExactSizeIterator for BlocksIterator<'_, '_> {}
+
+pub fn iter_blocks<'data, 'iter>(
+    blocks: &'iter [ParsedBlock<'data>],
+) -> BlocksIterator<'data, 'iter> {
     BlocksIterator::new(blocks)
 }
 
-pub fn iter_blocks_ordered<'a>(
-    blocks: &'a mut [ParsedBlock<'a>],
+pub fn iter_blocks_ordered<'data, 'iter>(
+    blocks: &'iter mut [ParsedBlock<'data>],
     order: &[&str],
-) -> Result<BlocksIterator<'a>> {
+) -> Result<BlocksIterator<'data, 'iter>> {
     BlocksIterator::new_ordered(blocks, order)
 }
 
@@ -470,5 +435,89 @@ pub(crate) mod common {
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
         Ok(buf)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::slice::ByteView;
+
+    fn block<'a>(names: &[&'a str], cells: &'a [u8]) -> ParsedBlock<'a> {
+        let markers = cells
+            .iter()
+            .map(|cell| mark::Mark::UInt8(ByteView::try_from(std::slice::from_ref(cell)).unwrap()))
+            .collect();
+        ParsedBlock {
+            markers,
+            col_names: names.into(),
+            num_rows: 1,
+        }
+    }
+
+    fn cells(block: &ParsedBlock<'_>) -> Vec<u8> {
+        block
+            .markers
+            .iter()
+            .map(|mark| mark.get_u8(0).unwrap().unwrap())
+            .collect()
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn tiny_range_round_trips_when_end_exceeds_u32_max() -> Result<()> {
+        let range = (u32::MAX as usize - 1)..(u32::MAX as usize + 10);
+        let tiny = TinyRange::try_from(range.clone())?;
+        assert_eq!(
+            tiny,
+            TinyRange {
+                start: u32::MAX - 1,
+                length: 11
+            }
+        );
+        assert_eq!(Range::<usize>::from(tiny), range);
+        Ok(())
+    }
+
+    #[test]
+    fn reorder_moves_markers_with_names_and_keeps_unrequested_tail() -> Result<()> {
+        let mut blocks = [block(&["a", "b", "c", "d", "e"], &[0, 1, 2, 3, 4])];
+        reorder_block_cols(&mut blocks, &["e", "c", "a"])?;
+        assert_eq!(*blocks[0].col_names, ["e", "c", "a", "b", "d"]);
+        assert_eq!(cells(&blocks[0]), [4, 2, 0, 1, 3]);
+        Ok(())
+    }
+
+    #[test]
+    fn reorder_reports_missing_requested_columns() {
+        let mut blocks = [block(&["a", "b"], &[0, 1])];
+        let err = reorder_block_cols(&mut blocks, &["b", "zzz"]).unwrap_err();
+        assert!(
+            matches!(&err, Error::InvalidColumnOrder(msg) if msg.contains("zzz")),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn decimal128_unsupported_scale_is_not_implemented() {
+        let data = Decimal128Data(zc::I128::new(1));
+        for scale in [29u8, 38] {
+            let err = data.with_scale(scale).unwrap_err();
+            assert!(
+                matches!(&err, Error::NotImplemented(msg) if msg.contains(&format!("scale {scale}"))),
+                "{err}"
+            );
+        }
+        assert_eq!(
+            data.with_scale(28).unwrap(),
+            rust_decimal::Decimal::try_from_i128_with_scale(1, 28).unwrap()
+        );
+    }
+
+    #[test]
+    fn decimal128_value_overflow_stays_overflow() {
+        let data = Decimal128Data(zc::I128::new(i128::MAX));
+        let err = data.with_scale(0).unwrap_err();
+        assert!(matches!(err, Error::Overflow(_)), "{err}");
     }
 }
