@@ -17,3 +17,15 @@ pub const MAX_NUM_ROWS: usize = 1_000_000_000_000;
 
 /// ClickHouse code: `ColumnDynamic::MAX_DYNAMIC_TYPES_LIMIT`
 pub const MAX_DYNAMIC_TYPES: usize = 254;
+
+/// ClickHouse code: `SerializationDynamic::SerializationVersion::V1`. Writes `max_dynamic_types`
+/// before the type count; otherwise identical to V2.
+pub const DYNAMIC_SERIALIZATION_V1: u64 = 1;
+/// ClickHouse code: `SerializationDynamic::SerializationVersion::V2`
+pub const DYNAMIC_SERIALIZATION_V2: u64 = 2;
+
+/// ClickHouse code: `SerializationObject::SerializationVersion::V1`. Writes `max_dynamic_paths`
+/// before the path count; otherwise identical to V2.
+pub const JSON_SERIALIZATION_V1: u64 = 0;
+/// ClickHouse code: `SerializationObject::SerializationVersion::V2`
+pub const JSON_SERIALIZATION_V2: u64 = 2;

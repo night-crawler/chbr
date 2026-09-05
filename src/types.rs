@@ -368,9 +368,13 @@ impl<'a> Type<'a> {
         }
         let (remainder, typ) = match parse_type(s) {
             Ok(parsed) => parsed,
-            Err(e) => return Err(crate::Error::Parse(e.to_string())),
+            Err(e) => {
+                cold_path();
+                return Err(crate::Error::Parse(e.to_string()));
+            }
         };
         if !remainder.trim_ascii().is_empty() {
+            cold_path();
             return Err(crate::Error::Parse(format!(
                 "Unparsed remainder: {remainder:?}"
             )));
@@ -455,15 +459,15 @@ impl<'a> Type<'a> {
     }
 }
 
+/// A dynamic path is a whole `Dynamic` column: `SerializationObject` delegates its prefix and data
+/// to `SerializationDynamic`.
 #[derive(Debug)]
-pub struct JsonColumnHeader<'a> {
-    pub(crate) _path_version: u64,
-    pub(crate) _max_types: usize,
-    pub(crate) _total_types: usize,
-    pub(crate) types: Vec<Type<'a>>,
-    pub(crate) _variant_version: u64,
-    pub(crate) is_typed: bool,
-    pub(crate) type_headers: Vec<TypeHeader<'a>>,
+pub enum JsonColumnHeader<'a> {
+    Typed {
+        typ: Type<'a>,
+        header: TypeHeader<'a>,
+    },
+    Dynamic(DynamicHeader<'a>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

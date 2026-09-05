@@ -17,7 +17,10 @@ use crate::{
         },
         header, parse_offsets, parse_u64, parse_var_str_bytes, take_elements,
     },
-    types::{DynamicHeader, Field, JsonHeader, MapHeader, OffsetIndexPair as _, Type, TypeHeader},
+    types::{
+        DynamicHeader, Field, JsonColumnHeader, JsonHeader, MapHeader, OffsetIndexPair as _, Type,
+        TypeHeader,
+    },
 };
 
 impl<'a> Type<'a> {
@@ -207,6 +210,16 @@ impl<'a> Discriminators<'a> {
     }
 }
 
+impl<'a> JsonColumnHeader<'a> {
+    fn decode(self, ctx: ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
+        match self {
+            JsonColumnHeader::Typed { typ, header } => typ.decode(ctx, header),
+            JsonColumnHeader::Dynamic(header) => dynamic(&ctx, header),
+        }
+    }
+}
+
+// Reads what `SerializationObject::serializeBinaryBulkWithMultipleStreams` writes.
 fn json<'a>(
     ctx: &ParseContext<'a>,
     JsonHeader { paths, col_headers }: JsonHeader<'a>,
@@ -215,67 +228,10 @@ fn json<'a>(
     let num_rows = ctx.num_rows;
 
     let mut path_columns = Vec::with_capacity(col_headers.len());
-    for mut col_header in col_headers {
-        if col_header.is_typed {
-            let Some(typ) = col_header.types.pop() else {
-                cold_path();
-                return Err(Error::CorruptedData(
-                    "typed JSON path is missing its type".to_owned(),
-                ));
-            };
-            let Some(type_header) = col_header.type_headers.pop() else {
-                cold_path();
-                return Err(Error::CorruptedData(
-                    "typed JSON path is missing its type header".to_owned(),
-                ));
-            };
-            let marker;
-            (input, marker) = typ.decode(ctx.fork(input), type_header)?;
-            path_columns.push(marker);
-            continue;
-        }
-
-        let (
-            remainder,
-            Discriminators {
-                raw: raw_discriminators,
-                offsets,
-                row_counts,
-            },
-        ) = Discriminators::parse(input, num_rows, col_header.types.len(), "JSON path")?;
-        input = remainder;
-
-        let mut columns = Vec::with_capacity(col_header.types.len());
-        for (((index, typ), type_header), read_rows) in col_header
-            .types
-            .into_iter()
-            .enumerate()
-            .zip(col_header.type_headers)
-            .zip(row_counts)
-        {
-            if matches!(typ, Type::SharedVariant) {
-                if read_rows != 0 {
-                    cold_path();
-                    return Err(Error::NotImplemented(format!(
-                        "JSON path with {read_rows} values in SharedVariant"
-                    )));
-                }
-                columns.push(Mark::Empty);
-                continue;
-            }
-            let marker;
-            (input, marker) = typ.decode(
-                ctx.fork(input).with_num_rows(read_rows as usize),
-                type_header,
-            )?;
-            debug!("Decoded JSON path type {index} with {read_rows} rows");
-            columns.push(marker);
-        }
-        path_columns.push(Mark::Dynamic(Dynamic {
-            offsets,
-            discriminators: raw_discriminators,
-            columns: columns.into_boxed_slice(),
-        }));
+    for col_header in col_headers {
+        let marker;
+        (input, marker) = col_header.decode(ctx.fork(input))?;
+        path_columns.push(marker);
     }
 
     let marker = Mark::Json(Json::new(paths, path_columns, num_rows)?);
