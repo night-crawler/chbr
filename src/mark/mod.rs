@@ -874,14 +874,14 @@ impl Nullable<'_> {
 
     #[inline(always)]
     pub(crate) fn is_null(&self, index: usize) -> Option<bool> {
-        Some(*self.mask.get(index)? == 1)
+        Some(*self.mask.get(index)? != 0)
     }
 
     /// # Safety
     /// `index < self.len()`.
     #[inline(always)]
     pub(crate) unsafe fn is_null_unchecked(&self, index: usize) -> bool {
-        unsafe { *self.mask.get_unchecked(index) == 1 }
+        unsafe { *self.mask.get_unchecked(index) != 0 }
     }
 
     pub(crate) fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
@@ -921,7 +921,7 @@ pub struct BoolView<'a> {
 
 impl BoolView<'_> {
     pub(crate) fn get(&self, index: usize) -> Option<bool> {
-        self.data.get(index).map(|&val| val == 1)
+        self.data.get(index).map(|&val| val != 0)
     }
 }
 

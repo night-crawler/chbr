@@ -171,7 +171,6 @@ impl TryRead<'_> for Nothing {
     }
 }
 
-/// Raw mask bytes; `1` is `true`.
 #[derive(Clone, Copy)]
 pub struct Bool<'a>(pub &'a [u8]);
 
@@ -201,7 +200,7 @@ impl<'a> TryRead<'a> for Bool<'a> {
 
     #[inline(always)]
     unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
-        Ok(unsafe { *self.0.get_unchecked(idx) } == 1)
+        Ok(unsafe { *self.0.get_unchecked(idx) } != 0)
     }
 }
 

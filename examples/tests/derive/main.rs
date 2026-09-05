@@ -6,6 +6,7 @@ mod arrays_of_nested_rows;
 mod arrays_of_tuples;
 mod bfloat16_arrays;
 mod boolean_arrays;
+mod boolean_nonzero_bytes;
 mod decimal_values;
 mod dynamic_arrays;
 mod dynamic_null_values;

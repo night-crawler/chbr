@@ -811,3 +811,32 @@ fn fixed_string_readers_separate_bytes_checked_and_trusted_utf8() -> TestResult 
 
     Ok(())
 }
+
+#[test]
+fn nullable_mask_treats_any_nonzero_byte_as_null() -> TestResult {
+    // ClickHouse's `ColumnNullable::isNullAt` is `null_map[n] != 0`; only `0` means present.
+    let mask = [0_u8, 1, 2, 0xff];
+    let mark = mark::Mark::Nullable(mark::Nullable {
+        mask: &mask,
+        data: Box::new(mark::Mark::UInt8(crate::slice::ByteView::try_from(
+            [10_u8, 11, 12, 13].as_slice(),
+        )?)),
+    });
+
+    let reader: Nullable<U8> = Nullable::try_from(&mark)?;
+    let expected = [Some(10), None, None, None];
+    for (index, expected) in expected.into_iter().enumerate() {
+        assert_eq!(
+            reader.try_read(index)?,
+            expected,
+            "reader mismatch at index {index}"
+        );
+        assert_eq!(
+            mark.get_opt_u8(index)?.expect("in range"),
+            expected,
+            "getter mismatch at index {index}"
+        );
+    }
+
+    Ok(())
+}
