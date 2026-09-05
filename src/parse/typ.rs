@@ -14,6 +14,7 @@ use nom::{
     sequence::{delimited, pair, preceded, separated_pair},
 };
 
+use crate::interval;
 use crate::types::{Field, Type};
 
 fn parse_num<T>(input: &[u8]) -> Result<T, nom::error::Error<&[u8]>>
@@ -317,6 +318,29 @@ fn parse_other_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     .parse(input)
 }
 
+fn parse_interval(input: &[u8]) -> IResult<&[u8], Type<'_>> {
+    map(
+        preceded(
+            tag("Interval"),
+            alt((
+                map(tag("Nanosecond"), |_| interval::Kind::Nanosecond),
+                map(tag("Microsecond"), |_| interval::Kind::Microsecond),
+                map(tag("Millisecond"), |_| interval::Kind::Millisecond),
+                map(tag("Second"), |_| interval::Kind::Second),
+                map(tag("Minute"), |_| interval::Kind::Minute),
+                map(tag("Hour"), |_| interval::Kind::Hour),
+                map(tag("Day"), |_| interval::Kind::Day),
+                map(tag("Week"), |_| interval::Kind::Week),
+                map(tag("Month"), |_| interval::Kind::Month),
+                map(tag("Quarter"), |_| interval::Kind::Quarter),
+                map(tag("Year"), |_| interval::Kind::Year),
+            )),
+        ),
+        Type::Interval,
+    )
+    .parse(input)
+}
+
 fn parse_primitive_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     alt((
         parse_string,
@@ -325,6 +349,7 @@ fn parse_primitive_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
         parse_fixed_string,
         parse_date_primitives,
         parse_inet_primitives,
+        parse_interval,
         parse_geo_primitives,
     ))
     .parse(input)

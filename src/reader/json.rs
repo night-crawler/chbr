@@ -696,6 +696,7 @@ fn base_contains(mark: &mark::Mark<'_>, row: usize) -> Result<bool, JsonDeserial
         mark::Mark::Date32(value) => value.get(row).is_some(),
         mark::Mark::DateTime(value) => value.data.get(row).is_some(),
         mark::Mark::DateTime64(value) => value.data.get(row).is_some(),
+        mark::Mark::Interval(value) => value.data.get(row).is_some(),
         mark::Mark::Ipv4(value) => value.get(row).is_some(),
         mark::Mark::Ipv6(value) => value.get(row).is_some(),
         mark::Mark::Enum8(value) => enum8_name(value, row).is_some(),
@@ -830,6 +831,7 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
                     .with_tz_and_precision(value.tz, value.precision)?;
                 visitor.visit_string(value.to_rfc3339())
             }
+            mark::Mark::Interval(value) => visitor.visit_i64(at!(value.data.get(cell.row)).get()),
             mark::Mark::Ipv4(value) => {
                 let value = std::net::Ipv4Addr::from(*at!(value.get(cell.row)));
                 visitor.visit_string(value.to_string())

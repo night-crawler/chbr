@@ -1178,6 +1178,22 @@ select tuple(1)::Tuple(_id UInt64) as t1, tuple(2, 'x')::Tuple(`my field` UInt64
 set flatten_nested=0;
 select [(1, 'x'), (2, 'y')]::Nested(`my field` UInt64, `1x` String) as n format Native;
 
+select
+    toIntervalNanosecond(1) as ns,
+    toIntervalMicrosecond(2) as us,
+    toIntervalMillisecond(3) as ms,
+    toIntervalSecond(4) as s,
+    toIntervalMinute(5) as mi,
+    toIntervalHour(6) as h,
+    toIntervalDay(7) as d,
+    toIntervalWeek(8) as w,
+    toIntervalMonth(9) as mo,
+    toIntervalQuarter(10) as q,
+    toIntervalYear(11) as y,
+    [toIntervalSecond(-1), toIntervalSecond(1)] as arr,
+    if(number = 0, NULL, toIntervalHour(number)) as n
+from numbers(2) format Native;
+
 select toIntervalDay(1) as i, sumState(toUInt64(1)) as s format Native;
 
 select CAST('{"a":{"b":"x"},"c":1}', 'JSON(a.b LowCardinality(String))') as j format Native;

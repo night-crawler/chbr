@@ -4,6 +4,7 @@ use std::{
     ops::Range,
 };
 
+use chrono::TimeDelta;
 use chrono_tz::Tz;
 use half::bf16;
 use rust_decimal::Decimal;
@@ -12,7 +13,10 @@ use uuid::Uuid;
 use super::{Value, short_type_name};
 use crate::{
     Bf16Data, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
-    Decimal128Data, I256, Ipv4Data, Ipv6Data, U256, UuidData, error::Error, zc,
+    Decimal128Data, I256, Ipv4Data, Ipv6Data, U256, UuidData,
+    error::Error,
+    interval::{self, Interval},
+    zc,
 };
 
 impl_try_from_value_slice!(Int8Slice, &'a [i8]);
@@ -324,6 +328,67 @@ impl Iterator for DateTime64SliceIterator<'_> {
 }
 
 impl ExactSizeIterator for DateTime64SliceIterator<'_> {}
+
+impl TryFrom<Value<'_>> for Interval {
+    type Error = Error;
+
+    fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Interval(index, i) => Ok(Interval {
+                kind: i.kind,
+                count: i.data[index].get(),
+            }),
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
+        }
+    }
+}
+
+impl TryFrom<Value<'_>> for TimeDelta {
+    type Error = Error;
+
+    fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Interval(index, i) => i.kind.to_time_delta(i.data[index].get()),
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
+        }
+    }
+}
+
+pub struct IntervalSliceIterator<'a> {
+    kind: interval::Kind,
+    slice: std::slice::Iter<'a, zc::I64>,
+}
+
+impl<'a> TryFrom<Value<'a>> for IntervalSliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::IntervalSlice { kind, slice } => Ok(Self {
+                kind,
+                slice: slice.iter(),
+            }),
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
+        }
+    }
+}
+
+impl Iterator for IntervalSliceIterator<'_> {
+    type Item = crate::Result<TimeDelta>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.slice
+            .next()
+            .map(|count| self.kind.to_time_delta(count.get()))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.slice.size_hint()
+    }
+}
+
+impl ExactSizeIterator for IntervalSliceIterator<'_> {}
+
 pub struct Decimal32SliceIterator<'a> {
     scale: u8,
     slice: std::slice::Iter<'a, Decimal32Data>,

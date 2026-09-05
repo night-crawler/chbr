@@ -2,7 +2,7 @@ use std::hint::cold_path;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::ops::Range;
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, TimeDelta};
 use chrono_tz::Tz;
 use rust_decimal::Decimal;
 
@@ -11,7 +11,7 @@ use crate::error::Error;
 use crate::mark::{
     DateTime as DateTimeMark, DateTime64 as DateTime64Mark, Decimal32 as Decimal32Mark,
     Decimal64 as Decimal64Mark, Decimal128 as Decimal128Mark, Enum8 as Enum8Mark,
-    Enum16 as Enum16Mark, Mark,
+    Enum16 as Enum16Mark, Interval as IntervalMark, Mark,
 };
 use crate::{Bf16Data, Date16Data, Date32Data, Ipv4Data, Ipv6Data, UuidData, zc};
 
@@ -463,6 +463,40 @@ col_decimal! {
     Decimal128, Decimal128, Decimal128Mark<'a>, |v, s| v.with_scale(s);
 }
 
+#[derive(Clone, Copy)]
+pub struct Interval<'a>(pub &'a IntervalMark<'a>);
+
+impl<'a> TryFrom<&'a Mark<'a>> for Interval<'a> {
+    type Error = Error;
+
+    fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Mark::Interval(i) if i.kind.is_fixed_length() => Ok(Self(i)),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), Self::NAME))
+            }
+        }
+    }
+}
+
+impl<'a> TryRead<'a> for Interval<'a> {
+    type Item = TimeDelta;
+
+    const NAME: &'static str = "TimeDelta";
+
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.0.data.len()
+    }
+
+    #[inline(always)]
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        let count = unsafe { self.0.data.as_slice().get_unchecked(idx) }.get();
+        self.0.kind.to_time_delta(count)
+    }
+}
+
 /// It's an escape hatch for runtime-typed columns like [`Mark::Variant`], [`Mark::Dynamic`],
 /// or [`Mark::Json`].
 ///
@@ -533,6 +567,7 @@ readable! {
     Ipv6Addr => Ipv6<'a>;
     NaiveDate => Date<'a>;
     chrono::DateTime<Tz> => DateTime<'a>;
+    TimeDelta => Interval<'a>;
     crate::value::Value<'a> => Value<'a>;
     () => Nothing;
 }

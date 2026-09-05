@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 pub(crate) mod conv;
 pub mod error;
+pub mod interval;
 mod macros;
 pub mod mark;
 pub mod parse;
@@ -28,6 +29,7 @@ pub mod zc;
 pub use bstr::BStr;
 pub use chbr_derive::{FromBlock, FromVariant};
 pub use error::Error;
+pub use interval::Interval;
 // Same name as the derive macro on purpose (macro vs type namespace):
 // `use crate::FromBlock;` imports both, serde-style.
 pub use reader::{FromBlock, FromVariant};

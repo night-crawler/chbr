@@ -22,6 +22,7 @@ mod generic_arrays_of_nested_rows;
 mod geometry_values;
 mod integer_arrays;
 mod integers_128;
+mod interval_values;
 mod ip_addresses;
 mod json_arrays;
 mod json_paths;

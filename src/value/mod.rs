@@ -3,7 +3,7 @@ use crate::{
     Bf16Data, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
     Decimal128Data, Decimal256Data, I256, Ipv4Data, Ipv6Data, TinyRange, U256, UuidData,
     error::Error,
-    mark,
+    interval, mark,
     types::{OffsetIndexPair as _, Offsets},
 };
 use bstr::BStr;
@@ -79,6 +79,7 @@ pub enum Value<'a> {
     Date32(chrono::NaiveDate),
     DateTime(usize, &'a mark::DateTime<'a>),
     DateTime64(usize, &'a mark::DateTime64<'a>),
+    Interval(usize, &'a mark::Interval<'a>),
     Ipv4(Ipv4Addr),
     Ipv6(&'a Ipv6Data),
 
@@ -128,6 +129,10 @@ pub enum Value<'a> {
         tz: Tz,
         precision: u8,
         slice: &'a [DateTime64Data],
+    },
+    IntervalSlice {
+        kind: interval::Kind,
+        slice: &'a [zc::I64],
     },
 
     Ipv4Slice(&'a [Ipv4Data]),
@@ -247,6 +252,7 @@ impl Value<'_> {
             Value::Date32(_) => "Date32",
             Value::DateTime(_, _) => "DateTime",
             Value::DateTime64(_, _) => "DateTime64",
+            Value::Interval(_, i) => i.kind.as_str(),
             Value::Ipv4(_) => "Ipv4",
             Value::Ipv6(_) => "Ipv6",
             Value::StringSlice(_) => "StringSlice",
@@ -276,6 +282,7 @@ impl Value<'_> {
             Value::Date32Slice(_) => "Date32Slice",
             Value::DateTime32Slice { .. } => "DateTime32Slice",
             Value::DateTime64Slice { .. } => "DateTime64Slice",
+            Value::IntervalSlice { .. } => "IntervalSlice",
             Value::Ipv4Slice(_) => "Ipv4Slice",
             Value::Ipv6Slice(_) => "Ipv6Slice",
             Value::NullableSlice { .. } => "NullableSlice",
