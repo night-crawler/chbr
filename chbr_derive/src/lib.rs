@@ -172,11 +172,16 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
         })
         .collect::<Vec<_>>();
 
-    let read_fields = specs
+    let read_fields_unchecked = specs
         .iter()
         .map(|ColSpec { ident, .. }| {
-            quote! { #ident: ::chbr::reader::TryRead::try_read(&self.#ident, idx)? }
+            quote! { #ident: ::chbr::reader::TryRead::try_read_unchecked(&self.#ident, idx)? }
         })
+        .collect::<Vec<_>>();
+
+    let field_lens = specs
+        .iter()
+        .map(|ColSpec { ident, .. }| quote! { ::chbr::reader::TryRead::len(&self.#ident) })
         .collect::<Vec<_>>();
 
     Ok(quote! {
@@ -205,10 +210,21 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
         #[automatically_derived]
         impl #impl_generics ::chbr::reader::TryRead<#lt> for #ident #ty_generics #read_where {
             type Item = #item_ident #ty_generics;
+            const NAME: &'static str = ::core::stringify!(#ident);
 
             #[inline(always)]
-            fn try_read(&self, idx: usize) -> ::chbr::Result<Self::Item> {
-                ::core::result::Result::Ok(#item_ident { #(#read_fields,)* })
+            fn len(&self) -> usize {
+                // The shortest column: `try_read_unchecked(idx)` is sound for every field only
+                // when `idx` is below all of their lengths.
+                let len = ::chbr::parse::consts::MAX_NUM_ROWS;
+                #( let len = ::core::cmp::min(len, #field_lens); )*
+                len
+            }
+
+            #[inline(always)]
+            unsafe fn try_read_unchecked(&self, idx: usize) -> ::chbr::Result<Self::Item> {
+                // SAFETY: `idx < len()`, and `len()` is the minimum over the columns.
+                unsafe { ::core::result::Result::Ok(#item_ident { #(#read_fields_unchecked,)* }) }
             }
         }
 

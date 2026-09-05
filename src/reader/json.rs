@@ -19,7 +19,7 @@ impl<'a> TryFrom<&'a mark::Mark<'a>> for Json<'a> {
             mark::Mark::Json(mark) => Ok(Self(mark)),
             other => {
                 cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Json"))
+                Err(Error::MismatchedType(other.as_str(), Self::NAME))
             }
         }
     }
@@ -28,11 +28,13 @@ impl<'a> TryFrom<&'a mark::Mark<'a>> for Json<'a> {
 impl<'a> TryRead<'a> for Json<'a> {
     type Item = JsonValue<'a>;
 
-    fn try_read(&self, row: usize) -> crate::Result<Self::Item> {
-        if !self.0.contains_row(row) {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(row, "Json"));
-        }
+    const NAME: &'static str = "Json";
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    unsafe fn try_read_unchecked(&self, row: usize) -> crate::Result<Self::Item> {
         Ok(JsonValue { mark: self.0, row })
     }
 }

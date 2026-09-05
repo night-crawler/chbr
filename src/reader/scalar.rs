@@ -30,7 +30,7 @@ macro_rules! col_view {
                         Mark::$variant(v) => Ok(Self(v.as_slice())),
                         other => {
                             cold_path();
-                            Err(Error::MismatchedType(other.as_str(), stringify!($variant)))
+                            Err(Error::MismatchedType(other.as_str(), Self::NAME))
                         }
                     }
                 }
@@ -38,14 +38,16 @@ macro_rules! col_view {
 
             impl<'a> TryRead<'a> for $name<'a> {
                 type Item = $item;
-
+                const NAME: &'static str = stringify!($variant);
 
                 #[inline(always)]
-                fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-                    let Some($v) = self.0.get(idx) else {
-                        cold_path();
-                        return Err(Error::IndexOutOfBounds(idx, stringify!($variant)));
-                    };
+                fn len(&self) -> usize {
+                    self.0.len()
+                }
+
+                #[inline(always)]
+                unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+                    let $v = unsafe { self.0.get_unchecked(idx) };
                     Ok($conv)
                 }
             }
@@ -99,25 +101,23 @@ pub struct Usize<'a>(pub &'a Mark<'a>);
 impl<'a> TryRead<'a> for Usize<'a> {
     type Item = usize;
 
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let value = match self.0 {
-            Mark::UInt8(v) => v.get(idx).map(|v| usize::from(*v)),
-            Mark::UInt16(v) => v.get(idx).map(|v| v.get() as usize),
-            Mark::UInt32(v) => v.get(idx).map(|v| v.get() as usize),
-            Mark::UInt64(v) => match v.get(idx) {
-                Some(v) => Some(usize::try_from(v.get())?),
-                None => None,
-            },
-            other => {
-                cold_path();
-                return Err(Error::MismatchedType(other.as_str(), "UInt8/16/32/64"));
+    const NAME: &'static str = "UInt8/16/32/64";
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        unsafe {
+            match self.0 {
+                Mark::UInt8(v) => Ok(usize::from(*v.as_slice().get_unchecked(idx))),
+                Mark::UInt16(v) => Ok(v.as_slice().get_unchecked(idx).get() as usize),
+                Mark::UInt32(v) => Ok(v.as_slice().get_unchecked(idx).get() as usize),
+                Mark::UInt64(v) => Ok(usize::try_from(v.as_slice().get_unchecked(idx).get())?),
+                // Construction accepted only the four variants above.
+                _ => std::hint::unreachable_unchecked(),
             }
-        };
-        let Some(value) = value else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "UInt8/16/32/64"));
-        };
-        Ok(value)
+        }
     }
 }
 
@@ -131,7 +131,7 @@ impl<'a> TryFrom<&'a Mark<'a>> for Usize<'a> {
             }
             other => {
                 cold_path();
-                Err(Error::MismatchedType(other.as_str(), "UInt8/16/32/64"))
+                Err(Error::MismatchedType(other.as_str(), Self::NAME))
             }
         }
     }
@@ -149,7 +149,7 @@ impl<'a> TryFrom<&'a Mark<'a>> for Nothing {
             Mark::Nothing(len) => Ok(Self(*len)),
             other => {
                 cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Nothing"))
+                Err(Error::MismatchedType(other.as_str(), Self::NAME))
             }
         }
     }
@@ -158,12 +158,15 @@ impl<'a> TryFrom<&'a Mark<'a>> for Nothing {
 impl TryRead<'_> for Nothing {
     type Item = ();
 
+    const NAME: &'static str = "Nothing";
+
     #[inline(always)]
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        if idx >= self.0 {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "Nothing"));
-        }
+    fn len(&self) -> usize {
+        self.0
+    }
+
+    #[inline(always)]
+    unsafe fn try_read_unchecked(&self, _idx: usize) -> crate::Result<Self::Item> {
         Ok(())
     }
 }
@@ -180,7 +183,7 @@ impl<'a> TryFrom<&'a Mark<'a>> for Bool<'a> {
             Mark::Bool(v) => Ok(Self(v.data)),
             other => {
                 cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Bool"))
+                Err(Error::MismatchedType(other.as_str(), Self::NAME))
             }
         }
     }
@@ -189,13 +192,16 @@ impl<'a> TryFrom<&'a Mark<'a>> for Bool<'a> {
 impl<'a> TryRead<'a> for Bool<'a> {
     type Item = bool;
 
+    const NAME: &'static str = "Bool";
+
     #[inline(always)]
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(&value) = self.0.get(idx) else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "Bool"));
-        };
-        Ok(value == 1)
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    #[inline(always)]
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        Ok(unsafe { *self.0.get_unchecked(idx) } == 1)
     }
 }
 
@@ -223,7 +229,7 @@ impl<'a> TryFrom<&'a Mark<'a>> for Enum8<'a> {
             Mark::Enum8(e) => Ok(Self(e)),
             other => {
                 cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Enum8"))
+                Err(Error::MismatchedType(other.as_str(), Self::NAME))
             }
         }
     }
@@ -232,11 +238,19 @@ impl<'a> TryFrom<&'a Mark<'a>> for Enum8<'a> {
 impl<'a> TryRead<'a> for Enum8<'a> {
     type Item = &'a str;
 
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(&variant) = self.0.data.get(idx) else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "Enum8"));
-        };
+    const NAME: &'static str = "Enum8";
+
+    fn len(&self) -> usize {
+        self.0.data.len()
+    }
+
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        self.name(unsafe { *self.0.data.as_slice().get_unchecked(idx) })
+    }
+}
+
+impl<'a> Enum8<'a> {
+    fn name(&self, variant: i8) -> crate::Result<&'a str> {
         let Ok(pos) = self
             .0
             .variants
@@ -262,7 +276,7 @@ impl<'a> TryFrom<&'a Mark<'a>> for Enum16<'a> {
             Mark::Enum16(e) => Ok(Self(e)),
             other => {
                 cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Enum16"))
+                Err(Error::MismatchedType(other.as_str(), Self::NAME))
             }
         }
     }
@@ -271,12 +285,19 @@ impl<'a> TryFrom<&'a Mark<'a>> for Enum16<'a> {
 impl<'a> TryRead<'a> for Enum16<'a> {
     type Item = &'a str;
 
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(variant) = self.0.data.get(idx) else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "Enum16"));
-        };
-        let variant = variant.get();
+    const NAME: &'static str = "Enum16";
+
+    fn len(&self) -> usize {
+        self.0.data.len()
+    }
+
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        self.name(unsafe { self.0.data.as_slice().get_unchecked(idx) }.get())
+    }
+}
+
+impl<'a> Enum16<'a> {
+    fn name(&self, variant: i16) -> crate::Result<&'a str> {
         let Ok(pos) = self
             .0
             .variants
@@ -309,7 +330,7 @@ impl<'a> TryFrom<&'a Mark<'a>> for DateTime<'a> {
             }),
             other => {
                 cold_path();
-                Err(Error::MismatchedType(other.as_str(), "DateTime"))
+                Err(Error::MismatchedType(other.as_str(), Self::NAME))
             }
         }
     }
@@ -318,17 +339,27 @@ impl<'a> TryFrom<&'a Mark<'a>> for DateTime<'a> {
 impl<'a> TryRead<'a> for DateTime<'a> {
     type Item = chrono::DateTime<Tz>;
 
+    const NAME: &'static str = "DateTime";
+
     #[inline(always)]
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value) = self.mark.data.get(idx) else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "DateTime"));
-        };
-        Ok(crate::conv::datetime32_resolved(
-            value.0.get(),
-            self.mark.tz,
-            self.cached_offset,
+    fn len(&self) -> usize {
+        self.mark.data.len()
+    }
+
+    #[inline(always)]
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        Ok(self.resolve(
+            unsafe { self.mark.data.as_slice().get_unchecked(idx) }
+                .0
+                .get(),
         ))
+    }
+}
+
+impl DateTime<'_> {
+    #[inline(always)]
+    fn resolve(&self, seconds: u32) -> chrono::DateTime<Tz> {
+        crate::conv::datetime32_resolved(seconds, self.mark.tz, self.cached_offset)
     }
 }
 
@@ -350,7 +381,7 @@ impl<'a> TryFrom<&'a Mark<'a>> for DateTime64<'a> {
             }),
             other => {
                 cold_path();
-                Err(Error::MismatchedType(other.as_str(), "DateTime64"))
+                Err(Error::MismatchedType(other.as_str(), Self::NAME))
             }
         }
     }
@@ -359,13 +390,26 @@ impl<'a> TryFrom<&'a Mark<'a>> for DateTime64<'a> {
 impl<'a> TryRead<'a> for DateTime64<'a> {
     type Item = chrono::DateTime<Tz>;
 
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value) = self.mark.data.get(idx) else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "DateTime64"));
-        };
+    const NAME: &'static str = "DateTime64";
+
+    fn len(&self) -> usize {
+        self.mark.data.len()
+    }
+
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        self.resolve(
+            unsafe { self.mark.data.as_slice().get_unchecked(idx) }
+                .0
+                .get(),
+        )
+    }
+}
+
+impl DateTime64<'_> {
+    #[inline(always)]
+    fn resolve(&self, ticks: i64) -> crate::Result<chrono::DateTime<Tz>> {
         crate::conv::datetime64_resolved(
-            value.0.get(),
+            ticks,
             self.mark.precision,
             self.mark.tz,
             self.cached_offset,
@@ -388,7 +432,7 @@ macro_rules! col_decimal {
                         Mark::$variant(d) => Ok(Self(d)),
                         other => {
                             cold_path();
-                            Err(Error::MismatchedType(other.as_str(), stringify!($variant)))
+                            Err(Error::MismatchedType(other.as_str(), Self::NAME))
                         }
                     }
                 }
@@ -397,12 +441,14 @@ macro_rules! col_decimal {
             impl<'a> TryRead<'a> for $name<'a> {
                 type Item = Decimal;
 
+                const NAME: &'static str = stringify!($variant);
 
-                fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-                    let Some($v) = self.0.data.get(idx) else {
-                        cold_path();
-                        return Err(Error::IndexOutOfBounds(idx, stringify!($variant)));
-                    };
+                fn len(&self) -> usize {
+                    self.0.data.len()
+                }
+
+                unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+                    let $v = unsafe { self.0.data.as_slice().get_unchecked(idx) };
                     let $scale = self.0.scale;
                     $conv
                 }
@@ -437,7 +483,15 @@ impl<'a> TryFrom<&'a Mark<'a>> for Value<'a> {
 impl<'a> TryRead<'a> for Value<'a> {
     type Item = crate::value::Value<'a>;
 
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
+    const NAME: &'static str = "Value";
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        // `Mark::get` dispatches on the runtime type and bounds-checks on its own; there is no
+        // unchecked form.
         let Some(value) = self.0.get(idx)? else {
             cold_path();
             return Err(Error::IndexOutOfBounds(idx, self.0.as_str()));

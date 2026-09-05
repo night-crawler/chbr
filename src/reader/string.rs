@@ -20,7 +20,7 @@ impl<'a> TryFrom<&'a Mark<'a>> for Bytes<'a> {
             Mark::String(strings) => Ok(Self(&strings.data)),
             other => {
                 cold_path();
-                Err(Error::MismatchedType(other.as_str(), "String"))
+                Err(Error::MismatchedType(other.as_str(), Self::NAME))
             }
         }
     }
@@ -29,13 +29,16 @@ impl<'a> TryFrom<&'a Mark<'a>> for Bytes<'a> {
 impl<'a> TryRead<'a> for Bytes<'a> {
     type Item = &'a BStr;
 
+    const NAME: &'static str = "String";
+
     #[inline(always)]
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(&value) = self.0.get(idx) else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "String"));
-        };
-        Ok(value)
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    #[inline(always)]
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        Ok(unsafe { *self.0.get_unchecked(idx) })
     }
 }
 
@@ -72,14 +75,17 @@ impl<'a> TryFrom<&'a Mark<'a>> for Str<'a> {
 impl<'a> TryRead<'a> for Str<'a> {
     type Item = &'a str;
 
+    const NAME: &'static str = "String";
+
     #[inline(always)]
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(&value) = self.0.get(idx) else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "String"));
-        };
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    #[inline(always)]
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
         // SAFETY: construction validated every value in the column.
-        Ok(unsafe { std::str::from_utf8_unchecked(value) })
+        Ok(unsafe { std::str::from_utf8_unchecked(self.0.get_unchecked(idx)) })
     }
 }
 
@@ -100,18 +106,28 @@ impl<'a> TryFrom<&'a Mark<'a>> for TrustedStr<'a> {
 impl<'a> TryRead<'a> for TrustedStr<'a> {
     type Item = &'a str;
 
+    const NAME: &'static str = "String";
+
     #[inline(always)]
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(&value) = self.0.get(idx) else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "String"));
-        };
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    #[inline(always)]
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        Ok(Self::trusted(unsafe { self.0.get_unchecked(idx) }))
+    }
+}
+
+impl<'a> TrustedStr<'a> {
+    #[inline(always)]
+    fn trusted(value: &'a BStr) -> &'a str {
         debug_assert!(
             std::str::from_utf8(value).is_ok(),
             "TrustedStr read invalid UTF-8"
         );
         // SAFETY: choosing this reader asserts the column is valid UTF-8.
-        Ok(unsafe { std::str::from_utf8_unchecked(value) })
+        unsafe { std::str::from_utf8_unchecked(value) }
     }
 }
 
@@ -126,7 +142,7 @@ impl<'a> TryFrom<&'a Mark<'a>> for FixedBytes<'a> {
             Mark::FixedString(fixed) => Ok(Self(fixed)),
             other => {
                 cold_path();
-                Err(Error::MismatchedType(other.as_str(), "FixedString"))
+                Err(Error::MismatchedType(other.as_str(), Self::NAME))
             }
         }
     }
@@ -135,12 +151,14 @@ impl<'a> TryFrom<&'a Mark<'a>> for FixedBytes<'a> {
 impl<'a> TryRead<'a> for FixedBytes<'a> {
     type Item = &'a BStr;
 
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value) = self.0.get_bstr(idx) else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "FixedString"));
-        };
-        Ok(value)
+    const NAME: &'static str = "FixedString";
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        Ok(unsafe { self.0.get_bstr_unchecked(idx) })
     }
 }
 
@@ -167,13 +185,15 @@ impl<'a> TryFrom<&'a Mark<'a>> for FixedStr<'a> {
 impl<'a> TryRead<'a> for FixedStr<'a> {
     type Item = &'a str;
 
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value) = self.0.get_bstr(idx) else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "FixedString"));
-        };
+    const NAME: &'static str = "FixedString";
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
         // SAFETY: construction validated every value in the column.
-        Ok(unsafe { std::str::from_utf8_unchecked(value) })
+        Ok(unsafe { std::str::from_utf8_unchecked(self.0.get_bstr_unchecked(idx)) })
     }
 }
 
@@ -193,17 +213,25 @@ impl<'a> TryFrom<&'a Mark<'a>> for TrustedFixedStr<'a> {
 impl<'a> TryRead<'a> for TrustedFixedStr<'a> {
     type Item = &'a str;
 
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value) = self.0.get_bstr(idx) else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "FixedString"));
-        };
+    const NAME: &'static str = "FixedString";
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        Ok(Self::trusted(unsafe { self.0.get_bstr_unchecked(idx) }))
+    }
+}
+
+impl<'a> TrustedFixedStr<'a> {
+    fn trusted(value: &'a BStr) -> &'a str {
         debug_assert!(
             std::str::from_utf8(value).is_ok(),
             "TrustedFixedStr read invalid UTF-8"
         );
         // SAFETY: choosing this reader asserts the column is valid UTF-8.
-        Ok(unsafe { std::str::from_utf8_unchecked(value) })
+        unsafe { std::str::from_utf8_unchecked(value) }
     }
 }
 

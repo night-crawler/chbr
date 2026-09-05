@@ -4,7 +4,7 @@ use crate::{error::Error, slice::ByteView, types::Offsets, zc};
 
 pub mod block;
 pub(crate) mod column;
-mod consts;
+pub mod consts;
 pub(crate) mod header;
 pub(crate) mod typ;
 

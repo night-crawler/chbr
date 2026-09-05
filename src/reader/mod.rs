@@ -1,3 +1,4 @@
+use crate::Error;
 use std::hint::cold_path;
 use std::ops::Range;
 
@@ -20,7 +21,28 @@ pub use string::*;
 pub trait TryRead<'a>: Copy {
     type Item;
 
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item>;
+    /// Reader name used in errors.
+    const NAME: &'static str;
+
+    fn len(&self) -> usize;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// # Safety
+    /// `idx < self.len()`.
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item>;
+
+    #[inline(always)]
+    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
+        if idx >= self.len() {
+            cold_path();
+            return Err(Error::IndexOutOfBounds(idx, Self::NAME));
+        }
+        // SAFETY: checked just above.
+        unsafe { self.try_read_unchecked(idx) }
+    }
 }
 
 /// Constructs a reader over selected columns of one [`crate::ParsedBlock`].
@@ -36,7 +58,7 @@ pub trait FromBlock<'a>: TryRead<'a> {
     fn from_block(block: &'a crate::ParsedBlock<'a>) -> crate::Result<Self>;
 
     fn rows(block: &'a crate::ParsedBlock<'a>) -> crate::Result<RowsIter<'a, Self>> {
-        Ok(RowsIter::new(Self::from_block(block)?, block.num_rows))
+        RowsIter::new(Self::from_block(block)?, block.num_rows)
     }
 
     /// Iterates all rows of all `blocks` as one flat stream.
@@ -98,8 +120,7 @@ pub trait FromVariant<'a>: Sized {
 /// You need to specify the reader explicitly (`#[col(reader = ...)]`) when the corresponding
 /// child [`crate::Mark`] needs a `FixedString`, `Enum8`, or `Enum16` reader.
 pub trait Readable<'a>: Sized {
-    type Reader: TryRead<'a, Item = Self>
-        + TryFrom<&'a crate::mark::Mark<'a>, Error = crate::error::Error>;
+    type Reader: TryRead<'a, Item = Self> + TryFrom<&'a crate::mark::Mark<'a>, Error = Error>;
 }
 
 pub struct RowsIter<'a, R: TryRead<'a>> {
@@ -109,12 +130,23 @@ pub struct RowsIter<'a, R: TryRead<'a>> {
 }
 
 impl<'a, R: TryRead<'a>> RowsIter<'a, R> {
-    pub(crate) const fn new(reader: R, num_rows: usize) -> Self {
-        Self {
+    // Checks the row range once to make `next` faster.
+    // Not inlined because inlining drags the per-column len/error path into the caller's row loop,
+    // which kills perf.
+    #[inline(never)]
+    pub(crate) fn new(reader: R, num_rows: usize) -> crate::Result<Self> {
+        let len = reader.len();
+        if len < num_rows {
+            cold_path();
+            return Err(Error::CorruptedData(format!(
+                "reader serves {len} rows, block has {num_rows}"
+            )));
+        }
+        Ok(Self {
             reader,
             range: 0..num_rows,
             _marker: std::marker::PhantomData,
-        }
+        })
     }
 }
 
@@ -123,7 +155,8 @@ impl<'a, R: TryRead<'a>> Iterator for RowsIter<'a, R> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.range.next()?;
-        Some(self.reader.try_read(i))
+        // SAFETY: `new` verified `range.end <= reader.len()`.
+        Some(unsafe { self.reader.try_read_unchecked(i) })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
