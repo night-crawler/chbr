@@ -1172,3 +1172,28 @@ select
     [NULL] as arr_n,
     [[]] as arr_arr
 from numbers(3) format Native;
+
+select tuple(1)::Tuple(_id UInt64) as t1, tuple(2, 'x')::Tuple(`my field` UInt64, `1x` String) as t2 format Native;
+
+set flatten_nested=0;
+select [(1, 'x'), (2, 'y')]::Nested(`my field` UInt64, `1x` String) as n format Native;
+
+select toIntervalDay(1) as i, sumState(toUInt64(1)) as s format Native;
+
+select CAST('{"a":{"b":"x"},"c":1}', 'JSON(a.b LowCardinality(String))') as j format Native;
+
+select CAST('{"a":[{"x":1}],"b":2}', 'JSON') as j format Native;
+select CAST('{"b":[{"x":1}],"a":2}', 'JSON') as j format Native;
+
+select CAST(['a', NULL, 'b'], 'Array(LowCardinality(Nullable(String)))') as arr format Native;
+
+select toUUID('61f0c404-5cb3-11e7-907b-a6006ad3dba0') as u, toIPv6('2001:db8::1') as ip6, toIPv4('192.168.1.2') as ip4 format Native;
+
+drop table if exists simple_agg;
+create table simple_agg
+(
+    x SimpleAggregateFunction(sum, UInt64),
+    y SimpleAggregateFunction(anyLast, Nullable(String))
+) engine = AggregatingMergeTree order by tuple();
+insert into simple_agg values (7, 'a');
+select * from simple_agg format Native;

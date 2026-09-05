@@ -417,6 +417,14 @@ fn map_fields<'a>(pairs: Vec<(&'a [u8], Type<'a>)>) -> Vec<Field<'a>> {
         .collect::<Vec<_>>()
 }
 
+fn parse_identifier(input: &[u8]) -> IResult<&[u8], &[u8]> {
+    alt((
+        delimited(char('`'), take_while1(|c| c != b'`'), char('`')),
+        take_while1(|c: u8| c.is_ascii_alphanumeric() || c == b'_'),
+    ))
+    .parse(input)
+}
+
 fn parse_pairs<'a>(
     name: &'static str,
     input: &'a [u8],
@@ -427,11 +435,7 @@ fn parse_pairs<'a>(
             ws(char('(')),
             separated_list1(
                 ws(char(',')),
-                separated_pair(
-                    take_while1(|c: u8| c.is_ascii_alphanumeric() || c == b'_'),
-                    multispace1,
-                    parse_type,
-                ),
+                separated_pair(parse_identifier, multispace1, parse_type),
             ),
             ws(char(')')),
         ),
@@ -728,6 +732,25 @@ mod tests {
         };
         let names: Vec<&str> = fields.iter().map(|f| f.name).collect();
         assert_eq!(names, ["_id", "name"]);
+    }
+
+    #[test]
+    fn named_tuple_and_nested_backquoted_names() {
+        let typ = Type::from_bytes(b"Tuple(`my field` UInt64, `1x` String, plain Int8)").unwrap();
+        let Type::NamedTuple(fields) = typ else {
+            panic!("expected NamedTuple, got {typ:?}");
+        };
+        let names: Vec<&str> = fields.iter().map(|f| f.name).collect();
+        assert_eq!(names, ["my field", "1x", "plain"]);
+
+        let typ = Type::from_bytes(b"Nested(`a.b` UInt64, c String)").unwrap();
+        let Type::Nested(fields) = typ else {
+            panic!("expected Nested, got {typ:?}");
+        };
+        let names: Vec<&str> = fields.iter().map(|f| f.name).collect();
+        assert_eq!(names, ["a.b", "c"]);
+
+        assert!(Type::from_bytes(b"Tuple(`unterminated UInt64)").is_err());
     }
 
     #[test]
