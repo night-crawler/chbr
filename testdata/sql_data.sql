@@ -831,6 +831,20 @@ insert into fixed_string_array (id, arr) values
 select * from fixed_string_array order by id;
 
 
+create table fixed_string_binary (
+    id Int64,
+    fb FixedString(4)
+) engine = MergeTree order by tuple();
+
+insert into fixed_string_binary (id, fb) values
+    (0, unhex('01000000')),
+    (1, unhex('00000000')),
+    (2, unhex('deadbeef')),
+    (3, 'ab');
+
+select * from fixed_string_binary order by id;
+
+
 drop table enums_sample;
 
 create table enums_sample (

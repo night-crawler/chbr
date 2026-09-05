@@ -6,8 +6,18 @@ use bstr::BStr;
 use super::{Value, short_type_name};
 use crate::{ByteExt as _, error::Error, mark::FixedString};
 
-impl_try_from_value!(String, &'a BStr);
 impl_try_from_value_slice!(StringSlice, &'a [&'a BStr]);
+
+impl<'a> TryFrom<Value<'a>> for &'a BStr {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::String(value) | Value::FixedString(value) => Ok(value),
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
+        }
+    }
+}
 
 impl<'a> TryFrom<Value<'a>> for &'a str {
     type Error = Error;
@@ -15,6 +25,7 @@ impl<'a> TryFrom<Value<'a>> for &'a str {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::String(value) => crate::error::decode_utf8(value),
+            Value::FixedString(value) => crate::error::decode_utf8(value.rtrim_zeros()),
             other => Err(other.mismatched_type(short_type_name::<Self>())),
         }
     }
@@ -51,7 +62,7 @@ impl<'a> Iterator for FixedStringSliceIterator<'a> {
             return None;
         }
 
-        Some(BStr::new(self.mark.data[start..end].rtrim_zeros()))
+        Some(BStr::new(&self.mark.data[start..end]))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

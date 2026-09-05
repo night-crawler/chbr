@@ -1195,8 +1195,21 @@ fn fixed_string_sample() -> TestResult {
 
     let fixed_string_marker = &block.markers[1];
     for (i, expected) in expected.iter().enumerate() {
-        let value: &str = fixed_string_marker.get(i)?.unwrap().try_into()?;
-        assert_eq!(value, *expected, "Mismatch at index {i}");
+        let value = fixed_string_marker.get(i)?.unwrap();
+        // `&str` trims the zero padding; `&BStr` is the raw 16-byte record.
+        let text: &str = value.clone().try_into()?;
+        assert_eq!(text, *expected, "Mismatch at index {i}");
+        let raw: &BStr = value.try_into()?;
+        assert_eq!(raw.len(), 16, "Mismatch at index {i}");
+        assert_eq!(
+            &raw[..expected.len()],
+            expected.as_bytes(),
+            "Mismatch at index {i}"
+        );
+        assert!(
+            raw[expected.len()..].iter().all(|byte| *byte == 0),
+            "Mismatch at index {i}"
+        );
     }
 
     Ok(())
@@ -1214,25 +1227,63 @@ fn fixed_string_array() -> TestResult {
     // 4,[]
     // 5,"['fixed string 8\u0000\u0000', 'fixed string 9\u0000\u0000']"
 
-    let expected = [
-        vec!["fixed string 1", "fixed string 2"],
-        vec!["fixed string 3", "fixed string 4"],
-        vec!["fixed string 5", "fixed string 6"],
-        vec!["fixed string 7"],
-        vec![],
-        vec!["fixed string 8", "fixed string 9"],
+    let expected: [&[&[u8]]; 6] = [
+        &[b"fixed string 1\0\0", b"fixed string 2\0\0"],
+        &[b"fixed string 3\0\0", b"fixed string 4\0\0"],
+        &[b"fixed string 5\0\0", b"fixed string 6\0\0"],
+        &[b"fixed string 7\0\0"],
+        &[],
+        &[b"fixed string 8\0\0", b"fixed string 9\0\0"],
     ];
 
     let fixed_string_array_marker = &block.markers[1];
     for (i, expected) in expected.iter().enumerate() {
         let value: FixedStringSliceIterator =
             fixed_string_array_marker.get(i)?.unwrap().try_into()?;
-        let mut actual = vec![];
-        for item in value {
-            actual.push(item);
-        }
+        let actual = value.map(|item| item.as_ref()).collect::<Vec<&[u8]>>();
         assert_eq!(actual, *expected, "Mismatch at index {i}");
     }
+
+    Ok(())
+}
+
+#[test]
+fn fixed_string_binary() -> TestResult {
+    let data = load("fixed_string_binary.native")?;
+    let (_, block) = parse_single(&data)?;
+
+    // 0,\x01\0\0\0
+    // 1,\0\0\0\0
+    // 2,\xde\xad\xbe\xef
+    // 3,ab\0\0
+
+    let expected: [&[u8]; 4] = [
+        b"\x01\x00\x00\x00",
+        b"\x00\x00\x00\x00",
+        b"\xde\xad\xbe\xef",
+        b"ab\x00\x00",
+    ];
+
+    let marker = &block.markers[1];
+    for (i, expected) in expected.iter().enumerate() {
+        let raw: &BStr = marker.get(i)?.unwrap().try_into()?;
+        assert_eq!(raw, *expected, "Mismatch at index {i}");
+        assert_eq!(
+            marker.get_str(i)?.unwrap(),
+            *expected,
+            "Mismatch at index {i}"
+        );
+    }
+
+    // `&str` trims the padding and validates only what is left.
+    let text: &str = marker.get(0)?.unwrap().try_into()?;
+    assert_eq!(text, "\u{1}");
+    let text: &str = marker.get(1)?.unwrap().try_into()?;
+    assert_eq!(text, "");
+    let text: &str = marker.get(3)?.unwrap().try_into()?;
+    assert_eq!(text, "ab");
+    let invalid: Result<&str, _> = marker.get(2)?.unwrap().try_into();
+    assert!(matches!(invalid, Err(Error::Utf8Decode(_, _))));
 
     Ok(())
 }

@@ -162,7 +162,8 @@ impl<'a> TryRead<'a> for FixedBytes<'a> {
     }
 }
 
-/// Reads ClickHouse `FixedString` values as `&str`.
+/// Reads ClickHouse `FixedString` values as `&str` with trailing zero padding
+/// trimmed.
 ///
 /// [`TryFrom`] validates the complete column once.
 #[derive(Clone, Copy)]
@@ -192,13 +193,14 @@ impl<'a> TryRead<'a> for FixedStr<'a> {
     }
 
     unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
-        // SAFETY: construction validated every value in the column.
-        Ok(unsafe { std::str::from_utf8_unchecked(self.0.get_bstr_unchecked(idx)) })
+        let bytes = unsafe { self.0.get_bstr_unchecked(idx) }.rtrim_zeros();
+        // SAFETY: construction validated every trimmed value in the column.
+        Ok(unsafe { std::str::from_utf8_unchecked(bytes) })
     }
 }
 
-/// Reads ClickHouse `FixedString` values as `&str` without any UTF-8
-/// validation.
+/// Reads ClickHouse `FixedString` values as `&str` with trailing zero padding
+/// trimmed, without any UTF-8 validation.
 #[derive(Clone, Copy)]
 pub struct TrustedFixedStr<'a>(&'a FixedStringMark<'a>);
 
@@ -220,12 +222,14 @@ impl<'a> TryRead<'a> for TrustedFixedStr<'a> {
     }
 
     unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
-        Ok(Self::trusted(unsafe { self.0.get_bstr_unchecked(idx) }))
+        Ok(Self::trusted(
+            unsafe { self.0.get_bstr_unchecked(idx) }.rtrim_zeros(),
+        ))
     }
 }
 
 impl<'a> TrustedFixedStr<'a> {
-    fn trusted(value: &'a BStr) -> &'a str {
+    fn trusted(value: &'a [u8]) -> &'a str {
         debug_assert!(
             std::str::from_utf8(value).is_ok(),
             "TrustedFixedStr read invalid UTF-8"

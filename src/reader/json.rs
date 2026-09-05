@@ -3,7 +3,7 @@ use std::{hint::cold_path, ops::Range};
 use super::{Readable, TryRead};
 #[cfg(feature = "serde1")]
 use crate::types::OffsetIndexPair as _;
-use crate::{Error, mark, value::Value};
+use crate::{ByteExt as _, Error, mark, value::Value};
 
 #[cfg(feature = "serde1")]
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
@@ -615,7 +615,7 @@ impl<'de> CellDeserializer<'de> {
                 .transpose()?,
             mark::Mark::FixedString(fixed) => fixed
                 .get_bstr(cell.row)
-                .map(|value| crate::error::decode_utf8(value))
+                .map(|value| crate::error::decode_utf8(value.rtrim_zeros()))
                 .transpose()?,
             mark::Mark::Enum8(enumeration) => enum8_name(enumeration, cell.row),
             mark::Mark::Enum16(enumeration) => enum16_name(enumeration, cell.row),
@@ -804,7 +804,7 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
             }
             mark::Mark::FixedString(value) => {
                 let value = at!(value.get_bstr(cell.row));
-                match crate::error::decode_utf8(value) {
+                match crate::error::decode_utf8(value.rtrim_zeros()) {
                     Ok(value) => visitor.visit_borrowed_str(value),
                     Err(_) => visitor.visit_borrowed_bytes(value),
                 }
