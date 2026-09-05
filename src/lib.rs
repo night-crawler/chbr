@@ -466,7 +466,13 @@ mod tests {
     fn tiny_range_round_trips_when_end_exceeds_u32_max() -> Result<()> {
         let range = (u32::MAX as usize - 1)..(u32::MAX as usize + 10);
         let tiny = TinyRange::try_from(range.clone())?;
-        assert_eq!(tiny, TinyRange { start: u32::MAX - 1, length: 11 });
+        assert_eq!(
+            tiny,
+            TinyRange {
+                start: u32::MAX - 1,
+                length: 11
+            }
+        );
         assert_eq!(Range::<usize>::from(tiny), range);
         Ok(())
     }

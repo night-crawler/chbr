@@ -1150,3 +1150,11 @@ insert into dynamic_null_sample (id, dyn, arr) values
 optimize table dynamic_null_sample final;
 
 select id, dyn, arr from dynamic_null_sample order by id format Native;
+
+select
+    number as id,
+    [] as arr,
+    NULL as n,
+    [NULL] as arr_n,
+    [[]] as arr_arr
+from numbers(3) format Native;

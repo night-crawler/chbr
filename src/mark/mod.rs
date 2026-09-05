@@ -23,6 +23,8 @@ use uuid::Uuid;
 
 pub enum Mark<'a> {
     Empty,
+    // It's enough to know the row count only
+    Nothing(usize),
     Bool(BoolView<'a>),
     Int8(ByteView<'a, i8>),
     Int16(ByteView<'a, zc::I16>),
@@ -73,6 +75,7 @@ impl<'a> Mark<'a> {
     pub const fn as_str(&self) -> &'static str {
         match self {
             Mark::Empty => "Empty",
+            Mark::Nothing(_) => "Nothing",
             Mark::Bool(_) => "Bool",
             Mark::Int8(_) => "Int8",
             Mark::Int16(_) => "Int16",
@@ -138,6 +141,7 @@ impl<'a> Mark<'a> {
     pub fn len(&self) -> usize {
         match self {
             Mark::Empty => 0,
+            Mark::Nothing(len) => *len,
             Mark::Bool(bv) => bv.data.len(),
             Mark::Int8(bv) => bv.len(),
             Mark::Int16(bv) => bv.len(),
@@ -190,6 +194,7 @@ impl<'a> Mark<'a> {
     pub fn get(&'a self, index: usize) -> crate::Result<Option<Value<'a>>> {
         match self {
             Mark::Empty => Ok(None),
+            Mark::Nothing(len) => Ok((index < *len).then_some(Value::Empty)),
             Mark::Bool(b) => Ok(b.get(index).map(Value::Bool)),
             Mark::Int8(bv) => Ok(bv.get(index).copied().map(Value::Int8)),
             Mark::Int16(bv) => Ok(bv.get(index).map(|v| v.get()).map(Value::Int16)),
@@ -241,6 +246,10 @@ impl<'a> Mark<'a> {
                     cold_path();
                     return Err(Error::RangeOutOfBounds(idx, self.as_str()));
                 }
+                Ok(Value::Empty)
+            }
+            Mark::Nothing(len) => {
+                self.checked_range(*len, idx)?;
                 Ok(Value::Empty)
             }
             Mark::Bool(bv) => Ok(Value::BoolSlice(self.checked_slice(bv.data, idx)?)),
@@ -879,7 +888,7 @@ impl Debug for Mark<'_> {
         }
         fmt_mark! {
             named: [
-                Bool, Int8, Int16, Int32, Int64, Int128, Int256, UInt8, UInt16, UInt32,
+                Nothing, Bool, Int8, Int16, Int32, Int64, Int128, Int256, UInt8, UInt16, UInt32,
                 UInt64, UInt128, UInt256, Float32, Float64, BFloat16, Uuid, Date, Date32,
                 Ipv4, Ipv6, String,
             ],

@@ -1,3 +1,4 @@
+/// Deliberately doesn't support escaping because it's pain in `derive` and pain in general.
 use std::hint::cold_path;
 use std::str::{FromStr, from_utf8};
 
@@ -6,10 +7,10 @@ use nom::{
     IResult, Parser,
     branch::alt,
     bytes::complete::{tag, take_while1},
-    character::complete::{alphanumeric1, char, digit1, multispace0, multispace1},
+    character::complete::{char, digit1, multispace0, multispace1},
     combinator::{map, map_res, opt, recognize, verify},
     error::{ErrorKind, FromExternalError as _, ParseError},
-    multi::{many0, separated_list0, separated_list1},
+    multi::{separated_list0, separated_list1},
     sequence::{delimited, pair, preceded, separated_pair},
 };
 
@@ -311,6 +312,7 @@ fn parse_other_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
             |_| Type::Dynamic,
         ),
         map(tag("SharedVariant"), |_| Type::SharedVariant),
+        map(tag("Nothing"), |_| Type::Nothing),
     ))
     .parse(input)
 }
@@ -426,7 +428,7 @@ fn parse_pairs<'a>(
             separated_list1(
                 ws(char(',')),
                 separated_pair(
-                    recognize(pair(alphanumeric1, many0(alt((alphanumeric1, tag("_")))))),
+                    take_while1(|c: u8| c.is_ascii_alphanumeric() || c == b'_'),
                     multispace1,
                     parse_type,
                 ),
@@ -716,6 +718,28 @@ mod tests {
     fn json_without_arguments() {
         assert_eq!(Type::from_bytes(b"JSON").unwrap(), Type::Json(vec![]));
         assert_eq!(Type::from_bytes(b"JSON()").unwrap(), Type::Json(vec![]));
+    }
+
+    #[test]
+    fn named_tuple_identifier_may_start_with_underscore() {
+        let typ = Type::from_bytes(b"Tuple(_id UInt64, name String)").unwrap();
+        let Type::NamedTuple(fields) = typ else {
+            panic!("expected NamedTuple, got {typ:?}");
+        };
+        let names: Vec<&str> = fields.iter().map(|f| f.name).collect();
+        assert_eq!(names, ["_id", "name"]);
+    }
+
+    #[test]
+    fn nothing() {
+        assert_eq!(
+            Type::from_bytes(b"Array(Nothing)").unwrap(),
+            Type::Array(Box::new(Type::Nothing))
+        );
+        assert_eq!(
+            Type::from_bytes(b"Nullable(Nothing)").unwrap(),
+            Type::Nullable(Box::new(Type::Nothing))
+        );
     }
 
     #[test]

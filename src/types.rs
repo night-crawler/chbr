@@ -228,6 +228,8 @@ pub enum Type<'a> {
     Dynamic,
     Json(Vec<Field<'a>>),
 
+    Nothing,
+
     /// From `src/Columns/ColumnDynamic.h`:
     ///
     /// > When new values are inserted into Dynamic column, the internal Variant type and
@@ -298,6 +300,7 @@ impl<'a> Type<'a> {
             Self::DateTime64(_, _) => Some(8),
             Self::Enum8(_) => Some(1),
             Self::Enum16(_) => Some(2),
+            Self::Nothing => Some(1),
 
             // Point is represented by its X and Y coordinates, stored as a Tuple(Float64, Float64).
             Self::Point => None,
@@ -402,6 +405,7 @@ impl<'a> Type<'a> {
                 variants: variants.into_boxed_slice(),
                 data: ByteView::try_from(data)?,
             }),
+            Type::Nothing => Mark::Nothing(data.len()),
 
             _ => {
                 cold_path();
