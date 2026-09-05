@@ -563,8 +563,10 @@ impl<'de> CellDeserializer<'de> {
                     let Some(&discriminator) = variant.discriminators.get(cell.row) else {
                         return Ok(CellState::Missing);
                     };
+                    // A typed path stays present when NULL (like `Nullable`); only a NULL
+                    // *dynamic* path means the key is absent from the row.
                     if discriminator == mark::Variant::NULL_DISCRIMINATOR {
-                        return Ok(CellState::Missing);
+                        return Ok(CellState::Null);
                     }
                     let Some(&row) = variant.offsets.get(cell.row) else {
                         return Ok(CellState::Missing);
@@ -1812,6 +1814,44 @@ mod serde_tests {
         assert_eq!(
             reader.try_read(1)?.deserialize::<serde_json::Value>()?,
             json!({"n": null, "k": null})
+        );
+        Ok(())
+    }
+
+    // ClickHouse 26.8: `SELECT ...::JSON(v Variant(Int64, String), n Nullable(String))` prints
+    // `{"n":null,"v":null}` for both `{"v": null}` and `{}`: a typed `Variant` path is present as
+    // NULL exactly like a typed `Nullable` path, and must not be dropped as a missing key.
+    #[test]
+    fn typed_variant_path_null_is_present() -> TestResult {
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Row<'a> {
+            v: Option<serde_json::Value>,
+            #[serde(borrow)]
+            n: Option<&'a str>,
+        }
+
+        let data = crate::common::load("./testdata/json_typed_variant.native")?;
+        let (_, block) = parse_single(&data)?;
+        let reader = Json::try_from(block.mark("json")?)?;
+
+        for row in 0..2 {
+            assert_eq!(
+                reader.try_read(row)?.deserialize::<serde_json::Value>()?,
+                json!({"n": null, "v": null}),
+                "row {row}"
+            );
+            assert_eq!(
+                reader.try_read(row)?.deserialize::<Row<'_>>()?,
+                Row { v: None, n: None }
+            );
+        }
+        assert_eq!(
+            reader.try_read(2)?.deserialize::<serde_json::Value>()?,
+            json!({"n": "s", "v": 1})
+        );
+        assert_eq!(
+            reader.try_read(3)?.deserialize::<serde_json::Value>()?,
+            json!({"n": null, "v": "x", "free": 2})
         );
         Ok(())
     }
