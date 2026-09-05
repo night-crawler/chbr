@@ -83,6 +83,7 @@ impl<'a> Json<'a> {
         self.rows
     }
 
+    #[cfg(feature = "serde1")]
     pub(crate) const fn contains_row(&self, row: usize) -> bool {
         row < self.rows
     }

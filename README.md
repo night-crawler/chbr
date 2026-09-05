@@ -234,3 +234,11 @@ The standalone examples crate keeps both access styles as executable tests:
 cargo test -p chbr-examples
 ```
 
+## ~Slop~ LLM policy
+
+- Every commit I didn't do myself I explicitly prefix with `slop:`
+- Around 100% of new added tests are LLM-generated
+- Derive examples are 100% LLM generated
+
+Newer types I don't use in production were slopped (JSON/Dynamic). Everything else has been initially written in the
+pre-slop era.

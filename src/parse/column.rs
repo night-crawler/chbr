@@ -78,9 +78,10 @@ impl<'a> Type<'a> {
                 Ok((input, TypeHeader::Nested(header)))
             }
             Type::Point => Ok((ctx.input, header::point())),
-            Type::Ring | Type::LineString => Ok((ctx.input, header::ring())),
+            Type::Ring | Type::LineString | Type::MultiPoint => Ok((ctx.input, header::ring())),
             Type::Polygon | Type::MultiLineString => Ok((ctx.input, header::polygon())),
             Type::MultiPolygon => Ok((ctx.input, header::multi_polygon())),
+            Type::Geometry => Type::geometry_variant().decode_header(ctx),
             _ => {
                 debug!("Nothing decoded for {:?}", self);
                 Ok((ctx.input, TypeHeader::Empty))
@@ -113,9 +114,10 @@ impl<'a> Type<'a> {
                 TypeHeader::Nested(fields.iter().map(|f| f.typ.empty_header()).collect())
             }
             Type::Point => header::point(),
-            Type::Ring | Type::LineString => header::ring(),
+            Type::Ring | Type::LineString | Type::MultiPoint => header::ring(),
             Type::Polygon | Type::MultiLineString => header::polygon(),
             Type::MultiPolygon => header::multi_polygon(),
+            Type::Geometry => Type::geometry_variant().empty_header(),
             _ => TypeHeader::Empty,
         }
     }
@@ -137,9 +139,12 @@ impl<'a> Type<'a> {
             Type::String => string(&ctx).map(|(input, view)| (input, Mark::String(view))),
             Type::Array(inner) => array(*inner, &ctx, header.into_array()),
             Type::Point => t!(Tuple(vec![t!(Float64), t!(Float64)])).decode(ctx, header),
-            Type::Ring | Type::LineString => t!(Array(bt!(Point))).decode(ctx, header),
+            Type::Ring | Type::LineString | Type::MultiPoint => {
+                t!(Array(bt!(Point))).decode(ctx, header)
+            }
             Type::Polygon | Type::MultiLineString => t!(Array(bt!(Ring))).decode(ctx, header),
             Type::MultiPolygon => t!(Array(bt!(Polygon))).decode(ctx, header),
+            Type::Geometry => Type::geometry_variant().decode(ctx, header),
             Type::Tuple(inner) => tuple(inner, &ctx, header.into_tuple()),
             Type::Map(key, value) => map(*key, *value, &ctx, header.into_map()),
             Type::Variant(inner) => variant(inner, &ctx, header.into_variant()),

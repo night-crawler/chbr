@@ -1,12 +1,5 @@
-//! Order of sub-prefixes inside a JSON (Object) column prefix.
-//!
-//! `SerializationObject::serializeBinaryBulkStatePrefix` (V1/V2) writes, in this order:
-//!   1. structure: version, [V1: num paths], num paths, path names
-//!   2. prefix of every typed path (sorted)
-//!   3. for every dynamic path (sorted): the *complete* Dynamic prefix
-//!      (`SerializationDynamic::serializeBinaryBulkStatePrefix`: version, num types, names,
-//!      then `SerializationVariant::serializeBinaryBulkStatePrefix`: mode + every variant prefix)
-//!   4. shared data prefix
+//! JSON columns whose typed, dynamic, and array-valued paths are declared in different orders
+//! all iterate their paths in name order with the right values.
 
 use chbr::parse::block::parse_single;
 use chbr::reader::JsonIterator;

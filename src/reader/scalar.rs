@@ -11,7 +11,7 @@ use crate::error::Error;
 use crate::mark::{
     DateTime as DateTimeMark, DateTime64 as DateTime64Mark, Decimal32 as Decimal32Mark,
     Decimal64 as Decimal64Mark, Decimal128 as Decimal128Mark, Enum8 as Enum8Mark,
-    Enum16 as Enum16Mark, Interval as IntervalMark, Mark,
+    Enum16 as Enum16Mark, Interval as IntervalMark, Mark, Time64 as Time64Mark,
 };
 use crate::{Bf16Data, Date16Data, Date32Data, Ipv4Data, Ipv6Data, UuidData, zc};
 
@@ -93,6 +93,7 @@ col_view! {
     Ipv6, Ipv6, Ipv6Data, Ipv6Addr, |v| Ipv6Addr::from(*v);
     Date, Date, Date16Data, NaiveDate, |v| NaiveDate::from(*v);
     Date32, Date32, Date32Data, NaiveDate, |v| NaiveDate::from(*v);
+    Time, Time, zc::I32, TimeDelta, |v| TimeDelta::seconds(i64::from(v.get()));
 }
 
 #[derive(Clone, Copy)]
@@ -460,6 +461,40 @@ col_decimal! {
     Decimal32, Decimal32, Decimal32Mark<'a>, |v, s| Ok(v.with_scale(s));
     Decimal64, Decimal64, Decimal64Mark<'a>, |v, s| Ok(v.with_scale(s));
     Decimal128, Decimal128, Decimal128Mark<'a>, |v, s| v.with_scale(s);
+}
+
+#[derive(Clone, Copy)]
+pub struct Time64<'a>(pub &'a Time64Mark<'a>);
+
+impl<'a> TryFrom<&'a Mark<'a>> for Time64<'a> {
+    type Error = Error;
+
+    fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Mark::Time64(t) => Ok(Self(t)),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), Self::NAME))
+            }
+        }
+    }
+}
+
+impl<'a> TryRead<'a> for Time64<'a> {
+    type Item = TimeDelta;
+
+    const NAME: &'static str = "Time64";
+
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.0.data.len()
+    }
+
+    #[inline(always)]
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        let ticks = unsafe { self.0.data.as_slice().get_unchecked(idx) }.get();
+        crate::conv::time64(ticks, self.0.precision)
+    }
 }
 
 #[derive(Clone, Copy)]

@@ -1,6 +1,6 @@
 use std::{hint::cold_path, sync::LazyLock};
 
-use chrono::{DateTime, Duration, NaiveDate, TimeZone as _, Utc};
+use chrono::{DateTime, Duration, NaiveDate, TimeDelta, TimeZone as _, Utc};
 use chrono_tz::{Tz, TzOffset};
 
 use crate::Error;
@@ -62,8 +62,13 @@ pub fn datetime32_resolved(secs: u32, tz: Tz, utc_offset: Option<TzOffset>) -> D
     }
 }
 
-pub fn datetime64(timestamp: i64, precision: u8) -> crate::Result<DateTime<Utc>> {
-    const POW10: [i64; 10] = [
+/// Finest tick both `DateTime64` and `Time64` accept (`TIME64_MAX_SCALE`, `DataTypeDateTime64`).
+const MAX_PRECISION: u8 = 9;
+
+/// `None` when `precision > MAX_PRECISION`.
+#[inline]
+fn split_ticks(ticks: i64, precision: u8) -> Option<(i64, u32)> {
+    const POW10: [i64; MAX_PRECISION as usize + 1] = [
         1,
         10,
         100,
@@ -76,21 +81,27 @@ pub fn datetime64(timestamp: i64, precision: u8) -> crate::Result<DateTime<Utc>>
         1_000_000_000,
     ];
 
-    let Some(&pow) = POW10.get(usize::from(precision)) else {
-        cold_path();
-        return Err(Error::ValueOutOfRange(
-            "u8",
-            "DateTime64 precision (0..=9)",
-            precision.to_string(),
-        ));
-    };
-    let secs = timestamp.div_euclid(pow);
+    let &pow = POW10.get(usize::from(precision))?;
+    let secs = ticks.div_euclid(pow);
     #[expect(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
         reason = "0 <= rem_euclid(pow) < pow, so the product is < 10^9 and fits u32"
     )]
-    let nsec = (timestamp.rem_euclid(pow) * POW10[9 - usize::from(precision)]) as u32;
+    let nsec = (ticks.rem_euclid(pow) * POW10[usize::from(MAX_PRECISION - precision)]) as u32;
+    Some((secs, nsec))
+}
+
+#[cold]
+#[inline(never)]
+fn precision_out_of_range(precision: u8) -> Error {
+    Error::ValueOutOfRange("u8", "precision (0..=9)", precision.to_string())
+}
+
+pub fn datetime64(timestamp: i64, precision: u8) -> crate::Result<DateTime<Utc>> {
+    let Some((secs, nsec)) = split_ticks(timestamp, precision) else {
+        return Err(precision_out_of_range(precision));
+    };
     match DateTime::<Utc>::from_timestamp(secs, nsec) {
         Some(dt) => Ok(dt),
         None => {
@@ -99,6 +110,24 @@ pub fn datetime64(timestamp: i64, precision: u8) -> crate::Result<DateTime<Utc>>
                 "DateTime64",
                 "DateTime<Utc>",
                 timestamp.to_string(),
+            ))
+        }
+    }
+}
+
+/// `Err` when `precision > 9` or when the result does not fit a [`TimeDelta`].
+pub fn time64(ticks: i64, precision: u8) -> crate::Result<TimeDelta> {
+    let Some((secs, nsec)) = split_ticks(ticks, precision) else {
+        return Err(precision_out_of_range(precision));
+    };
+    match TimeDelta::new(secs, nsec) {
+        Some(td) => Ok(td),
+        None => {
+            cold_path();
+            Err(Error::ValueOutOfRange(
+                "Time64",
+                "TimeDelta",
+                ticks.to_string(),
             ))
         }
     }

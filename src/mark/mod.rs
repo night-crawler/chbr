@@ -16,7 +16,7 @@ use crate::{
     zc,
 };
 use bstr::BStr;
-use chrono::{DateTime as ChronoDateTime, TimeZone};
+use chrono::{DateTime as ChronoDateTime, TimeDelta, TimeZone};
 use chrono_tz::Tz;
 use core::fmt;
 use std::{fmt::Debug, hint::cold_path, marker::PhantomData, ops::Range};
@@ -53,6 +53,8 @@ pub enum Mark<'a> {
     Date32(ByteView<'a, Date32Data>),
     DateTime(DateTime<'a>),
     DateTime64(DateTime64<'a>),
+    Time(ByteView<'a, zc::I32>),
+    Time64(Time64<'a>),
     Interval(Interval<'a>),
     Ipv4(ByteView<'a, Ipv4Data>),
     Ipv6(ByteView<'a, Ipv6Data>),
@@ -105,6 +107,8 @@ impl<'a> Mark<'a> {
             Mark::Date32(_) => "Date32",
             Mark::DateTime(_) => "DateTime",
             Mark::DateTime64(_) => "DateTime64",
+            Mark::Time(_) => "Time",
+            Mark::Time64(_) => "Time64",
             Mark::Interval(i) => i.kind.as_str(),
             Mark::Ipv4(_) => "Ipv4",
             Mark::Ipv6(_) => "Ipv6",
@@ -148,7 +152,7 @@ impl<'a> Mark<'a> {
             Mark::Bool(bv) => bv.data.len(),
             Mark::Int8(bv) => bv.len(),
             Mark::Int16(bv) => bv.len(),
-            Mark::Int32(bv) => bv.len(),
+            Mark::Int32(bv) | Mark::Time(bv) => bv.len(),
             Mark::Int64(bv) => bv.len(),
             Mark::Int128(bv) => bv.len(),
             Mark::Int256(bv) => bv.len(),
@@ -172,6 +176,7 @@ impl<'a> Mark<'a> {
             Mark::Date32(bv) => bv.len(),
             Mark::DateTime(d) => d.data.len(),
             Mark::DateTime64(d) => d.data.len(),
+            Mark::Time64(t) => t.data.len(),
             Mark::Interval(i) => i.data.len(),
             Mark::Ipv4(bv) => bv.len(),
             Mark::Ipv6(bv) => bv.len(),
@@ -225,6 +230,11 @@ impl<'a> Mark<'a> {
             Mark::Date32(bv) => Ok(bv.get(index).copied().map(Into::into).map(Value::Date32)),
             Mark::DateTime(d) => Ok(d.get(index)),
             Mark::DateTime64(d) => Ok(d.get(index)),
+            Mark::Time(bv) => Ok(bv
+                .get(index)
+                .map(|v| TimeDelta::seconds(i64::from(v.get())))
+                .map(Value::Time)),
+            Mark::Time64(t) => Ok(t.get(index)),
             Mark::Interval(i) => Ok(i.get(index)),
             Mark::Ipv4(data) => Ok(data.get(index).copied().map(Into::into).map(Value::Ipv4)),
             Mark::Ipv6(data) => Ok(data.get(index).map(Value::Ipv6)),
@@ -310,6 +320,11 @@ impl<'a> Mark<'a> {
                 precision: d.precision,
                 tz: d.tz,
                 slice: self.checked_slice(d.data.as_slice(), idx)?,
+            }),
+            Mark::Time(bv) => Ok(Value::TimeSlice(self.checked_slice(bv.as_slice(), idx)?)),
+            Mark::Time64(t) => Ok(Value::Time64Slice {
+                precision: t.precision,
+                slice: self.checked_slice(t.data.as_slice(), idx)?,
             }),
             Mark::Interval(i) => Ok(Value::IntervalSlice {
                 kind: i.kind,
@@ -789,13 +804,19 @@ pub struct DateTime64<'a> {
 }
 
 #[derive(Debug)]
+pub struct Time64<'a> {
+    pub(crate) precision: u8,
+    pub(crate) data: ByteView<'a, zc::I64>,
+}
+
+#[derive(Debug)]
 pub struct Interval<'a> {
     pub(crate) kind: interval::Kind,
     pub(crate) data: ByteView<'a, zc::I64>,
 }
 
 impl_get_many!(
-    Decimal32, Decimal64, Decimal128, Decimal256, DateTime, DateTime64, Interval
+    Decimal32, Decimal64, Decimal128, Decimal256, DateTime, DateTime64, Time64, Interval
 );
 
 #[derive(Debug)]
@@ -939,13 +960,13 @@ impl Debug for Mark<'_> {
         fmt_mark! {
             named: [
                 Nothing, Bool, Int8, Int16, Int32, Int64, Int128, Int256, UInt8, UInt16, UInt32,
-                UInt64, UInt128, UInt256, Float32, Float64, BFloat16, Uuid, Date, Date32,
+                UInt64, UInt128, UInt256, Float32, Float64, BFloat16, Uuid, Date, Date32, Time,
                 Ipv4, Ipv6, String,
             ],
             delegate: [
                 Decimal32, Decimal64, Decimal128, Decimal256, FixedString, DateTime,
-                DateTime64, Interval, Enum8, Enum16, LowCardinality, Array, Tuple, Nullable, Map,
-                Variant, Nested, NamedTuple, Dynamic, Json,
+                DateTime64, Time64, Interval, Enum8, Enum16, LowCardinality, Array, Tuple,
+                Nullable, Map, Variant, Nested, NamedTuple, Dynamic, Json,
             ]
         }
     }

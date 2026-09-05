@@ -17,6 +17,8 @@ use nom::{
 use crate::interval;
 use crate::types::{Field, Type};
 
+const TIME64_DEFAULT_SCALE: u8 = 3;
+
 fn parse_num<T>(input: &[u8]) -> Result<T, nom::error::Error<&[u8]>>
 where
     T: FromStr,
@@ -87,6 +89,41 @@ fn parse_decimal_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     };
 
     Ok((input, typ))
+}
+
+/// `Decimal32(S)` | `Decimal64(S)` | `Decimal128(S)` | `Decimal256(S)`: the precision is the
+/// type's maximum (`createExact` in `DataTypesDecimal.cpp`), so `S` is the only argument and must
+/// not exceed it. `NativeWriter` normalizes these to `Decimal(P, S)`, so they only appear in
+/// hand-written type strings.
+fn parse_decimal_sized<'a>(input: &'a [u8]) -> IResult<&'a [u8], Type<'a>> {
+    type Ctor<'a> = fn(u8) -> Type<'a>;
+    let (input, (ctor, max_precision)) = preceded(
+        tag("Decimal"),
+        alt((
+            map(tag("32"), |_| (Type::Decimal32 as Ctor<'a>, 9)),
+            map(tag("64"), |_| (Type::Decimal64 as Ctor<'a>, 18)),
+            map(tag("128"), |_| (Type::Decimal128 as Ctor<'a>, 38)),
+            map(tag("256"), |_| (Type::Decimal256 as Ctor<'a>, 76)),
+        )),
+    )
+    .parse(input)?;
+
+    let (input, scale) = delimited(
+        ws(char('(')),
+        map_res(digit1, parse_num::<u8>),
+        ws(char(')')),
+    )
+    .parse(input)?;
+
+    if scale > max_precision {
+        cold_path();
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            ErrorKind::Fail,
+        )));
+    }
+
+    Ok((input, ctor(scale)))
 }
 
 fn parse_string(input: &[u8]) -> IResult<&[u8], Type<'_>> {
@@ -204,6 +241,22 @@ fn parse_tuple(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     .parse(input)
 }
 
+/// `Time64(P)`; `DataTypeTime64` rejects a timezone argument, so none is parsed.
+fn parse_time64(input: &[u8]) -> IResult<&[u8], Type<'_>> {
+    map(
+        preceded(
+            tag("Time64"),
+            delimited(
+                ws(char('(')),
+                map_res(digit1, parse_num::<u8>),
+                ws(char(')')),
+            ),
+        ),
+        Type::Time64,
+    )
+    .parse(input)
+}
+
 fn parse_date_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     alt((
         parse_datetime64,
@@ -212,6 +265,9 @@ fn parse_date_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
         map(tag("DateTime"), |_| Type::DateTime(UTC)),
         map(tag("Date32"), |_| Type::Date32),
         map(tag("Date"), |_| Type::Date),
+        parse_time64,
+        map(tag("Time64"), |_| Type::Time64(TIME64_DEFAULT_SCALE)),
+        map(tag("Time"), |_| Type::Time),
     ))
     .parse(input)
 }
@@ -221,12 +277,15 @@ fn parse_geo_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
         map(tag("LineString"), |_| Type::LineString),
         map(tag("MultiLineString"), |_| Type::MultiLineString),
         map(tag("MultiPolygon"), |_| Type::MultiPolygon),
+        map(tag("MultiPoint"), |_| Type::MultiPoint),
         map(tag("Polygon"), |_| Type::Polygon),
         map(tag("Ring"), |_| Type::Ring),
         map(tag("Point"), |_| Type::Point),
+        map(tag("Geometry"), |_| Type::Geometry),
     ))
     .parse(input)
 }
+
 fn parse_json_path(input: &[u8]) -> IResult<&[u8], &[u8]> {
     alt((
         delimited(char('`'), take_while1(|c| c != b'`'), char('`')),
@@ -560,6 +619,7 @@ pub fn parse_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
         parse_map,
         parse_tuple,
         parse_decimal_type,
+        parse_decimal_sized,
         parse_variant,
         parse_nested,
         parse_named_tuple,
@@ -580,6 +640,67 @@ mod tests {
         let input = b"Decimal(9, 9)";
         let (_, typ) = parse_decimal_type(input).unwrap();
         assert_eq!(typ, Type::Decimal32(9));
+    }
+
+    #[test]
+    fn decimal_sized_aliases() {
+        for (input, expected) in [
+            (&b"Decimal32(3)"[..], Type::Decimal32(3)),
+            (b"Decimal64(18)", Type::Decimal64(18)),
+            (b"Decimal128( 10 )", Type::Decimal128(10)),
+            (b"Decimal256(76)", Type::Decimal256(76)),
+            (
+                b"Nullable(Decimal32(0))",
+                Type::Nullable(Box::new(Type::Decimal32(0))),
+            ),
+        ] {
+            let (rest, typ) = parse_type(input).unwrap();
+            assert!(rest.is_empty(), "{}", String::from_utf8_lossy(input));
+            assert_eq!(typ, expected, "{}", String::from_utf8_lossy(input));
+        }
+    }
+
+    #[test]
+    fn decimal_sized_scale_exceeds_max_precision() {
+        assert!(parse_decimal_sized(b"Decimal32(10)").is_err());
+        assert!(parse_decimal_sized(b"Decimal64(19)").is_err());
+        assert!(parse_decimal_sized(b"Decimal128(39)").is_err());
+        assert!(parse_decimal_sized(b"Decimal256(77)").is_err());
+        // `Decimal32(P, S)` is not a ClickHouse type: `Decimal32` takes the scale only.
+        assert!(parse_decimal_sized(b"Decimal32(9, 3)").is_err());
+    }
+
+    #[test]
+    fn time_types() {
+        for (input, expected) in [
+            (&b"Time"[..], Type::Time),
+            (b"Time64", Type::Time64(3)),
+            (b"Time64(0)", Type::Time64(0)),
+            (b"Time64( 9 )", Type::Time64(9)),
+            (b"Array(Time)", Type::Array(Box::new(Type::Time))),
+            (
+                b"Nullable(Time64(6))",
+                Type::Nullable(Box::new(Type::Time64(6))),
+            ),
+        ] {
+            let (rest, typ) = parse_type(input).unwrap();
+            assert!(rest.is_empty(), "{}", String::from_utf8_lossy(input));
+            assert_eq!(typ, expected, "{}", String::from_utf8_lossy(input));
+        }
+    }
+
+    #[test]
+    fn geometry_types() {
+        for (input, expected) in [
+            (&b"MultiPoint"[..], Type::MultiPoint),
+            (b"MultiPolygon", Type::MultiPolygon),
+            (b"Geometry", Type::Geometry),
+            (b"Array(Geometry)", Type::Array(Box::new(Type::Geometry))),
+        ] {
+            let (rest, typ) = parse_type(input).unwrap();
+            assert!(rest.is_empty(), "{}", String::from_utf8_lossy(input));
+            assert_eq!(typ, expected, "{}", String::from_utf8_lossy(input));
+        }
     }
 
     #[test]

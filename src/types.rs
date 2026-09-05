@@ -6,7 +6,7 @@ use crate::{
     interval,
     mark::{
         DateTime, DateTime64, Decimal32, Decimal64, Decimal128, Decimal256, Enum8, Enum16,
-        FixedString, Interval, Mark,
+        FixedString, Interval, Mark, Time64,
     },
     parse::typ::parse_type,
     slice::ByteView,
@@ -202,6 +202,12 @@ pub enum Type<'a> {
     Date32,
     DateTime(Tz),
     DateTime64(u8, Tz),
+    /// Signed seconds as `Int32` (`DataTypeTime : DataTypeNumberBase<Int32>`); no timezone.
+    /// ClickHouse saturates only the text form at `±999:59:59`; stored values may exceed it.
+    Time,
+    /// Signed `Int64` ticks of `10^-precision` seconds
+    /// (`DataTypeTime64 : DataTypeDecimalBase<Time64>`); no timezone.
+    Time64(u8),
     Interval(interval::Kind),
 
     Ipv4,
@@ -227,6 +233,14 @@ pub enum Type<'a> {
 
     /// MultiLineString is multiple lines stored as an array of LineString: Array(LineString).
     MultiLineString,
+
+    /// MultiPoint is a set of points stored as Array(Point).
+    MultiPoint,
+
+    /// Geometry is a Variant over every geo type with a fixed discriminator order
+    /// (`registerDataTypeDomainGeo`): LineString, MultiLineString, MultiPolygon, Point, Polygon,
+    /// Ring, MultiPoint. New geo types are appended, never sorted in.
+    Geometry,
 
     Enum8(Vec<(&'a str, i8)>),
     Enum16(Vec<(&'a str, i16)>),
@@ -282,6 +296,20 @@ impl<'a> Type<'a> {
         }
     }
 
+    /// The `Variant` a `Geometry` column is serialized as. The element order is the
+    /// discriminator order, see [`Type::Geometry`].
+    pub(crate) fn geometry_variant() -> Type<'a> {
+        Type::Variant(vec![
+            Type::LineString,
+            Type::MultiLineString,
+            Type::MultiPolygon,
+            Type::Point,
+            Type::Polygon,
+            Type::Ring,
+            Type::MultiPoint,
+        ])
+    }
+
     pub(crate) const fn size(&self) -> Option<usize> {
         #[expect(clippy::match_same_arms)]
         match self {
@@ -319,6 +347,8 @@ impl<'a> Type<'a> {
             Self::Date32 => Some(4),
             Self::DateTime(_) => Some(4),
             Self::DateTime64(_, _) => Some(8),
+            Self::Time => Some(4),
+            Self::Time64(_) => Some(8),
             Self::Interval(_) => Some(8),
             Self::Enum8(_) => Some(1),
             Self::Enum16(_) => Some(2),
@@ -333,6 +363,8 @@ impl<'a> Type<'a> {
             Self::MultiPolygon => None,
             Self::LineString => None,
             Self::MultiLineString => None,
+            Self::MultiPoint => None,
+            Self::Geometry => None,
             Self::Map(_, _) => None,
 
             Self::Array(_) => None,
@@ -428,6 +460,11 @@ impl<'a> Type<'a> {
             Type::DateTime64(precision, tz) => Mark::DateTime64(DateTime64 {
                 precision,
                 tz,
+                data: ByteView::try_from(data)?,
+            }),
+            Type::Time => Mark::Time(ByteView::try_from(data)?),
+            Type::Time64(precision) => Mark::Time64(Time64 {
+                precision,
                 data: ByteView::try_from(data)?,
             }),
             Type::Interval(kind) => Mark::Interval(Interval {

@@ -151,7 +151,13 @@ pub fn lc<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], TypeHeader<'a>> {
     })
 }
 
-// Reads what `SerializationObject::serializeBinaryBulkStatePrefix` writes for V1/V2.
+// Reads what `SerializationObject::serializeBinaryBulkStatePrefix` writes for V1/V2, in order:
+//   1. structure: version, [V1: max dynamic paths], num dynamic paths, dynamic path names;
+//   2. the prefix of every typed path, in name order;
+//   3. for every dynamic path, in name order, a complete `Dynamic` prefix
+//      (`SerializationDynamic::serializeBinaryBulkStatePrefix`, which in turn nests the
+//      `Variant` prefix: mode + every variant's prefix);
+//   4. the shared data prefix.
 pub fn json<'a>(
     ctx: &ParseContext<'a>,
     typed_paths: &[Field<'a>],
