@@ -273,7 +273,7 @@ impl Value<'_> {
 
 pub struct LowCardinalitySliceIterator<'a> {
     pub(crate) lc: &'a mark::lc::LowCardinality<'a>,
-    pub(crate) indices: SliceUsizeIterator<'a>,
+    pub(crate) indices: mark::lc::IndicesIter<'a>,
 }
 
 impl<'a> TryFrom<Value<'a>> for LowCardinalitySliceIterator<'a> {
@@ -291,7 +291,13 @@ impl<'a> Iterator for LowCardinalitySliceIterator<'a> {
     type Item = Result<Value<'a>, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        Some(self.lc.value(self.indices.next()?))
+        Some(match self.indices.next()? {
+            Ok(index) => self.lc.value(index),
+            Err(error) => {
+                cold_path();
+                Err(error)
+            }
+        })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
