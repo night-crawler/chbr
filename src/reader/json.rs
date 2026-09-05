@@ -1665,6 +1665,7 @@ mod serde_tests {
                     mark::Mark::String(string_view(vec!["two"])),
                 ]
                 .into(),
+                num_rows: 1,
             }),
             mark::Mark::NamedTuple(mark::NamedTuple {
                 col_names: vec!["x"].into(),
@@ -1673,6 +1674,7 @@ mod serde_tests {
                         named_value.as_slice(),
                     )?)]
                     .into(),
+                    num_rows: 1,
                 })),
             }),
             mark::Mark::Nested(mark::Nested {
@@ -1681,6 +1683,7 @@ mod serde_tests {
                     offsets: ByteView::try_from(nested_offsets.as_slice())?,
                     values: Box::new(mark::Mark::Tuple(mark::Tuple {
                         values: vec![mark::Mark::String(string_view(vec!["a", "b"]))].into(),
+                        num_rows: 2,
                     })),
                 })),
             }),

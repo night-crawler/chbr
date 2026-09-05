@@ -507,6 +507,41 @@ fn col_tuple_reads_named_tuple_positionally() -> TestResult {
 }
 
 #[test]
+fn empty_tuple_keeps_row_count() -> TestResult {
+    #[derive(FromBlock)]
+    struct Row<'a> {
+        t: Value<'a>,
+        at: Array<'a, Value<'a>>,
+        number: U64<'a>,
+    }
+
+    let buf = load("./testdata/empty_tuple.native")?;
+    let (_, block) = parse_single(&buf)?;
+    assert_eq!(block.num_rows, 2);
+    assert_eq!(block.mark("t")?.len(), 2);
+
+    let mut rows = 0;
+    for (row_idx, row) in Row::rows(&block)?.enumerate() {
+        let row = row?;
+        assert!(
+            matches!(row.t, crate::value::Value::Tuple { mark, index } if mark.values.is_empty() && index == row_idx),
+            "row {row_idx}: {:?}",
+            row.t
+        );
+        let at: Vec<_> = row.at.collect::<Result<_, _>>()?;
+        assert_eq!(at.len(), 2, "row {row_idx}: [tuple(), tuple()]");
+        assert!(at.iter().all(
+            |v| matches!(v, crate::value::Value::Tuple { mark, .. } if mark.values.is_empty())
+        ));
+        assert_eq!(row.number, u64::try_from(row_idx)?);
+        rows += 1;
+    }
+    assert_eq!(rows, 2);
+
+    Ok(())
+}
+
+#[test]
 fn derive_variant_enum() -> TestResult {
     // Variants in the server-canonicalized order of Variant(Array(Int64), Int64, String).
     #[derive(FromVariant)]

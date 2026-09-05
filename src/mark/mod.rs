@@ -913,16 +913,16 @@ impl Nullable<'_> {
 #[derive(Debug)]
 pub struct Tuple<'a> {
     pub values: Box<[Mark<'a>]>,
+    pub num_rows: usize,
 }
 
 impl Tuple<'_> {
-    pub(crate) fn len(&self) -> usize {
-        // Every element column has one value per row, so any of them gives the row count;
-        // ClickHouse's `ColumnTuple::size()` (`src/Columns/ColumnTuple.cpp`) also reads the first.
-        self.values.first().map_or(0, Mark::len)
+    #[inline]
+    pub(crate) const fn len(&self) -> usize {
+        self.num_rows
     }
 
-    pub(crate) fn get(&self, index: usize) -> Option<Value<'_>> {
+    pub(crate) const fn get(&self, index: usize) -> Option<Value<'_>> {
         if index >= self.len() {
             cold_path();
             return None;
@@ -1030,6 +1030,7 @@ mod tests {
 
         let tuple = Mark::Tuple(Tuple {
             values: Box::new([Mark::UInt8(ByteView::try_from(bytes.as_slice())?)]),
+            num_rows: 2,
         });
         assert_eq!(tuple.len(), 2);
         assert!(matches!(
