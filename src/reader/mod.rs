@@ -59,6 +59,8 @@ pub trait FromBlock<'a>: TryRead<'a> {
     /// if it can.
     fn from_block(block: &'a crate::ParsedBlock<'a>) -> crate::Result<Self>;
 
+    // Too fat
+    #[inline(never)]
     fn rows(block: &'a crate::ParsedBlock<'a>) -> crate::Result<RowsIter<'a, Self>> {
         RowsIter::new(Self::from_block(block)?, block.num_rows)
     }
@@ -133,9 +135,7 @@ pub struct RowsIter<'a, R: TryRead<'a>> {
 
 impl<'a, R: TryRead<'a>> RowsIter<'a, R> {
     // Checks the row range once to make `next` faster.
-    // Not inlined because inlining drags the per-column len/error path into the caller's row loop,
-    // which kills perf.
-    #[inline(never)]
+    #[inline]
     pub(crate) fn new(reader: R, num_rows: usize) -> crate::Result<Self> {
         let len = reader.len();
         if len < num_rows {
