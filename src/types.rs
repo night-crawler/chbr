@@ -16,6 +16,9 @@ pub type Offsets<'a> = ByteView<'a, zc::U64>;
 
 pub trait OffsetIndexPair {
     fn offset_indices(&self, index: usize) -> crate::Result<Option<(usize, usize)>>;
+    /// # Safety
+    /// `index < self.len()`.
+    unsafe fn offset_indices_unchecked(&self, index: usize) -> crate::Result<(usize, usize)>;
     fn last_or_default(&self) -> crate::Result<usize>;
 }
 
@@ -35,6 +38,17 @@ impl OffsetIndexPair for [zc::U64] {
         Ok(Some((start, end)))
     }
 
+    #[inline(always)]
+    unsafe fn offset_indices_unchecked(&self, index: usize) -> crate::Result<(usize, usize)> {
+        let end = cast_offset(unsafe { self.get_unchecked(index) }.get())?;
+        let start = if index == 0 {
+            0
+        } else {
+            cast_offset(unsafe { self.get_unchecked(index - 1) }.get())?
+        };
+        Ok((start, end))
+    }
+
     fn last_or_default(&self) -> crate::Result<usize> {
         match self.last() {
             Some(last) => cast_offset(last.get()),
@@ -47,6 +61,11 @@ impl OffsetIndexPair for Offsets<'_> {
     #[inline(always)]
     fn offset_indices(&self, index: usize) -> crate::Result<Option<(usize, usize)>> {
         self.as_slice().offset_indices(index)
+    }
+
+    #[inline(always)]
+    unsafe fn offset_indices_unchecked(&self, index: usize) -> crate::Result<(usize, usize)> {
+        unsafe { self.as_slice().offset_indices_unchecked(index) }
     }
 
     fn last_or_default(&self) -> crate::Result<usize> {

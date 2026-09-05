@@ -14,37 +14,47 @@ pub struct Nullable<'a, Inner> {
 
 impl<'a, Inner> TryFrom<&'a Mark<'a>> for Nullable<'a, Inner>
 where
-    Inner: TryRead<'a> + TryFrom<&'a Mark<'a>>,
+    Inner: TryRead<'a> + TryFrom<&'a Mark<'a>> + 'a,
     Error: From<<Inner as TryFrom<&'a Mark<'a>>>::Error>,
 {
     type Error = Error;
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Mark::Nullable(n) => Ok(Nullable {
-                mark: n,
-                inner: Inner::try_from(n.data.as_ref())?,
-            }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Nullable"))
-            }
+        let Mark::Nullable(n) = value else {
+            cold_path();
+            return Err(Error::MismatchedType(value.as_str(), Self::NAME));
+        };
+        let inner = Inner::try_from(n.data.as_ref())?;
+        if inner.len() < n.len() {
+            cold_path();
+            return Err(Error::CorruptedData(format!(
+                "Nullable mask has {} rows, values have {}",
+                n.len(),
+                inner.len()
+            )));
         }
+        Ok(Nullable { mark: n, inner })
     }
 }
 
 impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for Nullable<'a, Inner> {
     type Item = Option<Inner::Item>;
 
+    const NAME: &'static str = "Nullable";
+
     #[inline(always)]
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        match self.mark.is_null(idx) {
-            None => {
-                cold_path();
-                Err(Error::IndexOutOfBounds(idx, "Nullable"))
+    fn len(&self) -> usize {
+        self.mark.len()
+    }
+
+    #[inline(always)]
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        // SAFETY: caller guarantees `idx < mark.len()`; construction checked `<= inner.len()`.
+        unsafe {
+            if self.mark.is_null_unchecked(idx) {
+                return Ok(None);
             }
-            Some(true) => Ok(None),
-            Some(false) => Ok(Some(self.inner.try_read(idx)?)),
+            Ok(Some(self.inner.try_read_unchecked(idx)?))
         }
     }
 }
@@ -61,7 +71,7 @@ pub type LcTrustedStr<'a> = Lc<'a, TrustedStr<'a>>;
 
 impl<'a, Inner> TryFrom<&'a Mark<'a>> for Lc<'a, Inner>
 where
-    Inner: TryRead<'a> + TryFrom<&'a Mark<'a>>,
+    Inner: TryRead<'a> + TryFrom<&'a Mark<'a>> + 'a,
     Error: From<<Inner as TryFrom<&'a Mark<'a>>>::Error>,
 {
     type Error = Error;
@@ -83,15 +93,28 @@ where
 impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for Lc<'a, Inner> {
     type Item = Inner::Item;
 
+    const NAME: &'static str = "LowCardinality";
+
     #[inline(always)]
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value_index) = self.indices.get(idx)? else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "LowCardinality"));
-        };
-        // Construction guarantees that a missing dictionary has no readable index.
-        // Reaching this point therefore proves that the common populated case has a dictionary.
+    fn len(&self) -> usize {
+        self.indices.len()
+    }
+
+    #[inline(always)]
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        let value_index = unsafe { self.indices.get_unchecked(idx) }?;
+        self.dict_read(value_index)
+    }
+}
+
+impl<'a, Inner: TryRead<'a> + 'a> Lc<'a, Inner> {
+    /// Dictionary entry `value_index`; `IndexOutOfBounds` past the dictionary.
+    #[inline(always)]
+    fn dict_read(&self, value_index: usize) -> crate::Result<Inner::Item> {
+        // SAFETY: construction guarantees that a missing dictionary has no readable index, so
+        // reaching this point proves that the dictionary exists.
         let dict = unsafe { self.dict.as_ref().unwrap_unchecked() };
+        // `value_index` is wire data, not an index the constructor bounded: keep the check.
         dict.try_read(value_index)
     }
 }
@@ -108,7 +131,7 @@ pub type LcNullableTrustedStr<'a> = LcNullable<'a, TrustedStr<'a>>;
 
 impl<'a, Inner> TryFrom<&'a Mark<'a>> for LcNullable<'a, Inner>
 where
-    Inner: TryRead<'a> + TryFrom<&'a Mark<'a>>,
+    Inner: TryRead<'a> + TryFrom<&'a Mark<'a>> + 'a,
     Error: From<<Inner as TryFrom<&'a Mark<'a>>>::Error>,
 {
     type Error = Error;
@@ -136,18 +159,31 @@ where
 impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for LcNullable<'a, Inner> {
     type Item = Option<Inner::Item>;
 
+    const NAME: &'static str = "LowCardinality";
+
     #[inline(always)]
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(value_index) = self.indices.get(idx)? else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "LowCardinality"));
-        };
+    fn len(&self) -> usize {
+        self.indices.len()
+    }
+
+    #[inline(always)]
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        let value_index = unsafe { self.indices.get_unchecked(idx) }?;
+        self.dict_read(value_index)
+    }
+}
+
+impl<'a, Inner: TryRead<'a> + 'a> LcNullable<'a, Inner> {
+    /// Dictionary entry `value_index`; `None` for the NULL slot, `IndexOutOfBounds` past the
+    /// dictionary.
+    #[inline(always)]
+    fn dict_read(&self, value_index: usize) -> crate::Result<Option<Inner::Item>> {
         if value_index == 0 {
             return Ok(None);
         }
-        // SAFETY:
-        // Construction guarantees that a missing dictionary has only null indices.
+        // SAFETY: construction guarantees that a missing dictionary has only null indices.
         let dict = unsafe { self.dict.as_ref().unwrap_unchecked() };
+        // `value_index` is wire data, not an index the constructor bounded: keep the check.
         Ok(Some(dict.try_read(value_index)?))
     }
 }
@@ -156,11 +192,13 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for LcNullable<'a, Inner> {
 pub struct Array<'a, Inner: TryRead<'a>> {
     pub(crate) offsets: &'a [crate::zc::U64],
     pub(crate) values: Option<Inner>,
+    // `values.len()`, or 0 without values; every row's range is checked against it once.
+    values_len: usize,
 }
 
 impl<'a, Inner> TryFrom<&'a Mark<'a>> for Array<'a, Inner>
 where
-    Inner: TryRead<'a> + TryFrom<&'a Mark<'a>>,
+    Inner: TryRead<'a> + TryFrom<&'a Mark<'a>> + 'a,
     Error: From<<Inner as TryFrom<&'a Mark<'a>>>::Error>,
 {
     type Error = Error;
@@ -168,8 +206,9 @@ where
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::Array(arr) => {
+                let elements = arr.offsets.last_or_default()?;
                 let values = match arr.values.as_ref() {
-                    Mark::Empty if arr.offsets.last_or_default()? == 0 => None,
+                    Mark::Empty if elements == 0 => None,
                     Mark::Empty => {
                         cold_path();
                         return Err(Error::CorruptedData(
@@ -178,16 +217,22 @@ where
                     }
                     values => Some(Inner::try_from(values)?),
                 };
+                let values_len = values.as_ref().map_or(0, Inner::len);
+                if values_len < elements {
+                    cold_path();
+                    return Err(offsets_exceed_values("Array", elements, values_len));
+                }
                 Ok(Array {
                     offsets: arr.offsets.as_slice(),
                     values,
+                    values_len,
                 })
             }
             // `Nested(...)` is stored as an array of tuples.
             Mark::Nested(n) => Self::try_from(n.array_of_tuples.as_ref()),
             other => {
                 cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Array"))
+                Err(Error::MismatchedType(other.as_str(), Self::NAME))
             }
         }
     }
@@ -196,24 +241,43 @@ where
 impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for Array<'a, Inner> {
     type Item = ArrayIter<'a, Inner>;
 
+    const NAME: &'static str = "Array";
+
     #[inline(always)]
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some((s, e)) = self.offsets.offset_indices(idx)? else {
+    fn len(&self) -> usize {
+        self.offsets.len()
+    }
+
+    #[inline(always)]
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        let (s, e) = unsafe { self.offsets.offset_indices_unchecked(idx) }?;
+        self.iter_range(s..e)
+    }
+}
+
+impl<'a, Inner: TryRead<'a> + 'a> Array<'a, Inner> {
+    /// Elements `range` of the values; `CorruptedData` when it runs past them.
+    #[inline(always)]
+    fn iter_range(&self, range: Range<usize>) -> crate::Result<ArrayIter<'a, Inner>> {
+        // One check per row here lets `ArrayIter` read every element unchecked.
+        if range.end > self.values_len {
             cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "Array"));
-        };
-        if self.values.is_none() && s != e {
-            cold_path();
-            return Err(Error::CorruptedData(
-                "Array values are missing for a non-empty range".to_owned(),
-            ));
+            return Err(offsets_exceed_values("Array", range.end, self.values_len));
         }
         Ok(ArrayIter {
             inner: self.values,
-            range: s..e,
+            range,
             _marker: std::marker::PhantomData,
         })
     }
+}
+
+#[cold]
+#[inline(never)]
+fn offsets_exceed_values(kind: &str, end: usize, present: usize) -> Error {
+    Error::CorruptedData(format!(
+        "{kind} offsets address {end} values, {present} present"
+    ))
 }
 
 pub struct ArrayIter<'a, Inner: TryRead<'a>> {
@@ -239,11 +303,12 @@ impl<'a, Inner: TryRead<'a>> Iterator for ArrayIter<'a, Inner> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.range.next()?;
-        // SAFETY:
-        // We construct it so that None can be only when the range is empty, so this line will never
-        // be executed, because it's guarded by the range.next() above.
-        let inner = unsafe { self.inner.as_ref().unwrap_unchecked() };
-        Some(inner.try_read(i))
+        // SAFETY: `Array::iter_range` verified `range.end <= values_len`, so `i < inner.len()` and
+        // `inner` is `Some` whenever the range is non-empty.
+        unsafe {
+            let inner = self.inner.as_ref().unwrap_unchecked();
+            Some(inner.try_read_unchecked(i))
+        }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -278,43 +343,68 @@ pub struct Map<'a, K: TryRead<'a>, V: TryRead<'a>> {
     pub(crate) offsets: &'a [crate::zc::U64],
     pub(crate) keys: K,
     pub(crate) values: V,
+    // `min(keys.len(), values.len())`; every row's range is checked against it once.
+    entries_len: usize,
 }
 
 impl<'a, K, V> TryFrom<&'a Mark<'a>> for Map<'a, K, V>
 where
-    K: TryRead<'a> + TryFrom<&'a Mark<'a>>,
-    V: TryRead<'a> + TryFrom<&'a Mark<'a>>,
+    K: TryRead<'a> + TryFrom<&'a Mark<'a>> + 'a,
+    V: TryRead<'a> + TryFrom<&'a Mark<'a>> + 'a,
     Error: From<<K as TryFrom<&'a Mark<'a>>>::Error> + From<<V as TryFrom<&'a Mark<'a>>>::Error>,
 {
     type Error = Error;
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Mark::Map(m) => Ok(Map {
-                offsets: m.offsets.as_slice(),
-                keys: K::try_from(m.keys.as_ref())?,
-                values: V::try_from(m.values.as_ref())?,
-            }),
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Map"))
-            }
+        let Mark::Map(m) = value else {
+            cold_path();
+            return Err(Error::MismatchedType(value.as_str(), Self::NAME));
+        };
+        let keys = K::try_from(m.keys.as_ref())?;
+        let values = V::try_from(m.values.as_ref())?;
+        let entries_len = keys.len().min(values.len());
+        let entries = m.offsets.last_or_default()?;
+        if entries_len < entries {
+            cold_path();
+            return Err(offsets_exceed_values("Map", entries, entries_len));
         }
+        Ok(Map {
+            offsets: m.offsets.as_slice(),
+            keys,
+            values,
+            entries_len,
+        })
     }
 }
 
 impl<'a, K: TryRead<'a> + 'a, V: TryRead<'a> + 'a> TryRead<'a> for Map<'a, K, V> {
     type Item = MapIter<'a, K, V>;
 
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some((s, e)) = self.offsets.offset_indices(idx)? else {
+    const NAME: &'static str = "Map";
+
+    fn len(&self) -> usize {
+        self.offsets.len()
+    }
+
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        let (s, e) = unsafe { self.offsets.offset_indices_unchecked(idx) }?;
+        self.iter_range(s..e)
+    }
+}
+
+impl<'a, K: TryRead<'a> + 'a, V: TryRead<'a> + 'a> Map<'a, K, V> {
+    /// Entries `range` of the keys and values; `CorruptedData` when it runs past them.
+    #[inline(always)]
+    fn iter_range(&self, range: Range<usize>) -> crate::Result<MapIter<'a, K, V>> {
+        // One check per row here lets `MapIter` read every entry unchecked.
+        if range.end > self.entries_len {
             cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "Map"));
-        };
+            return Err(offsets_exceed_values("Map", range.end, self.entries_len));
+        }
         Ok(MapIter {
             keys: self.keys,
             values: self.values,
-            range: s..e,
+            range,
             _marker: std::marker::PhantomData,
         })
     }
@@ -332,15 +422,18 @@ impl<'a, K: TryRead<'a>, V: TryRead<'a>> Iterator for MapIter<'a, K, V> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.range.next()?;
-        let key = match self.keys.try_read(i) {
-            Ok(key) => key,
-            Err(error) => return Some(Err(error)),
-        };
-        let value = match self.values.try_read(i) {
-            Ok(value) => value,
-            Err(error) => return Some(Err(error)),
-        };
-        Some(Ok((key, value)))
+        // SAFETY: `Map::iter_range` verified `range.end <= min(keys.len(), values.len())`.
+        unsafe {
+            let key = match self.keys.try_read_unchecked(i) {
+                Ok(key) => key,
+                Err(error) => return Some(Err(error)),
+            };
+            let value = match self.values.try_read_unchecked(i) {
+                Ok(value) => value,
+                Err(error) => return Some(Err(error)),
+            };
+            Some(Ok((key, value)))
+        }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -376,7 +469,7 @@ impl<'a, T: FromVariant<'a>> Clone for Variant<'a, T> {
 
 impl<'a, T: FromVariant<'a>> Copy for Variant<'a, T> {}
 
-impl<'a, T: FromVariant<'a>> TryFrom<&'a Mark<'a>> for Variant<'a, T> {
+impl<'a, T: FromVariant<'a> + 'a> TryFrom<&'a Mark<'a>> for Variant<'a, T> {
     type Error = Error;
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
@@ -387,7 +480,7 @@ impl<'a, T: FromVariant<'a>> TryFrom<&'a Mark<'a>> for Variant<'a, T> {
             }),
             other => {
                 cold_path();
-                Err(Error::MismatchedType(other.as_str(), "Variant"))
+                Err(Error::MismatchedType(other.as_str(), Self::NAME))
             }
         }
     }
@@ -396,11 +489,20 @@ impl<'a, T: FromVariant<'a>> TryFrom<&'a Mark<'a>> for Variant<'a, T> {
 impl<'a, T: FromVariant<'a> + 'a> TryRead<'a> for Variant<'a, T> {
     type Item = T;
 
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(&discriminator) = self.mark.discriminators.get(idx) else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "Variant"));
-        };
+    const NAME: &'static str = "Variant";
+
+    fn len(&self) -> usize {
+        self.mark.discriminators.len()
+    }
+
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        let discriminator = unsafe { *self.mark.discriminators.get_unchecked(idx) };
+        self.row(discriminator, idx)
+    }
+}
+
+impl<'a, T: FromVariant<'a> + 'a> Variant<'a, T> {
+    fn row(&self, discriminator: u8, idx: usize) -> crate::Result<T> {
         if discriminator == VariantMark::NULL_DISCRIMINATOR {
             cold_path();
             return Err(Error::MismatchedType(
@@ -408,6 +510,10 @@ impl<'a, T: FromVariant<'a> + 'a> TryRead<'a> for Variant<'a, T> {
                 "non-null Variant row (use ColVariantNullable)",
             ));
         }
+        self.value(discriminator, idx)
+    }
+
+    fn value(&self, discriminator: u8, idx: usize) -> crate::Result<T> {
         // `offsets` and `discriminators` always have the same length.
         T::read(
             &self.readers,
@@ -430,7 +536,7 @@ impl<'a, T: FromVariant<'a>> Clone for VariantNullable<'a, T> {
 
 impl<'a, T: FromVariant<'a>> Copy for VariantNullable<'a, T> {}
 
-impl<'a, T: FromVariant<'a>> TryFrom<&'a Mark<'a>> for VariantNullable<'a, T> {
+impl<'a, T: FromVariant<'a> + 'a> TryFrom<&'a Mark<'a>> for VariantNullable<'a, T> {
     type Error = Error;
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
@@ -443,21 +549,24 @@ impl<'a, T: FromVariant<'a>> TryFrom<&'a Mark<'a>> for VariantNullable<'a, T> {
 impl<'a, T: FromVariant<'a> + 'a> TryRead<'a> for VariantNullable<'a, T> {
     type Item = Option<T>;
 
-    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let mark = self.inner.mark;
-        let Some(&discriminator) = mark.discriminators.get(idx) else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "Variant"));
-        };
+    const NAME: &'static str = "Variant";
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+        let discriminator = unsafe { *self.inner.mark.discriminators.get_unchecked(idx) };
+        self.row(discriminator, idx)
+    }
+}
+
+impl<'a, T: FromVariant<'a> + 'a> VariantNullable<'a, T> {
+    fn row(&self, discriminator: u8, idx: usize) -> crate::Result<Option<T>> {
         if discriminator == VariantMark::NULL_DISCRIMINATOR {
             return Ok(None);
         }
-        T::read(
-            &self.inner.readers,
-            discriminator as usize,
-            mark.offsets[idx] as usize,
-        )
-        .map(Some)
+        self.inner.value(discriminator, idx).map(Some)
     }
 }
 
@@ -469,7 +578,7 @@ macro_rules! impl_col_tuple {
         impl<'a, $($t,)+> TryFrom<&'a Mark<'a>> for Tuple<($($t,)+)>
         where
             $(
-                $t: TryRead<'a> + TryFrom<&'a Mark<'a>>,
+                $t: TryRead<'a> + TryFrom<&'a Mark<'a>> + 'a,
                 Error: From<<$t as TryFrom<&'a Mark<'a>>>::Error>,
             )+
         {
@@ -482,12 +591,12 @@ macro_rules! impl_col_tuple {
                         Mark::Tuple(t) => t,
                         other => {
                             cold_path();
-                            return Err(Error::MismatchedType(other.as_str(), "Tuple"));
+                            return Err(Error::MismatchedType(other.as_str(), Self::NAME));
                         }
                     },
                     other => {
                         cold_path();
-                        return Err(Error::MismatchedType(other.as_str(), "Tuple"));
+                        return Err(Error::MismatchedType(other.as_str(), Self::NAME));
                     }
                 };
 
@@ -503,8 +612,21 @@ macro_rules! impl_col_tuple {
         impl<'a, $($t: TryRead<'a> + 'a,)+> TryRead<'a> for Tuple<($($t,)+)> {
             type Item = ($($t::Item,)+);
 
-            fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-                Ok(($(self.0.$idx.try_read(idx)?,)+))
+            const NAME: &'static str = "Tuple";
+
+            #[inline(always)]
+            fn len(&self) -> usize {
+                // The shortest element column: `try_read_unchecked(idx)` is sound for every
+                // element only when `idx` is below all of their lengths.
+                let len = crate::parse::consts::MAX_NUM_ROWS;
+                $( let len = len.min(self.0.$idx.len()); )+
+                len
+            }
+
+            #[inline(always)]
+            unsafe fn try_read_unchecked(&self, idx: usize) -> crate::Result<Self::Item> {
+                // SAFETY: `idx < len()`, and `len()` is the minimum over the elements.
+                unsafe { Ok(($(self.0.$idx.try_read_unchecked(idx)?,)+)) }
             }
         }
     };

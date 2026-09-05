@@ -163,7 +163,7 @@ impl<'a> Mark<'a> {
             Mark::Decimal128(d) => d.data.len(),
             Mark::Decimal256(d) => d.data.len(),
             Mark::String(sv) => sv.data.len(),
-            Mark::FixedString(fs) => fs.data.len().checked_div(fs.size).unwrap_or(0),
+            Mark::FixedString(fs) => fs.len(),
             Mark::Uuid(bv) => bv.len(),
             Mark::Date(bv) => bv.len(),
             Mark::Date32(bv) => bv.len(),
@@ -844,9 +844,20 @@ pub struct Nullable<'a> {
 }
 
 impl Nullable<'_> {
+    pub(crate) const fn len(&self) -> usize {
+        self.mask.len()
+    }
+
     #[inline(always)]
     pub(crate) fn is_null(&self, index: usize) -> Option<bool> {
         Some(*self.mask.get(index)? == 1)
+    }
+
+    /// # Safety
+    /// `index < self.len()`.
+    #[inline(always)]
+    pub(crate) unsafe fn is_null_unchecked(&self, index: usize) -> bool {
+        unsafe { *self.mask.get_unchecked(index) == 1 }
     }
 
     pub(crate) fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {

@@ -41,10 +41,21 @@ impl std::fmt::Debug for FixedString<'_> {
 }
 
 impl<'a> FixedString<'a> {
+    pub(crate) fn len(&self) -> usize {
+        self.data.len().checked_div(self.size).unwrap_or(0)
+    }
+
     pub(crate) fn get_bstr(&self, index: usize) -> Option<&'a BStr> {
         let offset = self.size.checked_mul(index)?;
         let end = offset.checked_add(self.size)?;
         Some(BStr::new(self.data.get(offset..end)?.rtrim_zeros()))
+    }
+
+    /// # Safety
+    /// `index < self.len()`.
+    pub(crate) unsafe fn get_bstr_unchecked(&self, index: usize) -> &'a BStr {
+        let offset = self.size * index;
+        BStr::new(unsafe { self.data.get_unchecked(offset..offset + self.size) }.rtrim_zeros())
     }
 
     pub(crate) fn get(&self, index: usize) -> Option<Value<'a>> {

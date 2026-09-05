@@ -270,6 +270,26 @@ impl<'a> Indices<'a> {
         }
     }
 
+    /// # Safety
+    /// `index < self.len()`.
+    #[inline(always)]
+    pub(crate) unsafe fn get_unchecked(self, index: usize) -> crate::Result<usize> {
+        unsafe {
+            match self {
+                Self::U8(indices) => Ok(usize::from(*indices.get_unchecked(index))),
+                Self::U16(indices) => Ok(usize::from(indices.get_unchecked(index).get())),
+                Self::U32(indices) => Ok(indices.get_unchecked(index).get() as usize),
+                Self::U64(indices) => match usize::try_from(indices.get_unchecked(index).get()) {
+                    Ok(index) => Ok(index),
+                    Err(error) => {
+                        cold_path();
+                        Err(error.into())
+                    }
+                },
+            }
+        }
+    }
+
     pub(crate) const fn len(self) -> usize {
         match self {
             Self::U8(indices) => indices.len(),

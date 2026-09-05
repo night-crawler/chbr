@@ -82,7 +82,7 @@ pub fn parse_single(input: &[u8]) -> IResult<&[u8], ParsedBlock<'_>> {
             "suspiciously many columns in Native block: {num_columns}"
         )));
     }
-    if num_rows as u64 > MAX_NUM_ROWS {
+    if num_rows > MAX_NUM_ROWS {
         cold_path();
         return Err(crate::parse::Error::CorruptedData(format!(
             "suspiciously many rows in Native block: {num_rows}"
