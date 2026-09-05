@@ -507,7 +507,7 @@ impl<'a, T: FromVariant<'a> + 'a> Variant<'a, T> {
             cold_path();
             return Err(Error::MismatchedType(
                 "Null",
-                "non-null Variant row (use ColVariantNullable)",
+                "non-null Variant row (use VariantNullable)",
             ));
         }
         self.value(discriminator, idx)

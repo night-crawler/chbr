@@ -109,7 +109,7 @@ impl TryFrom<Value<'_>> for chrono::NaiveDate {
     fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
         match value {
             Value::Date32(dt) | Value::Date(dt) => Ok(dt),
-            other => Err(other.mismatched_type("Date/Date64")),
+            other => Err(other.mismatched_type("Date/Date32")),
         }
     }
 }
