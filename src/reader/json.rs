@@ -534,9 +534,9 @@ impl<'de> CellDeserializer<'de> {
         loop {
             match cell.mark {
                 mark::Mark::Empty => return Ok(CellState::Missing),
-                mark::Mark::Nullable(nullable) => match nullable.mask.get(cell.row) {
-                    Some(1) => return Ok(CellState::Null),
-                    Some(_) => {
+                mark::Mark::Nullable(nullable) => match nullable.is_null(cell.row) {
+                    Some(true) => return Ok(CellState::Null),
+                    Some(false) => {
                         cell.mark = &nullable.data;
                     }
                     None => return Ok(CellState::Missing),
@@ -545,12 +545,10 @@ impl<'de> CellDeserializer<'de> {
                     let Some(index) = low_cardinality.indices.get(cell.row)? else {
                         return Ok(CellState::Missing);
                     };
-                    if low_cardinality.is_nullable && index == 0 {
+                    if low_cardinality.is_null(index) {
                         return Ok(CellState::Null);
                     }
-                    let Some(keys) = low_cardinality.additional_keys.as_deref() else {
-                        return Ok(CellState::Missing);
-                    };
+                    let keys = low_cardinality.keys()?;
                     cell = Self {
                         mark: keys,
                         row: index,

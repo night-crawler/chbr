@@ -669,7 +669,7 @@ impl<'a> Iterator for NullableSliceIterator<'a> {
         let mark = self
             .mark
             .expect("bug: an empty nullable iterator has an empty range");
-        if mark.mask.get(index).copied()? == 1 {
+        if mark.is_null(index)? {
             return Some(Ok(Value::Empty));
         }
         mark.data.get(index).transpose()
