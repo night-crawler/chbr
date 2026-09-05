@@ -179,8 +179,7 @@ impl<'a> Mark<'a> {
             Mark::Enum16(e) => e.data.len(),
             Mark::LowCardinality(lc) => lc.indices.len(),
             Mark::Array(a) => a.offsets.len(),
-            // We trust that CH always reports equal lengths for tuple
-            Mark::Tuple(t) => t.values.first().map_or(0, Mark::len),
+            Mark::Tuple(t) => t.len(),
             Mark::Nullable(n) => n.mask.len(),
             Mark::Map(m) => m.offsets.len(),
             Mark::Variant(v) => v.discriminators.len(),
@@ -233,9 +232,9 @@ impl<'a> Mark<'a> {
             Mark::Enum16(v) => Ok(v.get(index)),
             Mark::LowCardinality(lc) => lc.get(index),
             Mark::Array(a) => a.get(index),
-            Mark::Tuple(mark) => Ok(Some(Value::Tuple { mark, index })),
+            Mark::Tuple(t) => Ok(t.get(index)),
             Mark::Nullable(n) => n.get(index),
-            Mark::Map(mark) => Ok(Some(Value::Map { mark, index })),
+            Mark::Map(m) => Ok(m.get(index)),
             Mark::Variant(v) => v.get(index),
             Mark::Nested(n) => n.get(index),
             Mark::NamedTuple(n) => n.get(index),
@@ -659,6 +658,16 @@ pub struct Map<'a> {
     pub(crate) values: Box<Mark<'a>>,
 }
 
+impl Map<'_> {
+    pub(crate) const fn get(&self, index: usize) -> Option<Value<'_>> {
+        if index >= self.offsets.len() {
+            cold_path();
+            return None;
+        }
+        Some(Value::Map { mark: self, index })
+    }
+}
+
 #[derive(Debug)]
 pub struct Variant<'a> {
     pub(crate) offsets: Box<[u32]>,
@@ -887,6 +896,22 @@ impl Nullable<'_> {
 #[derive(Debug)]
 pub struct Tuple<'a> {
     pub values: Box<[Mark<'a>]>,
+}
+
+impl Tuple<'_> {
+    pub(crate) fn len(&self) -> usize {
+        // Every element column has one value per row, so any of them gives the row count;
+        // ClickHouse's `ColumnTuple::size()` (`src/Columns/ColumnTuple.cpp`) also reads the first.
+        self.values.first().map_or(0, Mark::len)
+    }
+
+    pub(crate) fn get(&self, index: usize) -> Option<Value<'_>> {
+        if index >= self.len() {
+            cold_path();
+            return None;
+        }
+        Some(Value::Tuple { mark: self, index })
+    }
 }
 
 #[derive(Debug)]
