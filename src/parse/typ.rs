@@ -6,7 +6,7 @@ use chrono_tz::{Tz, Tz::UTC};
 use nom::{
     IResult, Parser,
     branch::alt,
-    bytes::complete::{tag, take_while1},
+    bytes::complete::{tag, take_while, take_while1},
     character::complete::{char, digit1, multispace0, multispace1},
     combinator::{map, map_res, opt, recognize, verify},
     error::{ErrorKind, FromExternalError as _, ParseError},
@@ -576,7 +576,7 @@ where
                     separated_list1(
                         ws(char(',')),
                         separated_pair(
-                            delimited(ws(char('\'')), take_while1(|c| c != b'\''), ws(char('\''))),
+                            delimited(ws(char('\'')), take_while(|c| c != b'\''), ws(char('\''))),
                             ws(char('=')),
                             map_res(recognize(pair(opt(char('-')), digit1)), parse_num::<T>),
                         ),
@@ -866,6 +866,12 @@ mod tests {
         assert!(parse_type(b"Enum8('B' = 2, 'A' = 1)").is_err());
         assert!(parse_type(b"Enum16('A' = 1, 'B' = 1)").is_err());
         assert!(parse_type(b"Enum8('Blue' = -23, 'Green' = 2, 'Red' = 11)").is_ok());
+    }
+
+    #[test]
+    fn enum_empty_name() {
+        let (_, typ) = parse_type(b"Enum8('' = 0, 'a' = 1)").unwrap();
+        assert_eq!(typ, Type::Enum8(vec![("", 0), ("a", 1)]));
     }
 
     #[test]
