@@ -49,10 +49,6 @@ inherits = "release"
 debug = true
 strip = "none"
 
-[[test]]
-name = "tests"
-path = "tests/main.rs"
-
 [[bench]]
 name = "refs"
 harness = false

@@ -137,6 +137,37 @@ impl<'a> TryFrom<&'a Mark<'a>> for Usize<'a> {
     }
 }
 
+/// `Nothing` is the type of `[]` and `NULL`, seen as `Array(Nothing)` and `Nullable(Nothing)`.
+#[derive(Clone, Copy)]
+pub struct Nothing(pub usize);
+
+impl<'a> TryFrom<&'a Mark<'a>> for Nothing {
+    type Error = Error;
+
+    fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Mark::Nothing(len) => Ok(Self(*len)),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "Nothing"))
+            }
+        }
+    }
+}
+
+impl TryRead<'_> for Nothing {
+    type Item = ();
+
+    #[inline(always)]
+    fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
+        if idx >= self.0 {
+            cold_path();
+            return Err(Error::IndexOutOfBounds(idx, "Nothing"));
+        }
+        Ok(())
+    }
+}
+
 /// Raw mask bytes; `1` is `true`.
 #[derive(Clone, Copy)]
 pub struct Bool<'a>(pub &'a [u8]);
@@ -449,4 +480,5 @@ readable! {
     NaiveDate => Date<'a>;
     chrono::DateTime<Tz> => DateTime<'a>;
     crate::value::Value<'a> => Value<'a>;
+    () => Nothing;
 }

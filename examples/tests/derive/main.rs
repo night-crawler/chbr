@@ -32,6 +32,7 @@ mod named_tuples;
 mod nested_integer_arrays;
 mod nested_maps;
 mod nested_rows;
+mod nothing_values;
 mod nullable_low_cardinality_strings;
 mod nullable_string_arrays;
 mod nullable_strings;

@@ -1847,3 +1847,46 @@ fn dynamic_arr() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn nothing() -> TestResult {
+    let data = load("nothing.native")?;
+    let (_, block) = parse_single(&data)?;
+
+    //    ┌─id─┬─arr─┬─n────┬─arr_n──┬─arr_arr─┐
+    // 1. │  0 │ []  │ ᴺᵁᴸᴸ │ [NULL] │ [[]]    │
+    // 2. │  1 │ []  │ ᴺᵁᴸᴸ │ [NULL] │ [[]]    │
+    // 3. │  2 │ []  │ ᴺᵁᴸᴸ │ [NULL] │ [[]]    │
+    //    └────┴─────┴──────┴────────┴─────────┘
+    assert_eq!(block.num_rows, 3);
+    let [_, arr, n, arr_n, arr_arr] = &*block.markers else {
+        panic!("unexpected columns {:?}", block.col_names);
+    };
+
+    for i in 0..block.num_rows {
+        let empty: ArraySliceIterator<Option<&str>> = arr.get(i)?.unwrap().try_into()?;
+        assert_eq!(empty.len(), 0, "arr mismatch at index {i}");
+
+        let null: Option<&str> = n.get(i)?.unwrap().try_into()?;
+        assert_eq!(null, None, "n mismatch at index {i}");
+        assert_eq!(n.get_opt_str(i)?, Some(None), "n mismatch at index {i}");
+
+        let nulls: NullableSliceIterator = arr_n.get(i)?.unwrap().try_into()?;
+        let nulls = nulls
+            .map(|item| item?.try_into())
+            .collect::<Result<Vec<Option<&str>>, _>>()?;
+        assert_eq!(nulls, [None], "arr_n mismatch at index {i}");
+
+        let outer: ArraySliceIterator<ArraySliceIterator<Option<&str>>> =
+            arr_arr.get(i)?.unwrap().try_into()?;
+        let inner_lens = outer
+            .map(|inner| Ok(inner?.len()))
+            .collect::<Result<Vec<_>, chbr::Error>>()?;
+        assert_eq!(inner_lens, [0], "arr_arr mismatch at index {i}");
+    }
+
+    assert!(n.get(block.num_rows)?.is_none());
+    assert_eq!(n.get_opt_str(block.num_rows)?, None);
+
+    Ok(())
+}

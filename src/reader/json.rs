@@ -668,6 +668,7 @@ fn enum16_name<'a>(mark: &'a mark::Enum16<'a>, row: usize) -> Option<&'a str> {
 fn base_contains(mark: &mark::Mark<'_>, row: usize) -> Result<bool, JsonDeserializeError> {
     let present = match mark {
         mark::Mark::Empty => false,
+        mark::Mark::Nothing(len) => row < *len,
         mark::Mark::Bool(value) => value.get(row).is_some(),
         mark::Mark::Int8(value) => value.get(row).is_some(),
         mark::Mark::Int16(value) => value.get(row).is_some(),
@@ -743,6 +744,12 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
 
         match cell.mark {
             mark::Mark::Empty => unreachable!("empty marks are resolved as missing"),
+            mark::Mark::Nothing(len) => {
+                if cell.row >= *len {
+                    return Err(Error::IndexOutOfBounds(cell.row, "Nothing").into());
+                }
+                visitor.visit_unit()
+            }
             mark::Mark::Bool(value) => visitor.visit_bool(at!(value.get(cell.row))),
             mark::Mark::Int8(value) => visitor.visit_i8(*at!(value.get(cell.row))),
             mark::Mark::Int16(value) => visitor.visit_i16(at!(value.get(cell.row)).get()),
