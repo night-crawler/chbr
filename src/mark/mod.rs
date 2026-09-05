@@ -374,8 +374,8 @@ impl<'a> Mark<'a> {
     /// Outer `None`: index out of range. Inner `None`: NULL.
     #[inline(always)]
     pub fn get_opt_str(&self, index: usize) -> crate::Result<Option<Option<&'a BStr>>> {
-        let (mask, data) = match self {
-            Mark::Nullable(Nullable { mask, data }) => (mask, data.as_ref()),
+        let nullable = match self {
+            Mark::Nullable(nullable) => nullable,
             Mark::LowCardinality(lc) => return lc.get_opt_str(index),
             // convenience wrapper for non-nullable columns
             mark => {
@@ -386,10 +386,10 @@ impl<'a> Mark<'a> {
             }
         };
 
-        match mask.get(index) {
+        match nullable.is_null(index) {
             None => Ok(None),
-            Some(1) => Ok(Some(None)),
-            Some(_) => match data.get_str(index)? {
+            Some(true) => Ok(Some(None)),
+            Some(false) => match nullable.data.get_str(index)? {
                 Some(value) => Ok(Some(Some(value))),
                 None => Ok(None),
             },
@@ -508,24 +508,17 @@ impl<'a> Mark<'a> {
         &self,
         index: usize,
     ) -> crate::Result<Option<impl Iterator<Item = bool>>> {
-        let Mark::Array(arr) = self else {
-            cold_path();
-            return Err(Error::MismatchedType(self.as_str(), "Array"));
-        };
-
-        let Some((start, end)) = arr.offsets.offset_indices(index)? else {
+        let Some((values, range)) = self.array_elements(index)? else {
             return Ok(None);
         };
-
-        let slice = match arr.values.as_ref() {
-            Mark::Bool(bv) => &bv.data[start..end],
+        let slice = match values {
+            Mark::Bool(bv) => &bv.data[range],
             Mark::Empty => &[],
             other => {
                 cold_path();
                 return Err(Error::MismatchedType(other.as_str(), "Bool"));
             }
         };
-
         Ok(Some(slice.iter().copied().map(|b| b != 0)))
     }
 
@@ -603,17 +596,11 @@ impl<'a> Mark<'a> {
 
     // It borrows the Mark's vec, so can't be done the same way as get_arr_*_slice
     pub fn get_arr_string_slice(&self, index: usize) -> crate::Result<Option<&[&'a BStr]>> {
-        let Mark::Array(arr) = self else {
-            cold_path();
-            return Err(Error::MismatchedType(self.as_str(), "Array"));
-        };
-
-        let Some((start, end)) = arr.offsets.offset_indices(index)? else {
+        let Some((values, range)) = self.array_elements(index)? else {
             return Ok(None);
         };
-
-        match arr.values.as_ref() {
-            Mark::String(bv) => Ok(Some(&bv[start..end])),
+        match values {
+            Mark::String(bv) => Ok(Some(&bv[range])),
             Mark::Empty => Ok(Some(&[])),
             other => {
                 cold_path();
@@ -857,12 +844,17 @@ pub struct Nullable<'a> {
 }
 
 impl Nullable<'_> {
-    pub(crate) fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
-        if self.mask.get(index) == Some(&1) {
-            return Ok(Some(Value::Empty));
-        }
+    #[inline(always)]
+    pub(crate) fn is_null(&self, index: usize) -> Option<bool> {
+        Some(*self.mask.get(index)? == 1)
+    }
 
-        self.data.get(index)
+    pub(crate) fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
+        match self.is_null(index) {
+            None => Ok(None),
+            Some(true) => Ok(Some(Value::Empty)),
+            Some(false) => self.data.get(index),
+        }
     }
 }
 

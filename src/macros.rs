@@ -16,18 +16,11 @@ macro_rules! define_slice_fns {
                     &self,
                     index: usize,
                 ) -> crate::Result<Option<&'a [$ret_type]>> {
-
-                    let Mark::Array(arr) = self else {
-                        cold_path();
-                        return Err(crate::Error::MismatchedType(self.as_str(), "Array"));
-                    };
-
-                    let Some((start, end)) = arr.offsets.offset_indices(index)? else {
+                    let Some((values, range)) = self.array_elements(index)? else {
                         return Ok(None);
                     };
-
-                    match arr.values.as_ref() {
-                        Mark::$mark_type(bv) => Ok(Some(&bv.as_slice()[start..end])),
+                    match values {
+                        Mark::$mark_type(bv) => Ok(Some(&bv.as_slice()[range])),
                         Mark::Empty => Ok(Some(&[])),
                         other => {
                             cold_path();
@@ -94,7 +87,7 @@ macro_rules! define_opt_getters {
                 /// Outer `None`: index out of range. Inner `None`: NULL.
                 #[inline(always)]
                 pub fn [<get_opt_ $suffix:lower>](&self, index: usize) -> crate::Result<Option<Option<$ret_type>>> {
-                    let Mark::Nullable(Nullable { mask, data }) = self else {
+                    let Mark::Nullable(nullable) = self else {
                         // convenience wrapper for non-nullable columns
                         return match self.[<get_ $suffix:lower>](index)? {
                             Some(value) => Ok(Some(Some(value))),
@@ -102,10 +95,10 @@ macro_rules! define_opt_getters {
                         };
                     };
 
-                    match mask.get(index) {
+                    match nullable.is_null(index) {
                         None => Ok(None),
-                        Some(1) => Ok(Some(None)),
-                        Some(_) => match data.[<get_ $suffix:lower>](index)? {
+                        Some(true) => Ok(Some(None)),
+                        Some(false) => match nullable.data.[<get_ $suffix:lower>](index)? {
                             Some(value) => Ok(Some(Some(value))),
                             None => Ok(None),
                         },

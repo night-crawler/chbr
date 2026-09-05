@@ -8,7 +8,7 @@ use std::ops::Range;
 
 #[derive(Clone, Copy)]
 pub struct Nullable<'a, Inner> {
-    pub(crate) mask: &'a [u8],
+    pub(crate) mark: &'a mark::Nullable<'a>,
     pub(crate) inner: Inner,
 }
 
@@ -22,7 +22,7 @@ where
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
         match value {
             Mark::Nullable(n) => Ok(Nullable {
-                mask: n.mask,
+                mark: n,
                 inner: Inner::try_from(n.data.as_ref())?,
             }),
             other => {
@@ -38,14 +38,14 @@ impl<'a, Inner: TryRead<'a> + 'a> TryRead<'a> for Nullable<'a, Inner> {
 
     #[inline(always)]
     fn try_read(&self, idx: usize) -> crate::Result<Self::Item> {
-        let Some(mask) = self.mask.get(idx) else {
-            cold_path();
-            return Err(Error::IndexOutOfBounds(idx, "Nullable"));
-        };
-        if *mask == 1 {
-            return Ok(None);
+        match self.mark.is_null(idx) {
+            None => {
+                cold_path();
+                Err(Error::IndexOutOfBounds(idx, "Nullable"))
+            }
+            Some(true) => Ok(None),
+            Some(false) => Ok(Some(self.inner.try_read(idx)?)),
         }
-        Ok(Some(self.inner.try_read(idx)?))
     }
 }
 
