@@ -272,9 +272,8 @@ impl Value<'_> {
 }
 
 pub struct LowCardinalitySliceIterator<'a> {
-    pub(crate) is_nullable: bool,
+    pub(crate) lc: &'a mark::lc::LowCardinality<'a>,
     pub(crate) indices: SliceUsizeIterator<'a>,
-    pub(crate) additional_keys: &'a mark::Mark<'a>,
 }
 
 impl<'a> TryFrom<Value<'a>> for LowCardinalitySliceIterator<'a> {
@@ -292,13 +291,7 @@ impl<'a> Iterator for LowCardinalitySliceIterator<'a> {
     type Item = Result<Value<'a>, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let index = self.indices.next()?;
-        // Slot 0 of a nullable dictionary is the NULL placeholder, serialized as the
-        // nested type's default (ColumnUnique::getNullValueIndex).
-        if index == 0 && self.is_nullable {
-            return Some(Ok(Value::Empty));
-        }
-        self.additional_keys.get(index).transpose()
+        Some(self.lc.value(self.indices.next()?))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
