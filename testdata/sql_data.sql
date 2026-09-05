@@ -1227,3 +1227,9 @@ select
     map()::Map(String, UInt8) as m,
     (toUInt8(number), '')::Tuple(a UInt8, b String) as nt
 from numbers(2) format Native;
+
+select
+    number as id,
+    reinterpret(toUInt8(number), 'Bool') as b,
+    arrayMap(x -> reinterpret(toUInt8(x), 'Bool'), [number, 0, 255]) as arr
+from numbers(4) format Native;
