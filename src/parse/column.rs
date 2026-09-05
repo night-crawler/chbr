@@ -466,8 +466,12 @@ fn tuple<'a>(
     ctx: &ParseContext<'a>,
     headers: Vec<TypeHeader<'a>>,
 ) -> IResult<&'a [u8], Mark<'a>> {
-    let mut markers = Vec::with_capacity(inner.len());
     let mut input = ctx.input;
+    if inner.is_empty() {
+        (input, _) = take_elements(input, ctx.num_rows, 1, "empty tuple placeholder")?;
+    }
+
+    let mut markers = Vec::with_capacity(inner.len());
     for (typ, header) in inner.into_iter().zip(headers) {
         let marker;
         (input, marker) = typ.decode(ctx.fork(input), header)?;
@@ -476,6 +480,7 @@ fn tuple<'a>(
 
     let marker = Tuple {
         values: markers.into_boxed_slice(),
+        num_rows: ctx.num_rows,
     };
     Ok((input, Mark::Tuple(marker)))
 }

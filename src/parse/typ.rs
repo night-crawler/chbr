@@ -232,7 +232,9 @@ fn parse_tuple(input: &[u8]) -> IResult<&[u8], Type<'_>> {
             tag("Tuple"),
             delimited(
                 ws(char('(')),
-                separated_list1(ws(char(',')), parse_type),
+                // `SELECT tuple()` case
+                // so not separated_list1
+                separated_list0(ws(char(',')), parse_type),
                 ws(char(')')),
             ),
         ),
