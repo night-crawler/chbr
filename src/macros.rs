@@ -21,7 +21,6 @@ macro_rules! define_slice_fns {
                     };
                     match values {
                         Mark::$mark_type(bv) => Ok(Some(&bv.as_slice()[range])),
-                        Mark::Empty => Ok(Some(&[])),
                         other => {
                             cold_path();
                             Err(crate::Error::MismatchedType(

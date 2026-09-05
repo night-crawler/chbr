@@ -1967,6 +1967,20 @@ fn dynamic_arr() -> TestResult {
     Ok(())
 }
 
+/// A type for `Array(Nothing)` (CH: `[]`)
+struct EmptyRow;
+
+impl TryFrom<Value<'_>> for EmptyRow {
+    type Error = Error;
+
+    fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
+        match value {
+            Value::NothingSlice => Ok(Self),
+            _ => Err(Error::MismatchedType("non-Nothing", "NothingSlice")),
+        }
+    }
+}
+
 #[test]
 fn nothing() -> TestResult {
     let data = load("nothing.native")?;
@@ -1983,8 +1997,15 @@ fn nothing() -> TestResult {
     };
 
     for i in 0..block.num_rows {
-        let empty: ArraySliceIterator<Option<&str>> = arr.get(i)?.unwrap().try_into()?;
-        assert_eq!(empty.len(), 0, "arr mismatch at index {i}");
+        let empty = arr.get(i)?.unwrap();
+        assert!(
+            matches!(empty, Value::NothingSlice),
+            "arr mismatch at index {i}: {empty:?}"
+        );
+        assert!(
+            <&[u8]>::try_from(empty).is_err(),
+            "`[]` is not an `Array(UInt8)`"
+        );
 
         let null: Option<&str> = n.get(i)?.unwrap().try_into()?;
         assert_eq!(null, None, "n mismatch at index {i}");
@@ -1996,12 +2017,9 @@ fn nothing() -> TestResult {
             .collect::<Result<Vec<Option<&str>>, _>>()?;
         assert_eq!(nulls, [None], "arr_n mismatch at index {i}");
 
-        let outer: ArraySliceIterator<ArraySliceIterator<Option<&str>>> =
-            arr_arr.get(i)?.unwrap().try_into()?;
-        let inner_lens = outer
-            .map(|inner| Ok(inner?.len()))
-            .collect::<Result<Vec<_>, chbr::Error>>()?;
-        assert_eq!(inner_lens, [0], "arr_arr mismatch at index {i}");
+        let outer: ArraySliceIterator<EmptyRow> = arr_arr.get(i)?.unwrap().try_into()?;
+        assert_eq!(outer.len(), 1, "arr_arr mismatch at index {i}");
+        assert_eq!(outer.filter_map(Result::ok).count(), 1);
     }
 
     assert!(n.get(block.num_rows)?.is_none());
