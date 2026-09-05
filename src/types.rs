@@ -356,6 +356,16 @@ impl<'a> Type<'a> {
     }
 
     pub(crate) fn from_bytes(s: &[u8]) -> Result<Type<'_>, crate::Error> {
+        // `SerializationAggregateFunction::serializeBinaryBulk` writes each row's state via
+        // `IAggregateFunction::serialize` with no length prefix, so the column can be neither
+        // decoded nor skipped without a per-function state layout.
+        if s.starts_with(b"AggregateFunction(") {
+            cold_path();
+            return Err(crate::Error::NotImplemented(format!(
+                "aggregate function state column {}",
+                String::from_utf8_lossy(s)
+            )));
+        }
         let (remainder, typ) = match parse_type(s) {
             Ok(parsed) => parsed,
             Err(e) => return Err(crate::Error::Parse(e.to_string())),

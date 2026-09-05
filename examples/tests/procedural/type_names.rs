@@ -113,9 +113,14 @@ fn interval_types_parse() -> TestResult {
 }
 
 #[test]
-fn aggregate_function_state_parses() -> TestResult {
+fn aggregate_function_state_is_not_implemented() -> TestResult {
     let data = load("interval_and_aggregate.native")?;
-    let (_, block) = parse_single(&data)?;
-    assert_eq!(block.markers.len(), 2);
+    let Err(Error::NotImplemented(message)) = parse_single(&data) else {
+        panic!("expected NotImplemented");
+    };
+    assert_eq!(
+        message,
+        "aggregate function state column AggregateFunction(sum, UInt64)"
+    );
     Ok(())
 }
