@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::hint::cold_path;
 use std::ops::Deref;
 
@@ -95,6 +96,7 @@ pub fn parse_single(input: &[u8]) -> IResult<&[u8], ParsedBlock<'_>> {
     let cap = num_columns.min(input.len());
     let mut markers = Vec::with_capacity(cap);
     let mut col_names = Vec::with_capacity(cap);
+    let mut seen_names = HashSet::with_capacity(cap);
 
     for index in 0..num_columns {
         debug!("Parsing column {} of {num_columns}", index + 1);
@@ -103,6 +105,12 @@ pub fn parse_single(input: &[u8]) -> IResult<&[u8], ParsedBlock<'_>> {
         let column_name;
         (input, column_name) = parse_var_str(input)?;
         debug!("column name: {column_name}");
+        if !seen_names.insert(column_name) {
+            cold_path();
+            return Err(crate::parse::Error::CorruptedData(format!(
+                "duplicate column name in Native block: {column_name:?}"
+            )));
+        }
         parse_context.column_name = column_name;
         col_names.push(column_name);
 
@@ -281,6 +289,23 @@ mod tests {
             assert_eq!(*block.col_names, ["x"]);
         }
         Ok(())
+    }
+
+    #[test]
+    fn duplicate_column_names_rejected() {
+        let mut b = vec![2u8, 0]; // 2 columns, 0 rows
+        var_str(&mut b, "x");
+        var_str(&mut b, "UInt8");
+        var_str(&mut b, "x");
+        var_str(&mut b, "UInt8");
+
+        match parse_single(&b) {
+            Err(crate::Error::CorruptedData(msg)) => {
+                assert!(msg.contains("duplicate column name"), "{msg}");
+            }
+            Err(other) => panic!("expected CorruptedData, got {other:?}"),
+            Ok(_) => panic!("duplicate column names must error"),
+        }
     }
 
     #[test]
