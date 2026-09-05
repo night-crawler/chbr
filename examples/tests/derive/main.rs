@@ -15,6 +15,7 @@ mod empty_low_cardinality_map_strings;
 mod enum_arrays;
 mod enum_values;
 mod fixed_string_arrays;
+mod fixed_string_binary;
 mod fixed_strings;
 mod floating_point_values;
 mod generic_arrays_of_nested_rows;

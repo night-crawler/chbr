@@ -786,9 +786,10 @@ fn fixed_string_readers_separate_bytes_checked_and_trusted_utf8() -> TestResult 
         data: &data,
     });
 
+    // Raw readers keep the full record; only `&str` readers trim padding.
     let bytes = FixedBytes::try_from(&mark)?;
-    assert_eq!(bytes.try_read(0)?, b"ok");
-    assert_eq!(bytes.try_read(1)?, b"\xff");
+    assert_eq!(bytes.try_read(0)?, b"ok\0");
+    assert_eq!(bytes.try_read(1)?, b"\xff\0\0");
 
     assert!(matches!(
         FixedStr::try_from(&mark),

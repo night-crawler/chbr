@@ -48,18 +48,18 @@ impl<'a> FixedString<'a> {
     pub(crate) fn get_bstr(&self, index: usize) -> Option<&'a BStr> {
         let offset = self.size.checked_mul(index)?;
         let end = offset.checked_add(self.size)?;
-        Some(BStr::new(self.data.get(offset..end)?.rtrim_zeros()))
+        Some(BStr::new(self.data.get(offset..end)?))
     }
 
     /// # Safety
     /// `index < self.len()`.
     pub(crate) unsafe fn get_bstr_unchecked(&self, index: usize) -> &'a BStr {
         let offset = self.size * index;
-        BStr::new(unsafe { self.data.get_unchecked(offset..offset + self.size) }.rtrim_zeros())
+        BStr::new(unsafe { self.data.get_unchecked(offset..offset + self.size) })
     }
 
     pub(crate) fn get(&self, index: usize) -> Option<Value<'a>> {
-        self.get_bstr(index).map(Value::String)
+        self.get_bstr(index).map(Value::FixedString)
     }
 }
 
