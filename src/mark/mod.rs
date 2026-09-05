@@ -821,14 +821,20 @@ pub struct Enum8<'a> {
     pub(crate) data: ByteView<'a, i8>,
 }
 
-impl Enum8<'_> {
-    pub(crate) fn get(&self, index: usize) -> Option<Value<'_>> {
-        let variant = *self.data.get(index)?;
-        if let Ok(index) = self.variants.binary_search_by_key(&variant, |(_, id)| *id) {
-            return Some(Value::String(BStr::new(self.variants[index].0)));
-        }
-        // actually, at this point it's broken, but we trust clickhouse!
-        None
+impl<'a> Enum8<'a> {
+    pub(crate) fn name(&self, index: usize) -> Option<&'a str> {
+        let id = *self.data.get(index)?;
+        let slot = self
+            .variants
+            .binary_search_by_key(&id, |(_, id)| *id)
+            .ok()?;
+        Some(self.variants[slot].0)
+    }
+
+    pub(crate) fn get(&self, index: usize) -> Option<Value<'a>> {
+        // An undeclared id means broken data, but we trust clickhouse!
+        let name = self.name(index)?;
+        Some(Value::String(BStr::new(name)))
     }
 }
 
@@ -838,13 +844,19 @@ pub struct Enum16<'a> {
     pub(crate) data: ByteView<'a, zc::I16>,
 }
 
-impl Enum16<'_> {
-    pub(crate) fn get(&self, index: usize) -> Option<Value<'_>> {
-        let variant = self.data.get(index)?.get();
-        if let Ok(index) = self.variants.binary_search_by_key(&variant, |(_, id)| *id) {
-            return Some(Value::String(BStr::new(self.variants[index].0)));
-        }
-        None
+impl<'a> Enum16<'a> {
+    pub(crate) fn name(&self, index: usize) -> Option<&'a str> {
+        let id = self.data.get(index)?.get();
+        let slot = self
+            .variants
+            .binary_search_by_key(&id, |(_, id)| *id)
+            .ok()?;
+        Some(self.variants[slot].0)
+    }
+
+    pub(crate) fn get(&self, index: usize) -> Option<Value<'a>> {
+        let name = self.name(index)?;
+        Some(Value::String(BStr::new(name)))
     }
 }
 

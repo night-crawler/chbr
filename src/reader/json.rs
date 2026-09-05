@@ -595,7 +595,7 @@ impl<'de> CellDeserializer<'de> {
                     };
                 }
                 mark => {
-                    return if base_contains(mark, cell.row)? {
+                    return if cell.row < mark.len() {
                         Ok(CellState::Present(cell))
                     } else {
                         Ok(CellState::Missing)
@@ -622,8 +622,8 @@ impl<'de> CellDeserializer<'de> {
                 .get_bstr(cell.row)
                 .map(|value| crate::error::decode_utf8(value.rtrim_zeros()))
                 .transpose()?,
-            mark::Mark::Enum8(enumeration) => enum8_name(enumeration, cell.row),
-            mark::Mark::Enum16(enumeration) => enum16_name(enumeration, cell.row),
+            mark::Mark::Enum8(enumeration) => enumeration.name(cell.row),
+            mark::Mark::Enum16(enumeration) => enumeration.name(cell.row),
             _ => None,
         };
         Ok(value)
@@ -636,92 +636,11 @@ impl<'de> CellDeserializer<'de> {
         Ok(match cell.mark {
             mark::Mark::String(strings) => strings.get(cell.row).map(AsRef::as_ref),
             mark::Mark::FixedString(fixed) => fixed.get_bstr(cell.row).map(AsRef::as_ref),
-            mark::Mark::Enum8(enumeration) => enum8_name(enumeration, cell.row).map(str::as_bytes),
-            mark::Mark::Enum16(enumeration) => {
-                enum16_name(enumeration, cell.row).map(str::as_bytes)
-            }
+            mark::Mark::Enum8(enumeration) => enumeration.name(cell.row).map(str::as_bytes),
+            mark::Mark::Enum16(enumeration) => enumeration.name(cell.row).map(str::as_bytes),
             _ => None,
         })
     }
-}
-
-#[cfg(feature = "serde1")]
-fn enum8_name<'a>(mark: &'a mark::Enum8<'a>, row: usize) -> Option<&'a str> {
-    if row >= mark.data.len() {
-        return None;
-    }
-    let value = mark.data[row];
-    match mark.variants.binary_search_by_key(&value, |(_, id)| *id) {
-        Ok(index) => Some(mark.variants[index].0),
-        Err(_) => None,
-    }
-}
-
-#[cfg(feature = "serde1")]
-fn enum16_name<'a>(mark: &'a mark::Enum16<'a>, row: usize) -> Option<&'a str> {
-    if row >= mark.data.len() {
-        return None;
-    }
-    let value = mark.data[row].get();
-    match mark.variants.binary_search_by_key(&value, |(_, id)| *id) {
-        Ok(index) => Some(mark.variants[index].0),
-        Err(_) => None,
-    }
-}
-
-#[cfg(feature = "serde1")]
-fn base_contains(mark: &mark::Mark<'_>, row: usize) -> Result<bool, JsonDeserializeError> {
-    let present = match mark {
-        mark::Mark::Empty => false,
-        mark::Mark::Nothing(len) => row < *len,
-        mark::Mark::Bool(value) => value.get(row).is_some(),
-        mark::Mark::Int8(value) => value.get(row).is_some(),
-        mark::Mark::Int16(value) => value.get(row).is_some(),
-        mark::Mark::Int32(value) | mark::Mark::Time(value) => value.get(row).is_some(),
-        mark::Mark::Int64(value) => value.get(row).is_some(),
-        mark::Mark::Int128(value) => value.get(row).is_some(),
-        mark::Mark::Int256(value) => value.get(row).is_some(),
-        mark::Mark::UInt8(value) => value.get(row).is_some(),
-        mark::Mark::UInt16(value) => value.get(row).is_some(),
-        mark::Mark::UInt32(value) => value.get(row).is_some(),
-        mark::Mark::UInt64(value) => value.get(row).is_some(),
-        mark::Mark::UInt128(value) => value.get(row).is_some(),
-        mark::Mark::UInt256(value) => value.get(row).is_some(),
-        mark::Mark::Float32(value) => value.get(row).is_some(),
-        mark::Mark::Float64(value) => value.get(row).is_some(),
-        mark::Mark::BFloat16(value) => value.get(row).is_some(),
-        mark::Mark::Decimal32(value) => value.data.get(row).is_some(),
-        mark::Mark::Decimal64(value) => value.data.get(row).is_some(),
-        mark::Mark::Decimal128(value) => value.data.get(row).is_some(),
-        mark::Mark::Decimal256(value) => value.data.get(row).is_some(),
-        mark::Mark::String(value) => value.get(row).is_some(),
-        mark::Mark::FixedString(value) => value.get_bstr(row).is_some(),
-        mark::Mark::Uuid(value) => value.get(row).is_some(),
-        mark::Mark::Date(value) => value.get(row).is_some(),
-        mark::Mark::Date32(value) => value.get(row).is_some(),
-        mark::Mark::DateTime(value) => value.data.get(row).is_some(),
-        mark::Mark::DateTime64(value) => value.data.get(row).is_some(),
-        mark::Mark::Time64(value) => value.data.get(row).is_some(),
-        mark::Mark::Interval(value) => value.data.get(row).is_some(),
-        mark::Mark::Ipv4(value) => value.get(row).is_some(),
-        mark::Mark::Ipv6(value) => value.get(row).is_some(),
-        mark::Mark::Enum8(value) => enum8_name(value, row).is_some(),
-        mark::Mark::Enum16(value) => enum16_name(value, row).is_some(),
-        mark::Mark::Array(value) => value.offsets.offset_indices(row)?.is_some(),
-        mark::Mark::Tuple(_) | mark::Mark::Map(_) | mark::Mark::NamedTuple(_) => true,
-        mark::Mark::Nested(value) => match value.array_of_tuples.as_ref() {
-            mark::Mark::Array(array) => array.offsets.offset_indices(row)?.is_some(),
-            _ => false,
-        },
-        mark::Mark::Json(value) => value.contains_row(row),
-        mark::Mark::Nullable(_)
-        | mark::Mark::LowCardinality(_)
-        | mark::Mark::Variant(_)
-        | mark::Mark::Dynamic(_) => {
-            unreachable!("wrapper marks are resolved before the presence check")
-        }
-    };
-    Ok(present)
 }
 
 #[cfg(feature = "serde1")]
