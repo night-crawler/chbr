@@ -1,10 +1,9 @@
-use std::hint::{cold_path, unreachable_unchecked};
+use std::hint::cold_path;
 
 use log::debug;
 
 use crate::{
     Error,
-    mark::Mark,
     parse::{
         IResult,
         block::ParseContext,
@@ -180,9 +179,6 @@ pub fn json<'a>(
 
     let (input, num_dynamic_paths) = parse_varuint(input)?;
     let (mut input, dynamic_paths) = string(&ctx.fork(input).with_num_rows(num_dynamic_paths))?;
-    let Mark::String(dynamic_paths) = dynamic_paths else {
-        unsafe { unreachable_unchecked() };
-    };
 
     let cap = typed_paths.len() + num_dynamic_paths.min(input.len());
     let mut paths = Vec::with_capacity(cap);

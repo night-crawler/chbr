@@ -134,7 +134,7 @@ impl<'a> Type<'a> {
         }
 
         match self {
-            Type::String => string(&ctx),
+            Type::String => string(&ctx).map(|(input, view)| (input, Mark::String(view))),
             Type::Array(inner) => array(*inner, &ctx, header.into_array()),
             Type::Point => t!(Tuple(vec![t!(Float64), t!(Float64)])).decode(ctx, header),
             Type::Ring | Type::LineString => t!(Array(bt!(Point))).decode(ctx, header),
@@ -505,7 +505,7 @@ fn array<'a>(
     ))
 }
 
-pub(super) fn string<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> {
+pub(super) fn string<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], StringView<'a>> {
     let mut input = ctx.input;
     let num_rows = ctx.num_rows;
     // We set the full vec in the end, and never skip a row, so we can ignore zeroing stuff.
@@ -525,9 +525,9 @@ pub(super) fn string<'a>(ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a>> 
 
     Ok((
         input,
-        Mark::String(StringView {
+        StringView {
             data: strings.into_boxed_slice(),
-        }),
+        },
     ))
 }
 
