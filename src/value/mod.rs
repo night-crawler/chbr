@@ -35,7 +35,6 @@ macro_rules! impl_try_from_value_slice {
             fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
                 match value {
                     Value::$variant(v) => Ok(v),
-                    Value::Empty => Ok(&[]),
                     other => Err(other.mismatched_type(stringify!($ty))),
                 }
             }
@@ -51,6 +50,8 @@ pub use string::*;
 
 #[derive(Debug, Clone)]
 pub enum Value<'a> {
+    /// A NULL row of `Nullable`, `Variant`, `Dynamic` or `LowCardinality(Nullable(..))`, or a
+    /// value of type `Nothing`. Never an empty array: those are typed slices.
     Empty,
     Bool(bool),
     Int8(i8),
@@ -85,6 +86,8 @@ pub enum Value<'a> {
     Ipv4(Ipv4Addr),
     Ipv6(&'a Ipv6Data),
 
+    /// A slice of `Array(Nothing)` (CH: [])
+    NothingSlice,
     StringSlice(&'a [&'a BStr]),
     BoolSlice(&'a [u8]),
     Int8Slice(&'a [i8]),
@@ -232,6 +235,7 @@ impl Value<'_> {
     pub(crate) const fn as_str(&self) -> &'static str {
         match self {
             Value::Empty => "Empty",
+            Value::NothingSlice => "NothingSlice",
             Value::Bool(_) => "Bool",
             Value::Int8(_) => "Int8",
             Value::Int16(_) => "Int16",
@@ -360,7 +364,7 @@ impl<'a> Iterator for LowCardinalitySliceIterator<'a> {
 impl ExactSizeIterator for LowCardinalitySliceIterator<'_> {}
 
 pub struct ArraySliceIterator<'a, T> {
-    mark: Option<&'a mark::Array<'a>>,
+    mark: &'a mark::Array<'a>,
     range: Range<usize>,
     _phantom: PhantomData<T>,
 }
@@ -371,13 +375,8 @@ impl<'a, T> TryFrom<Value<'a>> for ArraySliceIterator<'a, T> {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::ArraySlice { mark, range } => Ok(Self {
-                mark: Some(mark),
+                mark,
                 range: range.into(),
-                _phantom: Default::default(),
-            }),
-            Value::Empty => Ok(Self {
-                mark: None,
-                range: 0..0,
                 _phantom: PhantomData,
             }),
             other => Err(other.mismatched_type(short_type_name::<Self>())),
@@ -393,11 +392,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let slice_idx = self.range.next()?;
-
-        let mark = self
-            .mark
-            .expect("bug: an empty array iterator has an empty range");
-        let (start, end) = match mark.offsets.offset_indices(slice_idx) {
+        let (start, end) = match self.mark.offsets.offset_indices(slice_idx) {
             Ok(Some(indices)) => indices,
             Ok(None) => {
                 cold_path();
@@ -405,7 +400,7 @@ where
             }
             Err(error) => return Some(Err(error)),
         };
-        let value = match mark.values.slice(start..end) {
+        let value = match self.mark.values.slice(start..end) {
             Ok(value) => value,
             Err(error) => return Some(Err(error)),
         };
@@ -690,7 +685,7 @@ impl<'a> Iterator for TupleSliceIterator<'a> {
 impl ExactSizeIterator for TupleSliceIterator<'_> {}
 
 pub struct NullableSliceIterator<'a> {
-    mark: Option<&'a mark::Nullable<'a>>,
+    mark: &'a mark::Nullable<'a>,
     range: Range<usize>,
 }
 
@@ -700,12 +695,8 @@ impl<'a> TryFrom<Value<'a>> for NullableSliceIterator<'a> {
     fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
         match value {
             Value::NullableSlice { mark, range } => Ok(Self {
-                mark: Some(mark),
+                mark,
                 range: range.into(),
-            }),
-            Value::Empty => Ok(Self {
-                mark: None,
-                range: 0..0,
             }),
             other => Err(other.mismatched_type(short_type_name::<Self>())),
         }
@@ -717,14 +708,10 @@ impl<'a> Iterator for NullableSliceIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.range.next()?;
-
-        let mark = self
-            .mark
-            .expect("bug: an empty nullable iterator has an empty range");
-        if mark.is_null(index)? {
+        if self.mark.is_null(index)? {
             return Some(Ok(Value::Empty));
         }
-        mark.data.get(index).transpose()
+        self.mark.data.get(index).transpose()
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

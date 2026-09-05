@@ -11,6 +11,7 @@ mod decimal_values;
 mod dynamic_arrays;
 mod dynamic_null_values;
 mod dynamic_values;
+mod empty_arrays;
 mod empty_low_cardinality_arrays;
 mod empty_low_cardinality_map_strings;
 mod enum_arrays;

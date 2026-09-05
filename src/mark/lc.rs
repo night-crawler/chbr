@@ -16,13 +16,6 @@ pub struct LowCardinality<'a> {
 }
 
 impl<'a> LowCardinality<'a> {
-    pub(crate) const EMPTY: Self = Self {
-        is_nullable: false,
-        indices: Indices::U8(&[]),
-        global_dictionary: None,
-        additional_keys: None,
-    };
-
     #[inline(always)]
     pub(crate) fn keys(&self) -> crate::Result<&Mark<'a>> {
         match self.additional_keys.as_deref() {

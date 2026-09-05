@@ -264,7 +264,7 @@ impl<'a> Mark<'a> {
             }
             Mark::Nothing(len) => {
                 self.checked_range(*len, idx)?;
-                Ok(Value::Empty)
+                Ok(Value::NothingSlice)
             }
             Mark::Bool(bv) => Ok(Value::BoolSlice(self.checked_slice(bv.data, idx)?)),
             Mark::Int8(bv) => Ok(Value::Int8Slice(self.checked_slice(bv.as_slice(), idx)?)),
@@ -453,9 +453,6 @@ impl<'a> Mark<'a> {
     pub(crate) const fn lc(&self) -> crate::Result<&lc::LowCardinality<'a>> {
         match self {
             Mark::LowCardinality(lc) => Ok(lc),
-            // `Mark::Empty` is the `values` of an `Array` with no elements (or an unused
-            // `SharedVariant` slot in `Dynamic`); an `Array(LowCardinality(..))` reaches here.
-            Mark::Empty => Ok(&lc::LowCardinality::EMPTY),
             other => {
                 cold_path();
                 Err(Error::MismatchedType(other.as_str(), "LowCardinality"))
@@ -537,7 +534,6 @@ impl<'a> Mark<'a> {
         };
         let slice = match values {
             Mark::Bool(bv) => &bv.data[range],
-            Mark::Empty => &[],
             other => {
                 cold_path();
                 return Err(Error::MismatchedType(other.as_str(), "Bool"));
@@ -625,7 +621,6 @@ impl<'a> Mark<'a> {
         };
         match values {
             Mark::String(bv) => Ok(Some(&bv[range])),
-            Mark::Empty => Ok(Some(&[])),
             other => {
                 cold_path();
                 Err(Error::MismatchedType(other.as_str(), "String"))

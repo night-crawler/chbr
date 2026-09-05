@@ -191,8 +191,7 @@ impl<'a, Inner: TryRead<'a> + 'a> LcNullable<'a, Inner> {
 #[derive(Clone, Copy)]
 pub struct Array<'a, Inner: TryRead<'a>> {
     pub(crate) offsets: &'a [crate::zc::U64],
-    pub(crate) values: Option<Inner>,
-    // `values.len()`, or 0 without values; every row's range is checked against it once.
+    pub(crate) values: Inner,
     values_len: usize,
 }
 
@@ -207,17 +206,8 @@ where
         match value {
             Mark::Array(arr) => {
                 let elements = arr.offsets.last_or_default()?;
-                let values = match arr.values.as_ref() {
-                    Mark::Empty if elements == 0 => None,
-                    Mark::Empty => {
-                        cold_path();
-                        return Err(Error::CorruptedData(
-                            "Array values are missing for non-empty offsets".to_owned(),
-                        ));
-                    }
-                    values => Some(Inner::try_from(values)?),
-                };
-                let values_len = values.as_ref().map_or(0, Inner::len);
+                let values = Inner::try_from(arr.values.as_ref())?;
+                let values_len = values.len();
                 if values_len < elements {
                     cold_path();
                     return Err(offsets_exceed_values("Array", elements, values_len));
@@ -281,7 +271,7 @@ fn offsets_exceed_values(kind: &str, end: usize, present: usize) -> Error {
 }
 
 pub struct ArrayIter<'a, Inner: TryRead<'a>> {
-    inner: Option<Inner>,
+    inner: Inner,
     range: Range<usize>,
     _marker: std::marker::PhantomData<&'a ()>,
 }
@@ -303,12 +293,8 @@ impl<'a, Inner: TryRead<'a>> Iterator for ArrayIter<'a, Inner> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.range.next()?;
-        // SAFETY: `Array::iter_range` verified `range.end <= values_len`, so `i < inner.len()` and
-        // `inner` is `Some` whenever the range is non-empty.
-        unsafe {
-            let inner = self.inner.as_ref().unwrap_unchecked();
-            Some(inner.try_read_unchecked(i))
-        }
+        // SAFETY: `Array::iter_range` verified `range.end <= values_len`, so `i < inner.len()`.
+        unsafe { Some(self.inner.try_read_unchecked(i)) }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -330,11 +316,7 @@ impl<'a, Inner: ReadSlice<'a>> ArrayIter<'a, Inner> {
     /// The contiguous backing slice for this array cell.
     #[inline]
     pub fn try_as_slice(&self) -> crate::Result<&'a [Inner::Elem]> {
-        match self.inner {
-            Some(inner) => inner.try_read_slice(self.range.clone()),
-            // The construction invariant guarantees an empty range here.
-            None => Ok(&[]),
-        }
+        self.inner.try_read_slice(self.range.clone())
     }
 }
 

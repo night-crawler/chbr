@@ -106,24 +106,6 @@ fn array_all_empty_rows_from_fixture() -> TestResult {
 }
 
 #[test]
-fn array_empty_values_plain_inner() -> TestResult {
-    let offsets = [0_u8; 24];
-    let mark = mark::Mark::Array(mark::Array {
-        offsets: crate::slice::ByteView::try_from(offsets.as_slice())?,
-        values: Box::new(mark::Mark::Empty),
-    });
-
-    let reader: Array<Str> = Array::try_from(&mark)?;
-
-    for row in 0..3 {
-        let count = reader.try_read(row)?.count();
-        assert_eq!(count, 0, "expected empty array at row {row}");
-    }
-
-    Ok(())
-}
-
-#[test]
 fn derive_from_block_with_names() -> TestResult {
     const ID_COL: &str = "id";
 

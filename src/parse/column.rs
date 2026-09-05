@@ -490,16 +490,6 @@ fn array<'a>(
     debug!("offsets: {:?}", offsets);
     debug!("Array num_rows: {}", num_rows);
 
-    if num_rows == 0 {
-        return Ok((
-            input,
-            Mark::Array(Array {
-                offsets,
-                values: Box::new(Mark::Empty),
-            }),
-        ));
-    }
-
     let (input, inner_block) = inner.decode(ctx.fork(input).with_num_rows(num_rows), header)?;
     Ok((
         input,
