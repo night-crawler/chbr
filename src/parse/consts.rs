@@ -8,3 +8,12 @@ pub const TUINT32: u64 = 2;
 pub const TUINT64: u64 = 3;
 
 pub const LOW_CARDINALITY_VERSION: u64 = 1;
+
+/// ClickHouse code: `DEFAULT_NATIVE_BINARY_MAX_NUM_COLUMNS`
+pub const MAX_NUM_COLUMNS: usize = 1_000_000;
+
+/// ClickHouse code: `DEFAULT_NATIVE_BINARY_MAX_NUM_ROWS`
+pub const MAX_NUM_ROWS: u64 = 1_000_000_000_000;
+
+/// ClickHouse code: `ColumnDynamic::MAX_DYNAMIC_TYPES_LIMIT`
+pub const MAX_DYNAMIC_TYPES: usize = 254;

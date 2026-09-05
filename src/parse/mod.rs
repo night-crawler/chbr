@@ -1,19 +1,17 @@
-use zerocopy::{LittleEndian, U64};
+use std::hint::cold_path;
 
-use crate::{
-    error::Error,
-    parse::typ::parse_type,
-    slice::ByteView,
-    types::{Offsets, Type},
-};
+use crate::{error::Error, slice::ByteView, types::Offsets, zc};
 
 pub mod block;
-pub mod column;
+pub(crate) mod column;
 mod consts;
-pub mod header;
-pub mod typ;
+pub(crate) mod header;
+pub(crate) mod typ;
 
-pub type IResult<I, O, E = Error> = Result<(I, O), E>;
+pub(crate) type IResult<I, O, E = Error> = Result<(I, O), E>;
+
+const DATA: u8 = 0x7F;
+const CONT: u8 = 0x80;
 
 fn parse_varuint<T>(input: &[u8]) -> IResult<&[u8], T>
 where
@@ -22,58 +20,59 @@ where
     let (value, rest) = get_unsigned_leb128(input)?;
 
     let Ok(value) = T::try_from(value) else {
+        cold_path();
         return Err(Error::Overflow(value.to_string()));
     };
 
     Ok((rest, value))
 }
 
-#[inline(always)]
 fn get_unsigned_leb128(input: &[u8]) -> Result<(u64, &[u8]), Error> {
-    const DATA: u8 = 0x7F;
-    const CONT: u8 = 0x80;
+    // We parse strings, realistically it will always be way less on average, so there's no point
+    // unfolding loops and messing with unneeded complexity.
+    let Some(head) = input.first_chunk::<3>() else {
+        return get_unsigned_leb128_slow(input);
+    };
 
-    macro_rules! read {
-        ($idx:expr, $shift:expr, $acc:ident, $len:ident) => {{
-            if $len <= $idx {
-                return Err(Error::Length($idx));
-            }
-            let byte = input[$idx];
-            $acc |= (u64::from(byte & DATA)) << $shift;
-            if byte & CONT == 0 {
-                return Ok(($acc, &input[$idx + 1..]));
-            }
-        }};
+    let b0 = head[0];
+    if b0 & CONT == 0 {
+        return Ok((u64::from(b0), &input[1..]));
+    }
+    let value = u64::from(b0 & DATA);
+
+    let b1 = head[1];
+    if b1 & CONT == 0 {
+        return Ok((value | u64::from(b1) << 7, &input[2..]));
+    }
+    let value = value | u64::from(b1 & DATA) << 7;
+
+    let b2 = head[2];
+    if b2 & CONT == 0 {
+        return Ok((value | u64::from(b2) << 14, &input[3..]));
     }
 
-    let len = input.len();
-    if len == 0 {
-        return Err(Error::Length(0));
-    }
+    get_unsigned_leb128_slow(input)
+}
 
+#[cold]
+#[inline(never)]
+fn get_unsigned_leb128_slow(input: &[u8]) -> Result<(u64, &[u8]), Error> {
     let mut acc: u64 = 0;
 
-    read!(0, 0, acc, len);
-    read!(1, 7, acc, len);
-    read!(2, 14, acc, len);
-    read!(3, 21, acc, len);
-    read!(4, 28, acc, len);
-    read!(5, 35, acc, len);
-    read!(6, 42, acc, len);
-    read!(7, 49, acc, len);
-    read!(8, 56, acc, len);
-
-    if len <= 9 {
-        return Err(Error::Length(9));
+    for (idx, &byte) in input.iter().take(10).enumerate() {
+        if byte & CONT == 0 {
+            if idx == 9 && byte > 1 {
+                return Err(Error::Overflow("varuint too large for u64".into()));
+            }
+            return Ok((acc | (u64::from(byte) << (idx * 7)), &input[idx + 1..]));
+        }
+        if idx == 9 {
+            return Err(Error::Overflow("varuint too large for u64".into()));
+        }
+        acc |= u64::from(byte & DATA) << (idx * 7);
     }
 
-    let b9 = input[9];
-    if b9 & CONT != 0 || b9 > 1 {
-        return Err(Error::Overflow("varuint too large for u64".into()));
-    }
-
-    acc |= u64::from(b9) << 63;
-    Ok((acc, &input[10..]))
+    Err(Error::Length(input.len() + 1))
 }
 
 fn parse_u64<T>(input: &[u8]) -> IResult<&[u8], T>
@@ -81,12 +80,14 @@ where
     T: TryFrom<u64>,
 {
     if input.len() < 8 {
+        cold_path();
         return Err(Error::Length(8));
     }
     let (bytes, rest) = input.split_at(8);
-    let value = u64::from_le_bytes(bytes.try_into().unwrap());
+    let value = u64::from_le_bytes(bytes.try_into().expect("we checked"));
 
     let Ok(value) = T::try_from(value) else {
+        cold_path();
         return Err(Error::Overflow(value.to_string()));
     };
 
@@ -96,6 +97,7 @@ where
 fn parse_var_str_bytes(input: &[u8]) -> IResult<&[u8], &[u8]> {
     let (input, len) = parse_varuint(input)?;
     if input.len() < len {
+        cold_path();
         return Err(Error::Length(len));
     }
 
@@ -106,26 +108,62 @@ fn parse_var_str_bytes(input: &[u8]) -> IResult<&[u8], &[u8]> {
 pub(crate) fn parse_var_str(input: &[u8]) -> IResult<&[u8], &str> {
     let (input, len) = parse_varuint(input)?;
     if input.len() < len {
+        cold_path();
         return Err(Error::UnexpectedEndOfInput);
     }
 
     let (str_bytes, remainder) = input.split_at(len);
 
-    let str_value =
-        std::str::from_utf8(str_bytes).map_err(|e| Error::Utf8Decode(e, str_bytes.to_vec()))?;
+    let str_value = match std::str::from_utf8(str_bytes) {
+        Ok(str_value) => str_value,
+        Err(e) => {
+            cold_path();
+            return Err(Error::Utf8Decode(e, str_bytes.to_vec()));
+        }
+    };
     Ok((remainder, str_value))
 }
 
-fn parse_var_str_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
-    let (input, str_bytes) = parse_var_str_bytes(input)?;
-    std::str::from_utf8(str_bytes).map_err(|e| Error::Utf8Decode(e, str_bytes.to_vec()))?;
-    let (_, typ) = parse_type(str_bytes)?;
-    Ok((input, typ))
+fn take_elements<'a>(
+    input: &'a [u8],
+    left: usize,
+    right: usize,
+    description: &str,
+) -> IResult<&'a [u8], &'a [u8]> {
+    let Some(byte_len) = left.checked_mul(right) else {
+        cold_path();
+        return Err(Error::Overflow(format!("{description}: {left} * {right}")));
+    };
+    let Some((data, input)) = input.split_at_checked(byte_len) else {
+        cold_path();
+        return Err(Error::Length(byte_len));
+    };
+    Ok((input, data))
 }
 
 fn parse_offsets(input: &[u8], num_rows: usize) -> IResult<&[u8], Offsets<'_>> {
-    let (offsets, input) = input.split_at(num_rows * size_of::<u64>());
-    let offsets = ByteView::<U64<LittleEndian>>::try_from(offsets)?;
+    let (input, offsets) = take_elements(input, num_rows, size_of::<u64>(), "offset byte length")?;
+    let offsets = ByteView::<zc::U64>::try_from(offsets)?;
+
+    if cfg!(debug_assertions) {
+        check_monotonic(offsets.as_slice())?;
+    }
 
     Ok((input, offsets))
+}
+
+fn check_monotonic(offsets: &[zc::U64]) -> Result<(), Error> {
+    let mut prev = 0u64;
+    for (i, offset) in offsets.iter().enumerate() {
+        let cur = offset.get();
+        if cur < prev {
+            cold_path();
+            return Err(Error::CorruptedData(format!(
+                "offsets not monotonic: offset[{i}] = {cur} < offset[{}] = {prev}",
+                i - 1
+            )));
+        }
+        prev = cur;
+    }
+    Ok(())
 }

@@ -1,3 +1,5 @@
+/// Deliberately doesn't support escaping because it's pain in `derive` and pain in general.
+use std::hint::cold_path;
 use std::str::{FromStr, from_utf8};
 
 use chrono_tz::{Tz, Tz::UTC};
@@ -5,10 +7,10 @@ use nom::{
     IResult, Parser,
     branch::alt,
     bytes::complete::{tag, take_while1},
-    character::complete::{alphanumeric1, char, digit1, multispace0, multispace1},
-    combinator::{map, map_res, opt, recognize},
+    character::complete::{char, digit1, multispace0, multispace1},
+    combinator::{map, map_res, opt, recognize, verify},
     error::{ErrorKind, FromExternalError as _, ParseError},
-    multi::{many0, separated_list1},
+    multi::{separated_list0, separated_list1},
     sequence::{delimited, pair, preceded, separated_pair},
 };
 
@@ -18,12 +20,24 @@ fn parse_num<T>(input: &[u8]) -> Result<T, nom::error::Error<&[u8]>>
 where
     T: FromStr,
 {
-    let s = from_utf8(input)
-        .map_err(|e| nom::error::Error::from_external_error(input, ErrorKind::Fail, e))?;
-    let parsed = s
-        .parse::<T>()
-        .map_err(|e| nom::error::Error::from_external_error(input, ErrorKind::Fail, e))?;
-    Ok(parsed)
+    let s = match from_utf8(input) {
+        Ok(s) => s,
+        Err(e) => {
+            return Err(nom::error::Error::from_external_error(
+                input,
+                ErrorKind::Fail,
+                e,
+            ));
+        }
+    };
+    match s.parse::<T>() {
+        Ok(parsed) => Ok(parsed),
+        Err(e) => Err(nom::error::Error::from_external_error(
+            input,
+            ErrorKind::Fail,
+            e,
+        )),
+    }
 }
 
 fn ws<'a, O, E, F>(inner: F) -> impl Parser<&'a [u8], Output = O, Error = E>
@@ -49,12 +63,21 @@ fn parse_decimal_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     )
     .parse(input)?;
 
+    if scale > precision {
+        cold_path();
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            ErrorKind::Fail,
+        )));
+    }
+
     let typ = match precision {
         0..10 => Type::Decimal32(scale),
         10..19 => Type::Decimal64(scale),
         19..39 => Type::Decimal128(scale),
         39..77 => Type::Decimal256(scale),
         _ => {
+            cold_path();
             return Err(nom::Err::Error(nom::error::Error::new(
                 input,
                 ErrorKind::Fail,
@@ -121,26 +144,48 @@ fn parse_inet_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     .parse(input)
 }
 
-fn parse_datetime64(input: &[u8]) -> IResult<&[u8], Type<'_>> {
-    let (input, (precision, tz)) = preceded(
-        tag("DateTime64"),
-        delimited(
-            ws(char('(')),
-            separated_pair(
-                map_res(digit1, parse_num::<u8>),
-                ws(char(',')),
-                delimited(ws(char('\'')), take_while1(|c| c != b'\''), ws(char('\''))),
-            ),
-            ws(char(')')),
-        ),
+/// `'Europe/Berlin'` -> [`Tz`]
+fn quoted_tz(input: &[u8]) -> IResult<&[u8], Tz> {
+    map_res(
+        delimited(ws(char('\'')), take_while1(|c| c != b'\''), ws(char('\''))),
+        |tz: &[u8]| {
+            // SAFETY: I hope caller validated the input as UTF-8 before parsing
+            Tz::from_str(unsafe { std::str::from_utf8_unchecked(tz) })
+                .map_err(|_| nom::error::Error::new(tz, ErrorKind::Fail))
+        },
     )
-    .parse(input)?;
+    .parse(input)
+}
 
-    let tz = unsafe { std::str::from_utf8_unchecked(tz) };
+/// `DateTime64(N)` or `DateTime64(N, 'tz')`
+fn parse_datetime64(input: &[u8]) -> IResult<&[u8], Type<'_>> {
+    map(
+        preceded(
+            tag("DateTime64"),
+            delimited(
+                ws(char('(')),
+                pair(
+                    map_res(digit1, parse_num::<u8>),
+                    opt(preceded(ws(char(',')), quoted_tz)),
+                ),
+                ws(char(')')),
+            ),
+        ),
+        |(precision, tz)| Type::DateTime64(precision, tz.unwrap_or(UTC)),
+    )
+    .parse(input)
+}
 
-    let tz = Tz::from_str(tz)
-        .map_err(|_| nom::Err::Error(nom::error::Error::new(input, ErrorKind::Fail)))?;
-    Ok((input, Type::DateTime64(precision, tz)))
+/// `DateTime('tz')`
+fn parse_datetime_tz(input: &[u8]) -> IResult<&[u8], Type<'_>> {
+    map(
+        preceded(
+            tag("DateTime"),
+            delimited(ws(char('(')), quoted_tz, ws(char(')'))),
+        ),
+        Type::DateTime,
+    )
+    .parse(input)
 }
 
 fn parse_tuple(input: &[u8]) -> IResult<&[u8], Type<'_>> {
@@ -162,6 +207,7 @@ fn parse_date_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     alt((
         parse_datetime64,
         map(tag("DateTime64"), |_| Type::DateTime64(3, UTC)),
+        parse_datetime_tz,
         map(tag("DateTime"), |_| Type::DateTime(UTC)),
         map(tag("Date32"), |_| Type::Date32),
         map(tag("Date"), |_| Type::Date),
@@ -180,12 +226,93 @@ fn parse_geo_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     ))
     .parse(input)
 }
+fn parse_json_path(input: &[u8]) -> IResult<&[u8], &[u8]> {
+    alt((
+        delimited(char('`'), take_while1(|c| c != b'`'), char('`')),
+        take_while1(|c: u8| !c.is_ascii_whitespace() && c != b',' && c != b')'),
+    ))
+    .parse(input)
+}
+
+fn parse_json_setting(input: &[u8]) -> IResult<&[u8], Option<Field<'_>>> {
+    map(
+        pair(
+            alt((tag("max_dynamic_paths"), tag("max_dynamic_types"))),
+            preceded(ws(char('=')), digit1),
+        ),
+        |_| None,
+    )
+    .parse(input)
+}
+
+fn parse_json_skip(input: &[u8]) -> IResult<&[u8], Option<Field<'_>>> {
+    map(
+        preceded(
+            alt((tag("SKIP REGEXP"), tag("SKIP"))),
+            preceded(
+                multispace1,
+                alt((
+                    delimited(char('\''), take_while1(|c| c != b'\''), char('\'')),
+                    parse_json_path,
+                )),
+            ),
+        ),
+        |_| None,
+    )
+    .parse(input)
+}
+
+fn parse_json_typed_path(input: &[u8]) -> IResult<&[u8], Option<Field<'_>>> {
+    map(
+        separated_pair(parse_json_path, multispace1, parse_type),
+        |(name, typ)| {
+            Some(Field {
+                name: unsafe { std::str::from_utf8_unchecked(name) },
+                typ,
+            })
+        },
+    )
+    .parse(input)
+}
+
+fn parse_json(input: &[u8]) -> IResult<&[u8], Type<'_>> {
+    let (input, arguments) = preceded(
+        tag("JSON"),
+        opt(delimited(
+            ws(char('(')),
+            separated_list0(
+                ws(char(',')),
+                alt((parse_json_setting, parse_json_skip, parse_json_typed_path)),
+            ),
+            ws(char(')')),
+        )),
+    )
+    .parse(input)?;
+
+    let mut typed_paths = match arguments {
+        Some(arguments) => arguments.into_iter().flatten().collect::<Vec<_>>(),
+        None => Vec::new(),
+    };
+    typed_paths.sort_unstable_by_key(|field| field.name);
+    Ok((input, Type::Json(typed_paths)))
+}
 
 fn parse_other_primitives(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     alt((
-        map(tag("Dynamic"), |_| Type::Dynamic),
-        map(tag("JSON"), |_| Type::Json),
+        // `Dynamic` | `Dynamic(max_types=32)` -> Type::Dynamic
+        map(
+            pair(
+                tag("Dynamic"),
+                opt(delimited(
+                    ws(char('(')),
+                    pair(tag("max_types"), preceded(ws(char('=')), digit1)),
+                    ws(char(')')),
+                )),
+            ),
+            |_| Type::Dynamic,
+        ),
         map(tag("SharedVariant"), |_| Type::SharedVariant),
+        map(tag("Nothing"), |_| Type::Nothing),
     ))
     .parse(input)
 }
@@ -301,7 +428,7 @@ fn parse_pairs<'a>(
             separated_list1(
                 ws(char(',')),
                 separated_pair(
-                    recognize(pair(alphanumeric1, many0(alt((alphanumeric1, tag("_")))))),
+                    take_while1(|c: u8| c.is_ascii_alphanumeric() || c == b'_'),
                     multispace1,
                     parse_type,
                 ),
@@ -314,60 +441,54 @@ fn parse_pairs<'a>(
     Ok((input, pairs))
 }
 
-fn parse_enum8(input: &[u8]) -> IResult<&[u8], Type<'_>> {
+fn parse_enum_variants<'a, T>(
+    name: &'static str,
+    input: &'a [u8],
+) -> IResult<&'a [u8], Vec<(&'a str, T)>>
+where
+    T: FromStr + PartialOrd,
+{
     map(
-        preceded(
-            tag("Enum8"),
-            delimited(
-                ws(char('(')),
-                separated_list1(
-                    ws(char(',')),
-                    separated_pair(
-                        delimited(ws(char('\'')), take_while1(|c| c != b'\''), ws(char('\''))),
-                        ws(char('=')),
-                        map_res(recognize(pair(opt(char('-')), digit1)), parse_num::<i8>),
+        verify(
+            preceded(
+                tag(name),
+                delimited(
+                    ws(char('(')),
+                    separated_list1(
+                        ws(char(',')),
+                        separated_pair(
+                            delimited(ws(char('\'')), take_while1(|c| c != b'\''), ws(char('\''))),
+                            ws(char('=')),
+                            map_res(recognize(pair(opt(char('-')), digit1)), parse_num::<T>),
+                        ),
                     ),
+                    ws(char(')')),
                 ),
-                ws(char(')')),
             ),
+            |pairs: &Vec<(&[u8], T)>| pairs.windows(2).all(|w| w[0].1 < w[1].1),
         ),
         |pairs| {
-            let mut enum_values = Vec::new();
-            for (name, value) in pairs {
-                let name_str = unsafe { std::str::from_utf8_unchecked(name) };
-                enum_values.push((name_str, value));
-            }
-            Type::Enum8(enum_values)
+            pairs
+                .into_iter()
+                .map(|(name, id)| (unsafe { std::str::from_utf8_unchecked(name) }, id))
+                .collect()
         },
+    )
+    .parse(input)
+}
+
+fn parse_enum8(input: &[u8]) -> IResult<&[u8], Type<'_>> {
+    map(
+        |input| parse_enum_variants::<i8>("Enum8", input),
+        Type::Enum8,
     )
     .parse(input)
 }
 
 fn parse_enum16(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     map(
-        preceded(
-            tag("Enum16"),
-            delimited(
-                ws(char('(')),
-                separated_list1(
-                    ws(char(',')),
-                    separated_pair(
-                        delimited(ws(char('\'')), take_while1(|c| c != b'\''), ws(char('\''))),
-                        ws(char('=')),
-                        map_res(digit1, parse_num::<i16>),
-                    ),
-                ),
-                ws(char(')')),
-            ),
-        ),
-        |pairs| {
-            let mut enum_values = Vec::new();
-            for (name, value) in pairs {
-                let name_str = unsafe { std::str::from_utf8_unchecked(name) };
-                enum_values.push((name_str, value));
-            }
-            Type::Enum16(enum_values)
-        },
+        |input| parse_enum_variants::<i16>("Enum16", input),
+        Type::Enum16,
     )
     .parse(input)
 }
@@ -386,6 +507,7 @@ pub fn parse_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
         parse_named_tuple,
         parse_enum8,
         parse_enum16,
+        parse_json,
         parse_other_primitives,
     ))
     .parse(input)
@@ -397,8 +519,20 @@ mod tests {
     #[test]
     fn decimal() {
         let input = b"Decimal(9, 9)";
-        let result = parse_decimal_type(input);
-        assert!(result.is_ok());
+        let (_, typ) = parse_decimal_type(input).unwrap();
+        assert_eq!(typ, Type::Decimal32(9));
+    }
+
+    #[test]
+    fn decimal_scale_exceeds_precision() {
+        assert!(parse_decimal_type(b"Decimal(9, 10)").is_err());
+        assert!(parse_decimal_type(b"Decimal(18, 30)").is_err());
+        assert!(parse_decimal_type(b"Decimal(38, 40)").is_err());
+    }
+
+    #[test]
+    fn decimal_precision_out_of_range() {
+        assert!(parse_decimal_type(b"Decimal(77, 0)").is_err());
     }
 
     #[test]
@@ -453,6 +587,19 @@ mod tests {
                 Type::UInt64
             ])
         );
+    }
+
+    #[test]
+    fn dynamic_max_types() {
+        for input in [
+            &b"Dynamic"[..],
+            b"Dynamic(max_types=0)",
+            b"Dynamic(max_types = 5)",
+        ] {
+            let (rest, typ) = parse_type(input).unwrap();
+            assert!(rest.is_empty(), "{}", String::from_utf8_lossy(input));
+            assert_eq!(typ, Type::Dynamic);
+        }
     }
 
     #[test]
@@ -520,5 +667,107 @@ mod tests {
         let input = b"Enum16('Foo' = 1000, 'Bar' = 2000)";
         let (_, typ) = parse_type(input).unwrap();
         assert_eq!(typ, Type::Enum16(vec![("Foo", 1000), ("Bar", 2000)]));
+    }
+
+    #[test]
+    fn enum16_negative() {
+        let input = b"Enum16('Min' = -32768, 'Neg' = -5000, 'Pos' = 5000)";
+        let (_, typ) = parse_type(input).unwrap();
+        assert_eq!(
+            typ,
+            Type::Enum16(vec![("Min", -32768), ("Neg", -5000), ("Pos", 5000)])
+        );
+    }
+
+    #[test]
+    fn enum_rejects_unsorted_or_duplicate_ids() {
+        assert!(parse_type(b"Enum8('B' = 2, 'A' = 1)").is_err());
+        assert!(parse_type(b"Enum16('A' = 1, 'B' = 1)").is_err());
+        assert!(parse_type(b"Enum8('Blue' = -23, 'Green' = 2, 'Red' = 11)").is_ok());
+    }
+
+    #[test]
+    fn json_with_typed_paths_and_settings() {
+        let typ = Type::from_bytes(
+            b"JSON(max_dynamic_paths=2, `nested.name` String, a UInt64, \
+              max_dynamic_types=4, SKIP ignored, SKIP REGEXP '^private')",
+        )
+        .unwrap();
+        assert_eq!(
+            typ,
+            Type::Json(vec![
+                Field {
+                    name: "a",
+                    typ: Type::UInt64,
+                },
+                Field {
+                    name: "nested.name",
+                    typ: Type::String,
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn json_type_rejects_unparsed_arguments() {
+        assert!(Type::from_bytes(b"JSON(a UInt64) trailing").is_err());
+        assert!(Type::from_bytes(b"JSON(unknown_setting=1)").is_err());
+    }
+
+    #[test]
+    fn json_without_arguments() {
+        assert_eq!(Type::from_bytes(b"JSON").unwrap(), Type::Json(vec![]));
+        assert_eq!(Type::from_bytes(b"JSON()").unwrap(), Type::Json(vec![]));
+    }
+
+    #[test]
+    fn named_tuple_identifier_may_start_with_underscore() {
+        let typ = Type::from_bytes(b"Tuple(_id UInt64, name String)").unwrap();
+        let Type::NamedTuple(fields) = typ else {
+            panic!("expected NamedTuple, got {typ:?}");
+        };
+        let names: Vec<&str> = fields.iter().map(|f| f.name).collect();
+        assert_eq!(names, ["_id", "name"]);
+    }
+
+    #[test]
+    fn nothing() {
+        assert_eq!(
+            Type::from_bytes(b"Array(Nothing)").unwrap(),
+            Type::Array(Box::new(Type::Nothing))
+        );
+        assert_eq!(
+            Type::from_bytes(b"Nullable(Nothing)").unwrap(),
+            Type::Nullable(Box::new(Type::Nothing))
+        );
+    }
+
+    #[test]
+    fn datetime_forms() {
+        use chrono_tz::{Asia::Tokyo, Europe::Berlin};
+        assert_eq!(Type::from_bytes(b"DateTime").unwrap(), Type::DateTime(UTC));
+        assert_eq!(
+            Type::from_bytes(b"DateTime('Europe/Berlin')").unwrap(),
+            Type::DateTime(Berlin)
+        );
+        assert_eq!(
+            Type::from_bytes(b"DateTime64").unwrap(),
+            Type::DateTime64(3, UTC)
+        );
+        assert_eq!(
+            Type::from_bytes(b"DateTime64(6)").unwrap(),
+            Type::DateTime64(6, UTC)
+        );
+        assert_eq!(
+            Type::from_bytes(b"DateTime64(9, 'Asia/Tokyo')").unwrap(),
+            Type::DateTime64(9, Tokyo)
+        );
+        assert_eq!(
+            Type::from_bytes(b"Nullable(DateTime64(3))").unwrap(),
+            Type::Nullable(Box::new(Type::DateTime64(3, UTC)))
+        );
+        assert!(Type::from_bytes(b"DateTime('Mars/Olympus')").is_err());
+        assert!(Type::from_bytes(b"DateTime64(3, 'Mars/Olympus')").is_err());
+        assert!(Type::from_bytes(b"DateTime64('UTC')").is_err());
     }
 }

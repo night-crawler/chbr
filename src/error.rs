@@ -1,13 +1,7 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, ops::Range};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("UInt decode error")]
-    VarUIntDecode(#[from] unsigned_varint::decode::Error),
-
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
-
     #[error("Parse error: {0}")]
     Parse(String),
 
@@ -26,9 +20,6 @@ pub enum Error {
     #[error("Not implemented: {0}")]
     NotImplemented(String),
 
-    #[error("Programming error: {0}")]
-    ProgrammingError(String),
-
     #[error("Utf8 decode error: {0}; bytes: {1:0x?}")]
     Utf8Decode(std::str::Utf8Error, Vec<u8>),
 
@@ -41,6 +32,9 @@ pub enum Error {
     #[error("Index {0} out of bounds for {1}")]
     IndexOutOfBounds(usize, &'static str),
 
+    #[error("Range {0:?} out of bounds for {1}")]
+    RangeOutOfBounds(Range<usize>, &'static str),
+
     #[error("Corrupted data: {0}")]
     CorruptedData(String),
 
@@ -49,6 +43,16 @@ pub enum Error {
 
     #[error("Invalid column order: {0}")]
     InvalidColumnOrder(String),
+
+    #[error("Column not found: {0}")]
+    ColumnNotFound(String),
+}
+
+pub(crate) fn decode_utf8(bytes: &[u8]) -> crate::Result<&str> {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => Ok(s),
+        Err(error) => Err(Error::Utf8Decode(error, bytes.to_vec())),
+    }
 }
 
 impl<T> From<nom::Err<T>> for Error

@@ -538,9 +538,39 @@ insert into uuid_and_dates (id, date, date32, datetime, datetime64) values
 
 select * from uuid_and_dates order by id;
 
-create table lol (
-                     datetime64 DateTime64(2, 'UTC') default now()
+-- datetime_tz.native: every DateTime type spelling the server emits.
+-- Note: `FORMAT Native` via clickhouse-client/HTTP (client revision 0) strips the
+-- zone from a top-level DateTime('tz') -> `DateTime`; nested ones survive.
+drop table if exists datetime_tz;
+create table datetime_tz (
+    a DateTime,
+    b DateTime('Europe/Berlin'),
+    c DateTime64(3),
+    d DateTime64(6, 'Asia/Tokyo'),
+    e DateTime64,
+    f Nullable(DateTime64(9)),
+    g Array(DateTime('UTC'))
+) engine = Memory;
 
+insert into datetime_tz values
+    (1700000000, 1700000000, 1700000000.123, 1700000000.123456, 1700000000.5, NULL, [1700000000]);
+
+select a, b, c, d, e, f, g, cast(b, 'Nullable(DateTime(''Europe/Berlin''))') as h
+from datetime_tz format Native;
+
+-- max_types=0 forces every value into the SharedVariant String sub-column.
+select number as id, cast(number * 10, 'Dynamic(max_types=0)') as d, toString(number) as after
+from numbers(3) format Native;
+
+select number as id, cast(concat('{"a":', toString(number * 10), '}'), 'JSON(max_dynamic_types=0)') as j,
+       toString(number) as after
+from numbers(3) format Native;
+
+select number as id, cast(number * 10, 'Dynamic(max_types=2)') as d, toString(number) as after
+from numbers(3) format Native;
+
+create table lol (
+    datetime64 DateTime64(2, 'UTC') default now()
 ) engine = MergeTree order by tuple();
 
 
@@ -819,6 +849,21 @@ insert into enums_sample (id, e8, e16) values
 
 select * from enums_sample order by id;
 
+create table enums_negative_sample (
+    id Int64,
+    e8 Enum8('Pos' = 5, 'Neg' = -5, 'Min' = -128) default 'Pos',
+    e16 Enum16('Pos' = 5000, 'Neg' = -5000, 'Min' = -32768) default 'Pos'
+) engine = MergeTree order by tuple();
+
+insert into enums_negative_sample (id, e8, e16) values
+    (0, 'Pos', 'Pos'),
+    (1, 'Neg', 'Neg'),
+    (2, 'Min', 'Min'),
+    (3, 'Neg', 'Pos');
+
+select * from enums_negative_sample order by id;
+
+
 
 create table enums_array_sample (
     id Int64,
@@ -1048,3 +1093,68 @@ values (0, [1, 2, 3]),
        (5, [toDateTime('2023-01-01 12:00:00'), toDateTime('2023-01-02 12:00:00')])
        (6, ['{"sample": true}'::JSON])
 ;
+
+create table named_tuple
+(
+    id  Int64,
+    tup Tuple(name String, rank Int64)
+) engine = MergeTree order by tuple();
+
+insert into named_tuple (id, tup) values
+    (0, ('apple', 0)),
+    (1, ('banana', 10)),
+    (2, ('cherry', 20)),
+    (3, ('date', 30)),
+    (4, ('elderberry', 40)),
+    (5, ('fig', 50));
+
+select * from named_tuple order by id;
+
+-- Variant/Dynamic are implicitly nullable: a row may hold none of the alternatives.
+-- Discriminator 255 marks such rows; nothing is written to any sub-column.
+-- Dumped to variant_null.native / dynamic_null.native.
+SET allow_experimental_variant_type = 1;
+drop table if exists variant_null_sample;
+create table variant_null_sample
+(
+    id  Int64,
+    var Variant(Int64, String, Array(Int64)),
+    arr Array(Variant(Int64, String))
+) engine = MergeTree order by tuple();
+
+insert into variant_null_sample (id, var, arr) values
+    (0, 1, [CAST(1::Int64, 'Variant(Int64, String)'), CAST(NULL, 'Variant(Int64, String)'), CAST('a', 'Variant(Int64, String)')]),
+    (1, NULL, []),
+    (2, 'a', [CAST(NULL, 'Variant(Int64, String)')]),
+    (3, [1, 2, 3], [CAST('b', 'Variant(Int64, String)')]),
+    (4, NULL, [CAST(NULL, 'Variant(Int64, String)'), CAST(NULL, 'Variant(Int64, String)')]);
+
+optimize table variant_null_sample final;
+
+select id, var, arr from variant_null_sample order by id format Native;
+
+drop table if exists dynamic_null_sample;
+create table dynamic_null_sample
+(
+    id  Int64,
+    dyn Dynamic,
+    arr Array(Dynamic)
+) engine = MergeTree order by tuple();
+
+insert into dynamic_null_sample (id, dyn, arr) values
+    (0, 42::Int64, [CAST(1::Int64, 'Dynamic'), CAST(NULL, 'Dynamic'), CAST('a', 'Dynamic')]),
+    (1, CAST(NULL, 'Dynamic'), []),
+    (2, 'x', [CAST(NULL, 'Dynamic')]),
+    (3, CAST(NULL, 'Dynamic'), [CAST(NULL, 'Dynamic'), CAST(NULL, 'Dynamic')]);
+
+optimize table dynamic_null_sample final;
+
+select id, dyn, arr from dynamic_null_sample order by id format Native;
+
+select
+    number as id,
+    [] as arr,
+    NULL as n,
+    [NULL] as arr_n,
+    [[]] as arr_arr
+from numbers(3) format Native;
