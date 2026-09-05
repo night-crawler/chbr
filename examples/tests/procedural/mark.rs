@@ -2,6 +2,7 @@ use std::{collections::HashMap, str::FromStr as _};
 
 use chbr::{
     BStr, Bf16Data,
+    error::Error,
     parse::block::parse_single,
     reader::{JsonIterator, JsonSliceIterator},
     value::{
@@ -248,7 +249,27 @@ fn lc_array_nullable_string() -> TestResult {
             actual.push(value);
         }
         assert_eq!(actual, *expected, "Mismatch at index {i}");
+
+        let actual = strings_marker
+            .get_array_lc_opt_strs(i)?
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(
+            actual,
+            expected
+                .iter()
+                .map(|s| s.map(BStr::new))
+                .collect::<Vec<_>>(),
+            "Mismatch at index {i} (get_array_lc_opt_strs)"
+        );
     }
+    assert!(matches!(
+        strings_marker.get_array_lc_strs(0),
+        Err(Error::MismatchedType(
+            "LowCardinality(Nullable)",
+            "LowCardinality"
+        ))
+    ));
 
     Ok(())
 }

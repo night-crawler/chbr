@@ -67,33 +67,16 @@ where
     type Error = Error;
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Mark::LowCardinality(lc) if !lc.is_nullable => {
-                let indices = lc.indices;
-                let dict = match lc.additional_keys.as_deref() {
-                    Some(Mark::Empty) | None if indices.is_empty() => None,
-                    Some(Mark::Empty) | None => {
-                        cold_path();
-                        return Err(Error::CorruptedData(
-                            "LowCardinality dictionary is missing".to_owned(),
-                        ));
-                    }
-                    Some(keys) => Some(Inner::try_from(keys)?),
-                };
-                Ok(Lc { indices, dict })
-            }
-            Mark::LowCardinality(_) => {
-                cold_path();
-                Err(Error::MismatchedType(
-                    "LowCardinality(Nullable)",
-                    "LowCardinality",
-                ))
-            }
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "LowCardinality"))
-            }
-        }
+        let lc = value.lc()?;
+        lc.not_nullable()?;
+        let dict = match lc.keys()? {
+            Mark::Empty => None,
+            keys => Some(Inner::try_from(keys)?),
+        };
+        Ok(Lc {
+            indices: lc.indices,
+            dict,
+        })
     }
 }
 
@@ -131,33 +114,22 @@ where
     type Error = Error;
 
     fn try_from(value: &'a Mark<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Mark::LowCardinality(lc) if lc.is_nullable => {
-                let indices = lc.indices;
-                let dict = match lc.additional_keys.as_deref() {
-                    Some(Mark::Empty) | None if indices.all_zero() => None,
-                    Some(Mark::Empty) | None => {
-                        cold_path();
-                        return Err(Error::CorruptedData(
-                            "LowCardinality dictionary is missing".to_owned(),
-                        ));
-                    }
-                    Some(keys) => Some(Inner::try_from(keys)?),
-                };
-                Ok(LcNullable { indices, dict })
-            }
-            Mark::LowCardinality(_) => {
-                cold_path();
-                Err(Error::MismatchedType(
-                    "LowCardinality",
-                    "LowCardinality(Nullable)",
-                ))
-            }
-            other => {
-                cold_path();
-                Err(Error::MismatchedType(other.as_str(), "LowCardinality"))
-            }
+        let lc = value.lc()?;
+        if !lc.is_nullable {
+            cold_path();
+            return Err(Error::MismatchedType(
+                "LowCardinality",
+                "LowCardinality(Nullable)",
+            ));
         }
+        let dict = match lc.keys()? {
+            Mark::Empty => None,
+            keys => Some(Inner::try_from(keys)?),
+        };
+        Ok(LcNullable {
+            indices: lc.indices,
+            dict,
+        })
     }
 }
 

@@ -696,7 +696,7 @@ fn low_cardinality_reader_rejects_readable_indices_without_dictionary() {
 }
 
 #[test]
-fn nullable_low_cardinality_reader_allows_missing_unused_dictionary() -> TestResult {
+fn nullable_low_cardinality_reader_rejects_readable_indices_without_dictionary() {
     let indices = [0_u8];
     let mark = mark::Mark::LowCardinality(mark::lc::LowCardinality {
         is_nullable: true,
@@ -705,9 +705,10 @@ fn nullable_low_cardinality_reader_allows_missing_unused_dictionary() -> TestRes
         additional_keys: None,
     });
 
-    let reader = LcNullableStr::try_from(&mark)?;
-    assert_eq!(reader.try_read(0)?, None);
-    Ok(())
+    assert!(matches!(
+        LcNullableStr::try_from(&mark),
+        Err(Error::CorruptedData(_))
+    ));
 }
 
 #[test]

@@ -427,54 +427,61 @@ impl<'a> Mark<'a> {
     }
 
     #[inline(always)]
-    pub fn slice_lc_strs(&self, idx: Range<usize>) -> crate::Result<lc::StrIter<'a, '_>> {
-        let Mark::LowCardinality(lc) = self else {
-            cold_path();
-            return Err(Error::MismatchedType(self.as_str(), "LowCardinality"));
-        };
-
-        let Some(keys) = &lc.additional_keys else {
-            cold_path();
-            return Err(Error::CorruptedData(
-                "LowCardinality marker without additional keys".to_owned(),
-            ));
-        };
-
-        let Mark::String(keys) = keys.as_ref() else {
-            cold_path();
-            return Err(Error::MismatchedType(keys.as_str(), "String"));
-        };
-
-        let indices = lc.indices.iter(idx)?;
-
-        Ok(lc::StrIter { indices, keys })
+    pub(crate) const fn lc(&self) -> crate::Result<&lc::LowCardinality<'a>> {
+        match self {
+            Mark::LowCardinality(lc) => Ok(lc),
+            // The parser emits `Mark::Empty` for any column without rows, whatever its type.
+            Mark::Empty => Ok(&lc::LowCardinality::EMPTY),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "LowCardinality"))
+            }
+        }
     }
 
     #[inline(always)]
-    pub fn get_array_lc_strs(
+    fn array_elements(&self, index: usize) -> crate::Result<Option<(&Mark<'a>, Range<usize>)>> {
+        let array = match self {
+            Mark::Array(array) => array,
+            Mark::Empty => return Ok(None),
+            other => {
+                cold_path();
+                return Err(Error::MismatchedType(other.as_str(), "Array"));
+            }
+        };
+        Ok(array
+            .offsets
+            .offset_indices(index)?
+            .map(|(start, end)| (array.values.as_ref(), start..end)))
+    }
+
+    #[inline(always)]
+    pub fn slice_lc_strs(&self, idx: Range<usize>) -> crate::Result<lc::StrIter<'a, '_>> {
+        self.lc()?.slice_strs(idx)
+    }
+
+    #[inline(always)]
+    pub fn slice_lc_opt_strs(&self, idx: Range<usize>) -> crate::Result<lc::OptStrIter<'a, '_>> {
+        self.lc()?.slice_opt_strs(idx)
+    }
+
+    #[inline(always)]
+    pub fn get_array_lc_strs(&self, index: usize) -> crate::Result<Option<lc::StrIter<'a, '_>>> {
+        match self.array_elements(index)? {
+            Some((values, range)) => values.slice_lc_strs(range).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    #[inline(always)]
+    pub fn get_array_lc_opt_strs(
         &self,
         index: usize,
-    ) -> crate::Result<Option<impl Iterator<Item = crate::Result<&'a BStr>>>> {
-        if matches!(self, Mark::Empty) {
-            cold_path();
-            return Ok(None);
+    ) -> crate::Result<Option<lc::OptStrIter<'a, '_>>> {
+        match self.array_elements(index)? {
+            Some((values, range)) => values.slice_lc_opt_strs(range).map(Some),
+            None => Ok(None),
         }
-
-        let Mark::Array(array) = self else {
-            cold_path();
-            return Err(Error::MismatchedType(self.as_str(), "Array"));
-        };
-
-        let Some((start, end)) = array.offsets.offset_indices(index)? else {
-            return Ok(None);
-        };
-
-        if matches!(array.values.as_ref(), Mark::Empty) {
-            return Ok(Some(lc::ArrayLcStrIter { inner: None }));
-        }
-
-        let it = array.values.slice_lc_strs(start..end)?;
-        Ok(Some(lc::ArrayLcStrIter { inner: Some(it) }))
     }
 
     pub fn get_map<K, V>(&'a self, index: usize) -> crate::Result<Option<MapIterator<'a, K, V>>> {

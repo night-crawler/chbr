@@ -5,6 +5,8 @@ use bstr::BStr;
 use std::hint::cold_path;
 use std::ops::Range;
 
+const NO_KEYS: Mark<'static> = Mark::Empty;
+
 #[derive(Debug)]
 pub struct LowCardinality<'a> {
     pub is_nullable: bool,
@@ -14,24 +16,58 @@ pub struct LowCardinality<'a> {
 }
 
 impl<'a> LowCardinality<'a> {
-    pub(crate) fn slice(
-        &self,
-        range: Range<usize>,
-    ) -> crate::Result<LowCardinalitySliceIterator<'_>> {
-        let Some(additional_keys) = self.additional_keys.as_ref() else {
+    pub(crate) const EMPTY: Self = Self {
+        is_nullable: false,
+        indices: Indices::U8(&[]),
+        global_dictionary: None,
+        additional_keys: None,
+    };
+
+    #[inline(always)]
+    pub(crate) fn keys(&self) -> crate::Result<&Mark<'a>> {
+        match self.additional_keys.as_deref() {
+            // Absent dictionary along indices cannot come from a valid stream
+            Some(Mark::Empty) | None if !self.indices.is_empty() => {
+                cold_path();
+                Err(Error::CorruptedData(
+                    "LowCardinality dictionary is missing".to_owned(),
+                ))
+            }
+            Some(keys) => Ok(keys),
+            None => Ok(&NO_KEYS),
+        }
+    }
+
+    #[inline(always)]
+    fn str_keys(&self) -> crate::Result<StrKeys<'a, '_>> {
+        match self.keys()? {
+            Mark::String(keys) => Ok(StrKeys(keys)),
+            Mark::Empty => Ok(StrKeys(&[])),
+            other => {
+                cold_path();
+                Err(Error::MismatchedType(other.as_str(), "String"))
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) const fn is_null(&self, value_index: usize) -> bool {
+        // The wire carries the NULL placeholder as the nested type's default (`""` for String).
+        // Taking blindly a value by index is wrong.
+        // == 0`, identifies it.
+        self.is_nullable && value_index == 0
+    }
+
+    #[inline(always)]
+    pub(crate) const fn not_nullable(&self) -> crate::Result<()> {
+        if self.is_nullable {
             cold_path();
-            return Err(Error::CorruptedData(
-                "LowCardinality marker without additional keys".to_owned(),
+            return Err(Error::MismatchedType(
+                "LowCardinality(Nullable)",
+                "LowCardinality",
             ));
-        };
-
-        let sliced = self.indices.slice(range)?;
-
-        Ok(LowCardinalitySliceIterator {
-            is_nullable: self.is_nullable,
-            indices: SliceUsizeIterator::try_from(sliced)?,
-            additional_keys,
-        })
+        }
+        Ok(())
     }
 
     #[inline(always)]
@@ -40,67 +76,99 @@ impl<'a> LowCardinality<'a> {
     }
 
     #[inline(always)]
-    pub(crate) fn get_str(&self, index: usize) -> crate::Result<Option<&'a BStr>> {
-        match self.get_opt_str(index)? {
-            Some(Some(value)) => Ok(Some(value)),
-            Some(None) | None => Ok(None),
+    pub(crate) fn value(&self, value_index: usize) -> crate::Result<Value<'_>> {
+        if self.is_null(value_index) {
+            return Ok(Value::Empty);
         }
+        match self.keys()?.get(value_index)? {
+            Some(value) => Ok(value),
+            None => {
+                cold_path();
+                Err(Error::IndexOutOfBounds(
+                    value_index,
+                    "LowCardinality dictionary",
+                ))
+            }
+        }
+    }
+
+    pub(crate) fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
+        match self.value_index(index)? {
+            Some(value_index) => self.value(value_index).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    pub(crate) fn slice(
+        &self,
+        range: Range<usize>,
+    ) -> crate::Result<LowCardinalitySliceIterator<'_>> {
+        Ok(LowCardinalitySliceIterator {
+            lc: self,
+            indices: SliceUsizeIterator::try_from(self.indices.slice(range)?)?,
+        })
+    }
+
+    #[inline(always)]
+    pub(crate) fn get_str(&self, index: usize) -> crate::Result<Option<&'a BStr>> {
+        self.not_nullable()?;
+        Ok(self.get_opt_str(index)?.flatten())
     }
 
     /// Outer `None`: index out of range. Inner `None`: NULL
     #[inline(always)]
     pub(crate) fn get_opt_str(&self, index: usize) -> crate::Result<Option<Option<&'a BStr>>> {
-        let Some(keys) = &self.additional_keys else {
-            cold_path();
-            return Err(Error::CorruptedData(
-                "LowCardinality marker without additional keys".to_owned(),
-            ));
-        };
-
         let Some(value_index) = self.value_index(index)? else {
             return Ok(None);
         };
-        if value_index == 0 && self.is_nullable {
+        if self.is_null(value_index) {
             return Ok(Some(None));
         }
-
-        let Mark::String(keys) = keys.as_ref() else {
-            cold_path();
-            return Err(Error::MismatchedType(keys.as_str(), "&BStr"));
-        };
-        match keys.get(value_index) {
-            Some(value) => Ok(Some(Some(value))),
-            None => Ok(None),
-        }
+        self.str_keys()?
+            .get(value_index)
+            .map(|value| Some(Some(value)))
     }
 
-    pub(crate) fn get(&self, index: usize) -> crate::Result<Option<Value<'_>>> {
-        // https://github.com/ClickHouse/clickhouse-go/blob/71a2b475e899afe9626f40af513bcf25aa3098a2/lib/column/lowcardinality.go#L191
-        let Some(keys) = &self.additional_keys else {
-            return Ok(None);
-        };
+    #[inline(always)]
+    pub(crate) fn slice_strs(&self, range: Range<usize>) -> crate::Result<StrIter<'a, '_>> {
+        self.not_nullable()?;
+        Ok(StrIter {
+            indices: self.indices.iter(range)?,
+            keys: self.str_keys()?,
+        })
+    }
 
-        let Some(value_index) = self.value_index(index)? else {
-            return Ok(None);
-        };
-        if value_index == 0 && self.is_nullable {
-            return Ok(Some(Value::Empty));
-        }
-
-        // fast path for LowCardinality with String keys
-        if let Mark::String(keys) = keys.as_ref() {
-            return Ok(keys.get(value_index).map(Value::String));
-        }
-
-        keys.get(value_index)
+    #[inline(always)]
+    pub(crate) fn slice_opt_strs(&self, range: Range<usize>) -> crate::Result<OptStrIter<'a, '_>> {
+        Ok(OptStrIter {
+            lc: self,
+            indices: self.indices.iter(range)?,
+            keys: self.str_keys()?,
+        })
     }
 }
 
-/// Iterator over raw string keys of a `LowCardinality` column slice.
+#[derive(Clone, Copy)]
+struct StrKeys<'data: 'keys, 'keys>(&'keys [&'data BStr]);
+
+impl<'data> StrKeys<'data, '_> {
+    #[inline(always)]
+    fn get(self, index: usize) -> crate::Result<&'data BStr> {
+        match self.0.get(index) {
+            Some(value) => Ok(value),
+            None => {
+                cold_path();
+                Err(Error::IndexOutOfBounds(index, "LowCardinality dictionary"))
+            }
+        }
+    }
+}
+
+/// Iterator over raw string keys of a non-nullable `LowCardinality` column slice.
 /// Waiting for: <https://github.com/rust-lang/rust/issues/63063>
 pub struct StrIter<'data: 'keys, 'keys> {
-    pub(crate) indices: IndicesIter<'data>,
-    pub(crate) keys: &'keys [&'data BStr],
+    indices: IndicesIter<'data>,
+    keys: StrKeys<'data, 'keys>,
 }
 
 impl<'data> Iterator for StrIter<'data, '_> {
@@ -108,21 +176,13 @@ impl<'data> Iterator for StrIter<'data, '_> {
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        let index = match self.indices.next()? {
-            Ok(index) => index,
+        Some(match self.indices.next()? {
+            Ok(index) => self.keys.get(index),
             Err(error) => {
                 cold_path();
-                return Some(Err(error));
+                Err(error)
             }
-        };
-        let Some(value) = self.keys.get(index).copied() else {
-            cold_path();
-            return Some(Err(Error::IndexOutOfBounds(
-                index,
-                "LowCardinality dictionary",
-            )));
-        };
-        Some(Ok(value))
+        })
     }
 
     #[inline]
@@ -133,28 +193,39 @@ impl<'data> Iterator for StrIter<'data, '_> {
 
 impl ExactSizeIterator for StrIter<'_, '_> {}
 
-pub(crate) struct ArrayLcStrIter<'data: 'keys, 'keys> {
-    pub(crate) inner: Option<StrIter<'data, 'keys>>,
+/// Iterator over raw string keys of a `LowCardinality` nullable column slice
+pub struct OptStrIter<'data: 'keys, 'keys> {
+    lc: &'keys LowCardinality<'data>,
+    indices: IndicesIter<'data>,
+    // It's cached here to skip more matching
+    keys: StrKeys<'data, 'keys>,
 }
 
-impl<'data> Iterator for ArrayLcStrIter<'data, '_> {
-    type Item = crate::Result<&'data BStr>;
+impl<'data> Iterator for OptStrIter<'data, '_> {
+    type Item = crate::Result<Option<&'data BStr>>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.as_mut()?.next()
+        let index = match self.indices.next()? {
+            Ok(index) => index,
+            Err(error) => {
+                cold_path();
+                return Some(Err(error));
+            }
+        };
+        if self.lc.is_null(index) {
+            return Some(Ok(None));
+        }
+        Some(self.keys.get(index).map(Some))
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        match &self.inner {
-            Some(it) => it.size_hint(),
-            None => (0, Some(0)),
-        }
+        self.indices.size_hint()
     }
 }
 
-impl ExactSizeIterator for ArrayLcStrIter<'_, '_> {}
+impl ExactSizeIterator for OptStrIter<'_, '_> {}
 
 #[derive(Clone, Copy, Debug)]
 pub enum Indices<'a> {
@@ -210,15 +281,6 @@ impl<'a> Indices<'a> {
 
     pub(crate) const fn is_empty(self) -> bool {
         self.len() == 0
-    }
-
-    pub(crate) fn all_zero(self) -> bool {
-        match self {
-            Self::U8(indices) => indices.iter().all(|&value| value == 0),
-            Self::U16(indices) => indices.iter().all(|value| value.get() == 0),
-            Self::U32(indices) => indices.iter().all(|value| value.get() == 0),
-            Self::U64(indices) => indices.iter().all(|value| value.get() == 0),
-        }
     }
 
     pub(crate) fn slice(self, range: Range<usize>) -> crate::Result<Value<'a>> {
