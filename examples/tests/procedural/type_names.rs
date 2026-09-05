@@ -3,9 +3,12 @@
 //! Grammar references: `DataTypeTuple::doGetName` (backQuoteIfNeed),
 //! `SerializationNothing::serializeBinaryBulk`, `DataTypeInterval : DataTypeNumberBase<Int64>`.
 
+use chbr::interval::Kind;
 use chbr::mark::Mark;
 use chbr::parse::block::parse_single;
-use chbr::value::{NestedIterator, Value};
+use chbr::value::{IntervalSliceIterator, NestedIterator, Value};
+use chbr::{Error, Interval};
+use chrono::TimeDelta;
 use testresult::TestResult;
 
 fn load(name: &str) -> std::io::Result<Vec<u8>> {
@@ -62,7 +65,50 @@ fn array_nothing_and_nullable_nothing_parse() -> TestResult {
 fn interval_types_parse() -> TestResult {
     let data = load("interval.native")?;
     let (_, block) = parse_single(&data)?;
-    assert!(matches!(block.markers[0].get(0)?, Some(Value::Int64(1))));
+    assert_eq!(block.num_rows, 2);
+
+    let fixed = [
+        ("ns", Kind::Nanosecond, TimeDelta::nanoseconds(1)),
+        ("us", Kind::Microsecond, TimeDelta::microseconds(2)),
+        ("ms", Kind::Millisecond, TimeDelta::milliseconds(3)),
+        ("s", Kind::Second, TimeDelta::seconds(4)),
+        ("mi", Kind::Minute, TimeDelta::minutes(5)),
+        ("h", Kind::Hour, TimeDelta::hours(6)),
+        ("d", Kind::Day, TimeDelta::days(7)),
+        ("w", Kind::Week, TimeDelta::weeks(8)),
+    ];
+    for (name, kind, expected) in fixed {
+        let mark = block.mark(name)?;
+        assert_eq!(mark.as_str(), kind.as_str());
+        let value = mark.get(1)?.unwrap();
+        assert_eq!(TimeDelta::try_from(value.clone())?, expected, "{name}");
+        assert_eq!(Interval::try_from(value)?.kind, kind, "{name}");
+    }
+
+    let calendar = [
+        ("mo", Kind::Month, 9),
+        ("q", Kind::Quarter, 10),
+        ("y", Kind::Year, 11),
+    ];
+    for (name, kind, count) in calendar {
+        let value = block.mark(name)?.get(0)?.unwrap();
+        assert_eq!(Interval::try_from(value.clone())?, Interval { kind, count });
+        assert!(matches!(
+            TimeDelta::try_from(value),
+            Err(Error::MismatchedType(from, "TimeDelta")) if from == kind.as_str()
+        ));
+    }
+
+    let arr: IntervalSliceIterator = block.mark("arr")?.get(0)?.unwrap().try_into()?;
+    let arr = arr.collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(arr, [TimeDelta::seconds(-1), TimeDelta::seconds(1)]);
+
+    let n = block.mark("n")?;
+    assert!(matches!(n.get(0)?, Some(Value::Empty)));
+    assert_eq!(
+        TimeDelta::try_from(n.get(1)?.unwrap())?,
+        TimeDelta::hours(1)
+    );
     Ok(())
 }
 

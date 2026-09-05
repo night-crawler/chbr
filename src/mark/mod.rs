@@ -8,6 +8,7 @@ pub use string::{FixedString, StringView};
 use crate::{
     Bf16Data, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
     Decimal128Data, Decimal256Data, Error, I256, Ipv4Data, Ipv6Data, TinyRange, U256, UuidData,
+    interval,
     macros::{define_int_getters, define_ip_getters, define_opt_getters, define_slice_fns},
     slice::ByteView,
     types::{OffsetIndexPair as _, Offsets},
@@ -52,6 +53,7 @@ pub enum Mark<'a> {
     Date32(ByteView<'a, Date32Data>),
     DateTime(DateTime<'a>),
     DateTime64(DateTime64<'a>),
+    Interval(Interval<'a>),
     Ipv4(ByteView<'a, Ipv4Data>),
     Ipv6(ByteView<'a, Ipv6Data>),
 
@@ -103,6 +105,7 @@ impl<'a> Mark<'a> {
             Mark::Date32(_) => "Date32",
             Mark::DateTime(_) => "DateTime",
             Mark::DateTime64(_) => "DateTime64",
+            Mark::Interval(i) => i.kind.as_str(),
             Mark::Ipv4(_) => "Ipv4",
             Mark::Ipv6(_) => "Ipv6",
             Mark::Enum8(_) => "Enum8",
@@ -169,6 +172,7 @@ impl<'a> Mark<'a> {
             Mark::Date32(bv) => bv.len(),
             Mark::DateTime(d) => d.data.len(),
             Mark::DateTime64(d) => d.data.len(),
+            Mark::Interval(i) => i.data.len(),
             Mark::Ipv4(bv) => bv.len(),
             Mark::Ipv6(bv) => bv.len(),
             Mark::Enum8(e) => e.data.len(),
@@ -222,6 +226,7 @@ impl<'a> Mark<'a> {
             Mark::Date32(bv) => Ok(bv.get(index).copied().map(Into::into).map(Value::Date32)),
             Mark::DateTime(d) => Ok(d.get(index)),
             Mark::DateTime64(d) => Ok(d.get(index)),
+            Mark::Interval(i) => Ok(i.get(index)),
             Mark::Ipv4(data) => Ok(data.get(index).copied().map(Into::into).map(Value::Ipv4)),
             Mark::Ipv6(data) => Ok(data.get(index).map(Value::Ipv6)),
             Mark::Enum8(v) => Ok(v.get(index)),
@@ -306,6 +311,10 @@ impl<'a> Mark<'a> {
                 precision: d.precision,
                 tz: d.tz,
                 slice: self.checked_slice(d.data.as_slice(), idx)?,
+            }),
+            Mark::Interval(i) => Ok(Value::IntervalSlice {
+                kind: i.kind,
+                slice: self.checked_slice(i.data.as_slice(), idx)?,
             }),
             Mark::Enum8(mark) => Ok(Value::Enum8Slice {
                 mark,
@@ -770,8 +779,14 @@ pub struct DateTime64<'a> {
     pub(crate) data: ByteView<'a, DateTime64Data>,
 }
 
+#[derive(Debug)]
+pub struct Interval<'a> {
+    pub(crate) kind: interval::Kind,
+    pub(crate) data: ByteView<'a, zc::I64>,
+}
+
 impl_get_many!(
-    Decimal32, Decimal64, Decimal128, Decimal256, DateTime, DateTime64
+    Decimal32, Decimal64, Decimal128, Decimal256, DateTime, DateTime64, Interval
 );
 
 #[derive(Debug)]
@@ -904,7 +919,7 @@ impl Debug for Mark<'_> {
             ],
             delegate: [
                 Decimal32, Decimal64, Decimal128, Decimal256, FixedString, DateTime,
-                DateTime64, Enum8, Enum16, LowCardinality, Array, Tuple, Nullable, Map,
+                DateTime64, Interval, Enum8, Enum16, LowCardinality, Array, Tuple, Nullable, Map,
                 Variant, Nested, NamedTuple, Dynamic, Json,
             ]
         }

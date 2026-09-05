@@ -3,9 +3,10 @@ use std::hint::cold_path;
 use crate::mark::BoolView;
 use crate::zc;
 use crate::{
+    interval,
     mark::{
         DateTime, DateTime64, Decimal32, Decimal64, Decimal128, Decimal256, Enum8, Enum16,
-        FixedString, Mark,
+        FixedString, Interval, Mark,
     },
     parse::typ::parse_type,
     slice::ByteView,
@@ -201,6 +202,7 @@ pub enum Type<'a> {
     Date32,
     DateTime(Tz),
     DateTime64(u8, Tz),
+    Interval(interval::Kind),
 
     Ipv4,
     Ipv6,
@@ -317,6 +319,7 @@ impl<'a> Type<'a> {
             Self::Date32 => Some(4),
             Self::DateTime(_) => Some(4),
             Self::DateTime64(_, _) => Some(8),
+            Self::Interval(_) => Some(8),
             Self::Enum8(_) => Some(1),
             Self::Enum16(_) => Some(2),
             Self::Nothing => Some(1),
@@ -411,6 +414,10 @@ impl<'a> Type<'a> {
             Type::DateTime64(precision, tz) => Mark::DateTime64(DateTime64 {
                 precision,
                 tz,
+                data: ByteView::try_from(data)?,
+            }),
+            Type::Interval(kind) => Mark::Interval(Interval {
+                kind,
                 data: ByteView::try_from(data)?,
             }),
             Type::Ipv4 => Mark::Ipv4(ByteView::try_from(data)?),
