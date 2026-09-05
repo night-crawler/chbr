@@ -244,7 +244,7 @@ mod tests {
             ),
             (
                 "./testdata/json_shared_variant.native",
-                "JSON path with 3 values in SharedVariant",
+                "Dynamic with 3 values in SharedVariant",
             ),
         ] {
             let buf = load(file)?;
