@@ -453,7 +453,8 @@ impl<'a> Mark<'a> {
     pub(crate) const fn lc(&self) -> crate::Result<&lc::LowCardinality<'a>> {
         match self {
             Mark::LowCardinality(lc) => Ok(lc),
-            // The parser emits `Mark::Empty` for any column without rows, whatever its type.
+            // `Mark::Empty` is the `values` of an `Array` with no elements (or an unused
+            // `SharedVariant` slot in `Dynamic`); an `Array(LowCardinality(..))` reaches here.
             Mark::Empty => Ok(&lc::LowCardinality::EMPTY),
             other => {
                 cold_path();
