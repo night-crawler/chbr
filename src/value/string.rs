@@ -6,28 +6,8 @@ use bstr::BStr;
 use super::{Value, short_type_name};
 use crate::{ByteExt as _, error::Error, mark::FixedString};
 
-impl<'a> TryFrom<Value<'a>> for &'a BStr {
-    type Error = Error;
-
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::String(value) => Ok(value),
-            other => Err(other.mismatched_type(stringify!(&'a BStr))),
-        }
-    }
-}
-
-impl<'a> TryFrom<Value<'a>> for &'a [&'a BStr] {
-    type Error = Error;
-
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::StringSlice(value) => Ok(value),
-            Value::Empty => Ok(&[]),
-            other => Err(other.mismatched_type(stringify!(&'a [&'a BStr]))),
-        }
-    }
-}
+impl_try_from_value!(String, &'a BStr);
+impl_try_from_value_slice!(StringSlice, &'a [&'a BStr]);
 
 impl<'a> TryFrom<Value<'a>> for &'a str {
     type Error = Error;

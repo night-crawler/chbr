@@ -686,7 +686,7 @@ fn low_cardinality_reader_rejects_readable_indices_without_dictionary() {
         is_nullable: false,
         indices: mark::lc::Indices::U8(&indices),
         global_dictionary: None,
-        additional_keys: Some(Box::new(mark::Mark::Empty)),
+        additional_keys: None,
     });
 
     assert!(matches!(

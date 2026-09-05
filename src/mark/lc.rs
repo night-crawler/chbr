@@ -26,15 +26,15 @@ impl<'a> LowCardinality<'a> {
     #[inline(always)]
     pub(crate) fn keys(&self) -> crate::Result<&Mark<'a>> {
         match self.additional_keys.as_deref() {
+            Some(keys) => Ok(keys),
+            None if self.indices.is_empty() => Ok(&NO_KEYS),
             // Absent dictionary along indices cannot come from a valid stream
-            Some(Mark::Empty) | None if !self.indices.is_empty() => {
+            None => {
                 cold_path();
                 Err(Error::CorruptedData(
                     "LowCardinality dictionary is missing".to_owned(),
                 ))
             }
-            Some(keys) => Ok(keys),
-            None => Ok(&NO_KEYS),
         }
     }
 

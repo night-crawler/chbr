@@ -366,7 +366,7 @@ fn lc<'a>(inner: &Type<'a>, ctx: &ParseContext<'a>) -> IResult<&'a [u8], Mark<'a
                 is_nullable: inner.is_nullable(),
                 indices: mark::lc::Indices::U8(&[]),
                 global_dictionary: None,
-                additional_keys: Some(Box::new(Mark::Empty)),
+                additional_keys: None,
             }),
         ));
     }
