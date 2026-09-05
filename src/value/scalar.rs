@@ -1,6 +1,5 @@
 use core::{convert::TryFrom, hint::cold_path};
 use std::{
-    hint::unreachable_unchecked,
     net::{Ipv4Addr, Ipv6Addr},
     ops::Range,
 };
@@ -235,76 +234,6 @@ impl_try_from_integer_value!(
     u8, u16, u32, u64, usize, i8, i16, i32, i64, isize, i128, u128
 );
 
-// TODO: also isize iterator?
-pub struct SliceUsizeIterator<'a> {
-    value: Value<'a>,
-    index: usize,
-    len: usize,
-}
-
-impl<'a> TryFrom<Value<'a>> for SliceUsizeIterator<'a> {
-    type Error = Error;
-
-    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Value::UInt8Slice(x) => Ok(Self {
-                value,
-                index: 0,
-                len: x.len(),
-            }),
-            Value::UInt16Slice(x) => Ok(Self {
-                value,
-                index: 0,
-                len: x.len(),
-            }),
-            Value::UInt32Slice(x) => Ok(Self {
-                value,
-                index: 0,
-                len: x.len(),
-            }),
-            Value::UInt64Slice(x) => Ok(Self {
-                value,
-                index: 0,
-                len: x.len(),
-            }),
-            _ => Err(value.mismatched_type(short_type_name::<Self>())),
-        }
-    }
-}
-
-impl Iterator for SliceUsizeIterator<'_> {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.len {
-            return None;
-        }
-
-        let result = match &self.value {
-            Value::UInt8Slice(bv) => bv.get(self.index).copied().map(usize::from),
-            Value::UInt16Slice(bv) => bv.get(self.index).map(|v| v.get() as usize),
-            Value::UInt32Slice(bv) => bv.get(self.index).map(|v| v.get() as usize),
-            Value::UInt64Slice(bv) => {
-                if let Some(value) = bv.get(self.index).map(|v| v.get()) {
-                    usize::try_from(value).ok()
-                } else {
-                    None
-                }
-            }
-            _ => unsafe { unreachable_unchecked() },
-        };
-
-        self.index += 1;
-        result
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.len - self.index;
-        (remaining, Some(remaining))
-    }
-}
-
-impl ExactSizeIterator for SliceUsizeIterator<'_> {}
 impl<'a> TryFrom<Value<'a>> for Decimal {
     type Error = Error;
 

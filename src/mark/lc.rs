@@ -1,5 +1,5 @@
 use crate::mark::{Mark, checked_slice};
-use crate::value::{LowCardinalitySliceIterator, SliceUsizeIterator, Value};
+use crate::value::{LowCardinalitySliceIterator, Value};
 use crate::{Error, zc};
 use bstr::BStr;
 use std::hint::cold_path;
@@ -105,7 +105,7 @@ impl<'a> LowCardinality<'a> {
     ) -> crate::Result<LowCardinalitySliceIterator<'_>> {
         Ok(LowCardinalitySliceIterator {
             lc: self,
-            indices: SliceUsizeIterator::try_from(self.indices.slice(range)?)?,
+            indices: self.indices.iter(range)?,
         })
     }
 
@@ -281,15 +281,6 @@ impl<'a> Indices<'a> {
 
     pub(crate) const fn is_empty(self) -> bool {
         self.len() == 0
-    }
-
-    pub(crate) fn slice(self, range: Range<usize>) -> crate::Result<Value<'a>> {
-        match self {
-            Self::U8(indices) => Ok(Value::UInt8Slice(checked_slice(indices, range, "UInt8")?)),
-            Self::U16(indices) => Ok(Value::UInt16Slice(checked_slice(indices, range, "UInt16")?)),
-            Self::U32(indices) => Ok(Value::UInt32Slice(checked_slice(indices, range, "UInt32")?)),
-            Self::U64(indices) => Ok(Value::UInt64Slice(checked_slice(indices, range, "UInt64")?)),
-        }
     }
 
     #[inline]
