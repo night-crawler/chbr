@@ -219,6 +219,41 @@ fn lc_array_string() -> TestResult {
 }
 
 #[test]
+fn lc_array_nullable_string() -> TestResult {
+    let buf = load("array_lc_nullable_string.native")?;
+    let (_, block) = parse_single(&buf)?;
+
+    // 0,"['apple', 'banana', NULL]"
+    // 1,"[NULL, 'date', 'elderberry']"
+    // 2,"['fig', NULL, 'honeydew']"
+    // 3,[NULL]
+    // 4,[]
+    // 5,"['lemon', NULL, 'mango']"
+
+    let expected_arrays = [
+        vec![Some("apple"), Some("banana"), None],
+        vec![None, Some("date"), Some("elderberry")],
+        vec![Some("fig"), None, Some("honeydew")],
+        vec![None],
+        vec![],
+        vec![Some("lemon"), None, Some("mango")],
+    ];
+
+    let strings_marker = &block.markers[1];
+    for (i, expected) in expected_arrays.iter().enumerate() {
+        let it: LowCardinalitySliceIterator = strings_marker.get(i)?.unwrap().try_into()?;
+        let mut actual = vec![];
+        for value in it {
+            let value: Option<&str> = value?.try_into()?;
+            actual.push(value);
+        }
+        assert_eq!(actual, *expected, "Mismatch at index {i}");
+    }
+
+    Ok(())
+}
+
+#[test]
 fn array_in_array_in64() -> TestResult {
     let buf = load("array_in_array_in64.native")?;
     let (_, block) = parse_single(&buf)?;
