@@ -8,7 +8,7 @@ pub struct Json<'a> {
     pub(crate) paths: Box<[&'a str]>,
     /// One column per path, same order as `paths`.
     pub(crate) columns: Box<[Mark<'a>]>,
-    rows: usize,
+    num_rows: usize,
     #[cfg(feature = "serde1")]
     nodes: Box<[JsonPathNode<'a>]>,
 }
@@ -48,7 +48,7 @@ impl<'a> Json<'a> {
         Ok(Self {
             paths: paths.into_boxed_slice(),
             columns: columns.into_boxed_slice(),
-            rows,
+            num_rows: rows,
             #[cfg(feature = "serde1")]
             nodes,
         })
@@ -80,16 +80,11 @@ impl<'a> Json<'a> {
     }
 
     pub(crate) const fn len(&self) -> usize {
-        self.rows
-    }
-
-    #[cfg(feature = "serde1")]
-    pub(crate) const fn contains_row(&self, row: usize) -> bool {
-        row < self.rows
+        self.num_rows
     }
 
     pub(crate) const fn get(&'a self, row: usize) -> Option<Value<'a>> {
-        if row < self.rows {
+        if row < self.num_rows {
             Some(Value::Json {
                 mark: self,
                 index: row,
