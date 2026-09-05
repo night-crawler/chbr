@@ -325,7 +325,10 @@ impl<'de> de::Deserializer<'de> for NodeDeserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        visitor.visit_some(self)
+        match self.shape()? {
+            NodeShape::Leaf(cell) => cell.deserialize_option(visitor),
+            NodeShape::Object => visitor.visit_some(self),
+        }
     }
 
     fn deserialize_newtype_struct<V>(
@@ -1763,6 +1766,53 @@ mod serde_tests {
             error,
             crate::Error::NotImplemented(message) if message == "non-empty JSON shared data"
         ));
+        Ok(())
+    }
+
+    // ClickHouse keeps a typed path present even when its value is NULL (only dynamic-path
+    // NULLs mean "absent"), so `Nullable(T)` typed paths must land in `Option<T>` as `None`
+    // instead of failing on the unit value.
+    #[test]
+    fn deserializes_typed_nullable_path_into_option() -> TestResult {
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Row<'a> {
+            #[serde(borrow)]
+            n: Option<&'a str>,
+            k: Option<i64>,
+            free: Option<serde_json::Value>,
+        }
+
+        let data = crate::common::load("./testdata/json_typed_nullable.native")?;
+        let (_, block) = parse_single(&data)?;
+        let reader = Json::try_from(block.mark("json")?)?;
+        assert_eq!(
+            reader.try_read(0)?.deserialize::<Row<'_>>()?,
+            Row {
+                n: Some("x"),
+                k: Some(1),
+                free: Some(json!(true))
+            }
+        );
+        assert_eq!(
+            reader.try_read(1)?.deserialize::<Row<'_>>()?,
+            Row {
+                n: None,
+                k: None,
+                free: None
+            }
+        );
+        assert_eq!(
+            reader.try_read(2)?.deserialize::<Row<'_>>()?,
+            Row {
+                n: Some(""),
+                k: Some(-7),
+                free: Some(json!("s"))
+            }
+        );
+        assert_eq!(
+            reader.try_read(1)?.deserialize::<serde_json::Value>()?,
+            json!({"n": null, "k": null})
+        );
         Ok(())
     }
 }
