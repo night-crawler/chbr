@@ -28,6 +28,7 @@ impl<'a> LowCardinality<'a> {
         let sliced = self.indices.slice(range)?;
 
         Ok(LowCardinalitySliceIterator {
+            is_nullable: self.is_nullable,
             indices: SliceUsizeIterator::try_from(sliced)?,
             additional_keys,
         })
