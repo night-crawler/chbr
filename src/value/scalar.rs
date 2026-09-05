@@ -13,7 +13,7 @@ use uuid::Uuid;
 use super::{Value, short_type_name};
 use crate::{
     Bf16Data, Date16Data, Date32Data, DateTime32Data, DateTime64Data, Decimal32Data, Decimal64Data,
-    Decimal128Data, I256, Ipv4Data, Ipv6Data, U256, UuidData,
+    Decimal128Data, I256, Ipv4Data, Ipv6Data, U256, UuidData, conv,
     error::Error,
     interval::{self, Interval},
     zc,
@@ -349,6 +349,8 @@ impl TryFrom<Value<'_>> for TimeDelta {
     fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
         match value {
             Value::Interval(index, i) => i.kind.to_time_delta(i.data[index].get()),
+            Value::Time(td) => Ok(td),
+            Value::Time64(index, t) => conv::time64(t.data[index].get(), t.precision),
             other => Err(other.mismatched_type(short_type_name::<Self>())),
         }
     }
@@ -388,6 +390,74 @@ impl Iterator for IntervalSliceIterator<'_> {
 }
 
 impl ExactSizeIterator for IntervalSliceIterator<'_> {}
+
+pub struct TimeSliceIterator<'a> {
+    slice: std::slice::Iter<'a, zc::I32>,
+}
+
+impl<'a> TryFrom<Value<'a>> for TimeSliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::TimeSlice(slice) => Ok(Self {
+                slice: slice.iter(),
+            }),
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
+        }
+    }
+}
+
+impl Iterator for TimeSliceIterator<'_> {
+    type Item = TimeDelta;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.slice
+            .next()
+            .map(|secs| TimeDelta::seconds(i64::from(secs.get())))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.slice.size_hint()
+    }
+}
+
+impl ExactSizeIterator for TimeSliceIterator<'_> {}
+
+pub struct Time64SliceIterator<'a> {
+    precision: u8,
+    slice: std::slice::Iter<'a, zc::I64>,
+}
+
+impl<'a> TryFrom<Value<'a>> for Time64SliceIterator<'a> {
+    type Error = Error;
+
+    fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+        match value {
+            Value::Time64Slice { precision, slice } => Ok(Self {
+                precision,
+                slice: slice.iter(),
+            }),
+            other => Err(other.mismatched_type(short_type_name::<Self>())),
+        }
+    }
+}
+
+impl Iterator for Time64SliceIterator<'_> {
+    type Item = crate::Result<TimeDelta>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.slice
+            .next()
+            .map(|ticks| conv::time64(ticks.get(), self.precision))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.slice.size_hint()
+    }
+}
+
+impl ExactSizeIterator for Time64SliceIterator<'_> {}
 
 pub struct Decimal32SliceIterator<'a> {
     scale: u8,

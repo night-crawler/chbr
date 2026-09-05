@@ -1233,3 +1233,38 @@ select
     reinterpret(toUInt8(number), 'Bool') as b,
     arrayMap(x -> reinterpret(toUInt8(x), 'Bool'), [number, 0, 255]) as arr
 from numbers(4) format Native;
+
+set enable_time_time64_type=1;
+select
+    toTime('12:34:56') as t,
+    toTime('-01:02:03') as neg,
+    toTime64('12:34:56.789', 3) as t3,
+    toTime64('-00:00:01.5', 6) as neg6,
+    toTime64('999:59:59.999999999', 9) as t9,
+    toTime64('00:00:07', 0) as t0,
+    [toTime('00:00:01'), toTime('-00:00:02')] as arr,
+    if(number = 0, NULL, toTime64('01:00:00', 3)) as n
+from numbers(2) format Native;
+
+drop table if exists geometry_sample;
+create table geometry_sample
+(
+    id  Int64,
+    geo Geometry,
+    mp  MultiPoint,
+    arr Array(Geometry)
+) engine = MergeTree order by id;
+
+insert into geometry_sample values
+    (1, readWKT('POINT(1 2)'), readWKT('MULTIPOINT(1 1,2 2,3 3)'), [readWKT('POINT(1 2)'), NULL]),
+    (2, readWKT('LINESTRING(0 0,1 1,2 0)'), [], []),
+    (3, readWKT('MULTILINESTRING((0 0,1 1),(2 2,3 3,4 2))'), [(7, 7)], [readWKT('LINESTRING(0 0,1 1)')]),
+    (4, readWKT('POLYGON((0 0,10 0,10 10,0 10,0 0),(4 4,5 4,5 5,4 5,4 4))'), [], [NULL]),
+    (5, readWKT('MULTIPOLYGON(((0 0,1 0,1 1,0 0)),((5 5,6 5,6 6,5 5),(5.2 5.2,5.5 5.2,5.5 5.5,5.2 5.2)))'), [], []),
+    (6, CAST([(0, 0), (1, 0), (1, 1)], 'Ring'), [], []),
+    (7, readWKT('MULTIPOINT(1 1,2 2,3 3)'), [], [readWKT('MULTIPOINT(9 9)')]),
+    (8, NULL, [], []);
+
+optimize table geometry_sample final;
+
+select id, geo, mp, arr from geometry_sample order by id format Native;

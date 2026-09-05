@@ -54,8 +54,7 @@ fn uuid_and_ip_byte_order_matches_clickhouse_text_form() -> TestResult {
     Ok(())
 }
 
-/// `SimpleAggregateFunction(f, T)` is a custom *name* over storage type `T`
-/// (`DataTypeCustomSimpleAggregateFunction.cpp`), so on the wire it is exactly `T`.
+/// `SimpleAggregateFunction(f, T)` is read as a plain `T`.
 #[test]
 fn simple_aggregate_function_is_its_storage_type() -> TestResult {
     let data = load("simple_aggregate.native")?;
@@ -68,8 +67,8 @@ fn simple_aggregate_function_is_its_storage_type() -> TestResult {
     Ok(())
 }
 
-/// `DataTypeCustomSimpleAggregateFunction::getName` prints the function's parameters inline
-/// (`groupArrayArray(3)`), and the storage type `T` may itself be `LowCardinality(..)` or `Map(..)`.
+/// `f` may carry parameters (`groupArrayArray(3)`), and `T` may be `LowCardinality(..)` or
+/// `Map(..)`.
 #[test]
 fn simple_aggregate_function_with_parameters_and_composite_storage() -> TestResult {
     let data = load("simple_aggregate_parametric.native")?;

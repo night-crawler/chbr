@@ -24,7 +24,6 @@ fn load(name: &str) -> std::io::Result<Vec<u8>> {
 #[test]
 fn int_array() -> TestResult {
     let buf = load("array.native")?;
-    // random() for id was a bad idea, it looks like parser is broken
     // 0,[]
     // 128969003,[1]
     // 214500519,[1]
@@ -563,7 +562,7 @@ fn variant() -> TestResult {
     //    └────┴─────────┘
 
     let variant_marker = &block.markers[1];
-    // it's hard to write a test for this because Value does not implement equals yet
+    // `Value` has no `PartialEq`; compare through the converted Rust value instead.
 
     let expected_str_repr = ["1", "a", "1, 2, 3", "2", "b", "4, 5, 6", "3"];
 
@@ -724,7 +723,11 @@ fn decimal_sample() -> TestResult {
         assert_eq!(value, *expected, "Mismatch at index {i}");
     }
 
-    // expect panic for decimal256, it's not implemented
+    let decimal256_marker = &block.markers[4];
+    assert!(matches!(
+        rust_decimal::Decimal::try_from(decimal256_marker.get(0)?.unwrap()),
+        Err(chbr::Error::NotImplemented(_))
+    ));
 
     Ok(())
 }
@@ -1678,8 +1681,7 @@ fn lc_empty_string_bug() -> TestResult {
     let (rem, block) = parse_single(&data)?;
     assert!(rem.is_empty());
 
-    // ["first_seen", "last_seen", "name", "resource_attrs", "scope_attrs", "attrs", "type", "temporality", "is_monotonic"]
-    let marker = &block.markers[3];
+    let marker = block.mark("resource_attrs")?;
     for i in 0..block.num_rows {
         let map_it: MapIterator<&str, &str> = marker.get(i)?.unwrap().try_into()?;
         for kv in map_it {
@@ -1750,24 +1752,35 @@ fn variant_arr() -> TestResult {
     let variant_marker = &block.markers[1];
     assert_eq!(block.num_rows, 4, "Expected 4 rows in variant_arr");
 
-    for i in 0..block.num_rows {
-        let it: VariantSliceIterator = variant_marker.get(i)?.unwrap().try_into()?;
-        for val in it {
-            let val = val?;
-            let str_value: Result<&str, _> = val.clone().try_into();
-            let int_value: Result<i64, _> = val.clone().try_into();
-            let arr_value: Result<&[zc::U64], _> = val.clone().try_into();
-            let json_value: Result<JsonIterator, _> = val.try_into();
+    // Every row is [String, Int64, Array(UInt64), JSON]; the JSON is given as its first path.
+    let expected: [(&str, i64, &[u64], &str); 4] = [
+        ("string value", 12345, &[1, 2, 3], "key"),
+        ("another string", 1232, &[4, 5], "array"),
+        ("more strings", 3333, &[], "nested.a"),
+        ("test json", 44, &[8, 9], "boolean"),
+    ];
 
-            // We should have exactly one successful conversion for each row.
-            // TODO: check actual values returned
-            let total = usize::from(str_value.is_ok())
-                + usize::from(int_value.is_ok())
-                + usize::from(arr_value.is_ok())
-                + usize::from(json_value.is_ok());
+    for (i, (exp_str, exp_int, exp_arr, exp_json_path)) in expected.into_iter().enumerate() {
+        let mut it: VariantSliceIterator = variant_marker.get(i)?.unwrap().try_into()?;
 
-            assert_eq!(total, 1, "some types were not parsed");
-        }
+        let s: &str = it.next().unwrap()?.try_into()?;
+        assert_eq!(s, exp_str, "Row {i}");
+
+        let n: i64 = it.next().unwrap()?.try_into()?;
+        assert_eq!(n, exp_int, "Row {i}");
+
+        let arr: &[zc::U64] = it.next().unwrap()?.try_into()?;
+        assert_eq!(
+            arr.iter().map(|v| v.get()).collect::<Vec<_>>(),
+            exp_arr,
+            "Row {i}"
+        );
+
+        let mut json: JsonIterator = it.next().unwrap()?.try_into()?;
+        let (path, _) = json.next().unwrap()?;
+        assert_eq!(path, exp_json_path, "Row {i}");
+
+        assert!(it.next().is_none(), "Row {i}: more than 4 elements");
     }
 
     Ok(())
@@ -1910,7 +1923,6 @@ fn dynamic_arr() -> TestResult {
         let actual: Vec<f64> = arr
             .map(|value| value.and_then(TryFrom::try_from))
             .collect::<Result<_, _>>()?;
-        // 4.56: meh
         let expected = [1.23, 4.5600000000000005, 7.89];
         assert_eq!(actual, expected, "Row 3 mismatch");
     }

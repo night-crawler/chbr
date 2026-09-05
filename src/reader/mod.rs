@@ -3,6 +3,7 @@ use std::hint::cold_path;
 use std::ops::Range;
 
 mod composite;
+mod geo;
 mod json;
 mod scalar;
 mod string;
@@ -10,6 +11,7 @@ mod string;
 mod tests;
 
 pub use composite::*;
+pub use geo::*;
 pub use json::*;
 pub use scalar::*;
 pub use string::*;

@@ -1,11 +1,6 @@
 use chbr::FromBlock;
 use chbr::parse::block::parse_single;
-use chbr::reader::{Array, F64, I64, Tuple};
-
-type Point<'a> = Tuple<(F64<'a>, F64<'a>)>;
-type Ring<'a> = Array<'a, Point<'a>>;
-type Polygon<'a> = Array<'a, Ring<'a>>;
-type MultiPolygon<'a> = Array<'a, Polygon<'a>>;
+use chbr::reader::{I64, MultiPolygon, Point, Polygon, Ring};
 
 #[derive(FromBlock)]
 struct Row<'a> {

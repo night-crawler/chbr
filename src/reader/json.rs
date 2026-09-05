@@ -2,8 +2,8 @@ use std::{hint::cold_path, ops::Range};
 
 use super::{Readable, TryRead};
 #[cfg(feature = "serde1")]
-use crate::types::OffsetIndexPair as _;
-use crate::{ByteExt as _, Error, mark, value::Value};
+use crate::{ByteExt as _, types::OffsetIndexPair as _};
+use crate::{Error, mark, value::Value};
 
 #[cfg(feature = "serde1")]
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
@@ -672,7 +672,7 @@ fn base_contains(mark: &mark::Mark<'_>, row: usize) -> Result<bool, JsonDeserial
         mark::Mark::Bool(value) => value.get(row).is_some(),
         mark::Mark::Int8(value) => value.get(row).is_some(),
         mark::Mark::Int16(value) => value.get(row).is_some(),
-        mark::Mark::Int32(value) => value.get(row).is_some(),
+        mark::Mark::Int32(value) | mark::Mark::Time(value) => value.get(row).is_some(),
         mark::Mark::Int64(value) => value.get(row).is_some(),
         mark::Mark::Int128(value) => value.get(row).is_some(),
         mark::Mark::Int256(value) => value.get(row).is_some(),
@@ -696,6 +696,7 @@ fn base_contains(mark: &mark::Mark<'_>, row: usize) -> Result<bool, JsonDeserial
         mark::Mark::Date32(value) => value.get(row).is_some(),
         mark::Mark::DateTime(value) => value.data.get(row).is_some(),
         mark::Mark::DateTime64(value) => value.data.get(row).is_some(),
+        mark::Mark::Time64(value) => value.data.get(row).is_some(),
         mark::Mark::Interval(value) => value.data.get(row).is_some(),
         mark::Mark::Ipv4(value) => value.get(row).is_some(),
         mark::Mark::Ipv6(value) => value.get(row).is_some(),
@@ -754,7 +755,9 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
             mark::Mark::Bool(value) => visitor.visit_bool(at!(value.get(cell.row))),
             mark::Mark::Int8(value) => visitor.visit_i8(*at!(value.get(cell.row))),
             mark::Mark::Int16(value) => visitor.visit_i16(at!(value.get(cell.row)).get()),
-            mark::Mark::Int32(value) => visitor.visit_i32(at!(value.get(cell.row)).get()),
+            mark::Mark::Int32(value) | mark::Mark::Time(value) => {
+                visitor.visit_i32(at!(value.get(cell.row)).get())
+            }
             mark::Mark::Int64(value) => visitor.visit_i64(at!(value.get(cell.row)).get()),
             mark::Mark::Int128(value) => visitor.visit_i128(at!(value.get(cell.row)).get()),
             mark::Mark::Int256(value) => {
@@ -831,6 +834,7 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
                     .with_tz_and_precision(value.tz, value.precision)?;
                 visitor.visit_string(value.to_rfc3339())
             }
+            mark::Mark::Time64(value) => visitor.visit_i64(at!(value.data.get(cell.row)).get()),
             mark::Mark::Interval(value) => visitor.visit_i64(at!(value.data.get(cell.row)).get()),
             mark::Mark::Ipv4(value) => {
                 let value = std::net::Ipv4Addr::from(*at!(value.get(cell.row)));
