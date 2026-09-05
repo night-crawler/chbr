@@ -11,6 +11,38 @@ use chrono_tz::Tz;
 use core::{any::type_name, convert::TryFrom, hint::cold_path, marker::PhantomData};
 use half::bf16;
 use std::{net::Ipv4Addr, ops::Range};
+
+macro_rules! impl_try_from_value {
+    ($variant:ident, $ty:ty) => {
+        impl<'a> TryFrom<Value<'a>> for $ty {
+            type Error = Error;
+
+            fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+                match value {
+                    Value::$variant(v) => Ok(v),
+                    other => Err(other.mismatched_type(stringify!($ty))),
+                }
+            }
+        }
+    };
+}
+
+macro_rules! impl_try_from_value_slice {
+    ($variant:ident, $ty:ty) => {
+        impl<'a> TryFrom<Value<'a>> for $ty {
+            type Error = Error;
+
+            fn try_from(value: Value<'a>) -> Result<Self, Self::Error> {
+                match value {
+                    Value::$variant(v) => Ok(v),
+                    Value::Empty => Ok(&[]),
+                    other => Err(other.mismatched_type(stringify!($ty))),
+                }
+            }
+        }
+    };
+}
+
 mod scalar;
 mod string;
 
