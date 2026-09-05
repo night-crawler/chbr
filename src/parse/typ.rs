@@ -418,6 +418,35 @@ fn parse_lowcardinality(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     .parse(input)
 }
 
+/// `SimpleAggregateFunction(f, T)` | `SimpleAggregateFunction(f(params), T)` -> `T`.
+fn parse_simple_aggregate_function(input: &[u8]) -> IResult<&[u8], Type<'_>> {
+    // `DataTypeCustomSimpleAggregateFunction` is a custom name over `T`, serialized as `T`
+    // (`create()` in `DataTypeCustomSimpleAggregateFunction.cpp` builds a `DataTypeCustomDesc`
+    // with a null serialization), so nothing of `f` or `params` survives into the wire format.
+    preceded(
+        tag("SimpleAggregateFunction"),
+        delimited(
+            ws(char('(')),
+            preceded(
+                pair(
+                    take_while1(|c: u8| c.is_ascii_alphanumeric() || c == b'_'),
+                    // Every parametric function in `checkSupportedFunctions` (`groupArray*`,
+                    // `groupUniqArray*`) takes numeric literals only, so no `)` can occur inside.
+                    opt(delimited(
+                        ws(char('(')),
+                        take_while1(|c| c != b')'),
+                        ws(char(')')),
+                    )),
+                ),
+                // Every function in `checkSupportedFunctions` is unary: exactly one `T`.
+                preceded(ws(char(',')), parse_type),
+            ),
+            ws(char(')')),
+        ),
+    )
+    .parse(input)
+}
+
 fn parse_named_tuple(input: &[u8]) -> IResult<&[u8], Type<'_>> {
     let (input, fields) = parse_pairs("Tuple", input)?;
     let fields = map_fields(fields);
@@ -538,6 +567,7 @@ pub fn parse_type(input: &[u8]) -> IResult<&[u8], Type<'_>> {
         parse_enum16,
         parse_json,
         parse_other_primitives,
+        parse_simple_aggregate_function,
     ))
     .parse(input)
 }
@@ -817,5 +847,28 @@ mod tests {
         assert!(Type::from_bytes(b"DateTime('Mars/Olympus')").is_err());
         assert!(Type::from_bytes(b"DateTime64(3, 'Mars/Olympus')").is_err());
         assert!(Type::from_bytes(b"DateTime64('UTC')").is_err());
+    }
+
+    #[test]
+    fn simple_aggregate_function_is_its_storage_type() {
+        assert_eq!(
+            Type::from_bytes(b"SimpleAggregateFunction(sum, UInt64)").unwrap(),
+            Type::UInt64
+        );
+        assert_eq!(
+            Type::from_bytes(b"SimpleAggregateFunction(anyLast, Nullable(String))").unwrap(),
+            Type::Nullable(Box::new(Type::String))
+        );
+        assert_eq!(
+            Type::from_bytes(b"SimpleAggregateFunction(groupArrayArray(3), Array(UInt64))")
+                .unwrap(),
+            Type::Array(Box::new(Type::UInt64))
+        );
+        assert_eq!(
+            Type::from_bytes(b"SimpleAggregateFunction(sumMap, Map(String, UInt64))").unwrap(),
+            Type::Map(Box::new(Type::String), Box::new(Type::UInt64))
+        );
+        assert!(Type::from_bytes(b"SimpleAggregateFunction(sum)").is_err());
+        assert!(Type::from_bytes(b"SimpleAggregateFunction('sum', UInt64)").is_err());
     }
 }
