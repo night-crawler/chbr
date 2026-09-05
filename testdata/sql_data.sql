@@ -1213,3 +1213,9 @@ create table simple_agg
 ) engine = AggregatingMergeTree order by tuple();
 insert into simple_agg values (7, 'a');
 select * from simple_agg format Native;
+
+select
+    CAST([1, 2], 'SimpleAggregateFunction(groupArrayArray(3), Array(UInt64))') as a,
+    CAST('a', 'SimpleAggregateFunction(anyLast, LowCardinality(String))') as lc,
+    CAST(map('k', 5), 'SimpleAggregateFunction(sumMap, Map(String, UInt64))') as m
+format Native;
