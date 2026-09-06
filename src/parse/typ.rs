@@ -576,7 +576,11 @@ where
                     separated_list1(
                         ws(char(',')),
                         separated_pair(
-                            delimited(ws(char('\'')), take_while(|c| c != b'\''), ws(char('\''))),
+                            ws(delimited(
+                                char('\''),
+                                take_while(|c| c != b'\''),
+                                char('\''),
+                            )),
                             ws(char('=')),
                             map_res(recognize(pair(opt(char('-')), digit1)), parse_num::<T>),
                         ),
@@ -872,6 +876,24 @@ mod tests {
     fn enum_empty_name() {
         let (_, typ) = parse_type(b"Enum8('' = 0, 'a' = 1)").unwrap();
         assert_eq!(typ, Type::Enum8(vec![("", 0), ("a", 1)]));
+    }
+
+    #[test]
+    fn enum_label_whitespace() {
+        for (input, expected) in [
+            (
+                &b"Enum8( ' leading' = 1, 'trailing ' = 2, ' \t ' = 3 )"[..],
+                Type::Enum8(vec![(" leading", 1), ("trailing ", 2), (" \t ", 3)]),
+            ),
+            (
+                &b"Enum16( ' leading' = 1, 'trailing ' = 2, ' \t ' = 3 )"[..],
+                Type::Enum16(vec![(" leading", 1), ("trailing ", 2), (" \t ", 3)]),
+            ),
+        ] {
+            let (rest, typ) = parse_type(input).unwrap();
+            assert!(rest.is_empty());
+            assert_eq!(typ, expected);
+        }
     }
 
     #[test]
