@@ -45,7 +45,31 @@ pub struct JsonValue<'a> {
     row: usize,
 }
 
+/// How JSON path segments are exposed as object keys during serde deserialization.
+///
+/// Native data does not carry `json_type_escape_dots_in_keys`. Select the mode that
+/// matches the producer's setting; literal `%2E` and an escaped dot are indistinguishable.
+#[cfg(feature = "serde1")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum JsonKeyMode {
+    /// Decode ClickHouse's uppercase `%2E` escape after splitting dotted paths.
+    /// Lowercase `%2e` and all other percent sequences remain literal.
+    #[default]
+    Decode,
+    /// Preserve every path segment verbatim, including `%2E`.
+    Preserve,
+}
+
+/// Options shared by a JSON deserialization and all of its nested values.
+#[cfg(feature = "serde1")]
+#[derive(Clone, Debug, Default)]
+pub struct DeserializeConfig {
+    /// How JSON path segments are exposed as object keys. Defaults to decoding.
+    pub key_mode: JsonKeyMode,
+}
+
 impl<'a> JsonValue<'a> {
+    /// Iterate raw, flattened Native paths, without decoding escaped dots.
     pub const fn paths(self) -> JsonIterator<'a> {
         JsonIterator {
             mark: self.mark,
@@ -54,8 +78,26 @@ impl<'a> JsonValue<'a> {
         }
     }
 
+    /// Deserialize with [`DeserializeConfig::default`], including nested JSON values.
+    ///
+    /// Use [`Self::deserialize_with_config`] to override the defaults.
     #[cfg(feature = "serde1")]
     pub fn deserialize<T>(self) -> Result<T, JsonDeserializeError>
+    where
+        T: serde::Deserialize<'a>,
+    {
+        self.deserialize_with_config(&DeserializeConfig::default())
+    }
+
+    /// Deserialize with a shared configuration, applied recursively to JSON objects.
+    ///
+    /// Ordinary string values, map keys, and named-tuple fields are not decoded.
+    /// Both modes support borrowed keys. Decoded keys are cached in the parsed block.
+    #[cfg(feature = "serde1")]
+    pub fn deserialize_with_config<T>(
+        self,
+        config: &DeserializeConfig,
+    ) -> Result<T, JsonDeserializeError>
     where
         T: serde::Deserialize<'a>,
     {
@@ -63,6 +105,7 @@ impl<'a> JsonValue<'a> {
             mark: self.mark,
             row: self.row,
             node: self.mark.root(),
+            config,
         })
     }
 }
@@ -200,41 +243,43 @@ impl de::Error for JsonDeserializeError {
 
 #[cfg(feature = "serde1")]
 #[derive(Clone, Copy)]
-struct NodeDeserializer<'de> {
+struct NodeDeserializer<'de, 'config> {
     mark: &'de mark::Json<'de>,
     row: usize,
     node: usize,
+    config: &'config DeserializeConfig,
 }
 
 #[cfg(feature = "serde1")]
 #[derive(Clone, Copy)]
 enum NodeShape<'de> {
-    Leaf(CellDeserializer<'de>),
+    Leaf(Cell<'de>),
     Object,
 }
 
 #[cfg(feature = "serde1")]
-impl<'de> NodeDeserializer<'de> {
+impl<'de, 'config> NodeDeserializer<'de, 'config> {
     fn shape(self) -> Result<NodeShape<'de>, JsonDeserializeError> {
         let leaf_index = self.mark.node_leaf(self.node);
         let mut leaf = None;
         if let Some(path) = leaf_index
             && let Some(column) = self.mark.columns.get(path)
+            && !self.mark.is_absent(path, self.row)
         {
-            leaf = Some(CellDeserializer {
+            leaf = Some(Cell {
                 mark: column,
                 row: self.row,
             });
         }
         let leaf_is_active = match leaf {
-            Some(cell) => cell.is_present()?,
+            Some(cell) => cell.deserializer(self.config).is_present()?,
             None => false,
         };
 
         let mut child = self.mark.first_child(self.node);
         let mut has_child = false;
         while let Some(index) = child {
-            if subtree_is_active(self.mark, self.row, index)? {
+            if subtree_is_active(self.mark, self.row, index, self.config)? {
                 has_child = true;
                 break;
             }
@@ -257,9 +302,9 @@ impl<'de> NodeDeserializer<'de> {
         }
     }
 
-    fn leaf(self) -> Result<CellDeserializer<'de>, JsonDeserializeError> {
+    fn leaf(self) -> Result<CellDeserializer<'de, 'config>, JsonDeserializeError> {
         match self.shape()? {
-            NodeShape::Leaf(cell) => Ok(cell),
+            NodeShape::Leaf(cell) => Ok(cell.deserializer(self.config)),
             NodeShape::Object => Err(JsonDeserializeError::Unsupported("JSON object enum")),
         }
     }
@@ -270,17 +315,24 @@ fn subtree_is_active(
     mark: &mark::Json<'_>,
     row: usize,
     node_index: usize,
+    config: &DeserializeConfig,
 ) -> Result<bool, JsonDeserializeError> {
     if let Some(path) = mark.node_leaf(node_index)
         && let Some(column) = mark.columns.get(path)
-        && (CellDeserializer { mark: column, row }).is_present()?
+        && !mark.is_absent(path, row)
+        && (CellDeserializer {
+            mark: column,
+            row,
+            config,
+        })
+        .is_present()?
     {
         return Ok(true);
     }
 
     let mut child = mark.first_child(node_index);
     while let Some(index) = child {
-        if subtree_is_active(mark, row, index)? {
+        if subtree_is_active(mark, row, index, config)? {
             return Ok(true);
         }
         child = mark.next_sibling(index);
@@ -289,7 +341,7 @@ fn subtree_is_active(
 }
 
 #[cfg(feature = "serde1")]
-impl<'de> de::Deserializer<'de> for NodeDeserializer<'de> {
+impl<'de> de::Deserializer<'de> for NodeDeserializer<'de, '_> {
     type Error = JsonDeserializeError;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -297,12 +349,13 @@ impl<'de> de::Deserializer<'de> for NodeDeserializer<'de> {
         V: Visitor<'de>,
     {
         match self.shape()? {
-            NodeShape::Leaf(cell) => cell.deserialize_any(visitor),
+            NodeShape::Leaf(cell) => cell.deserializer(self.config).deserialize_any(visitor),
             NodeShape::Object => visitor.visit_map(PathMapAccess {
                 mark: self.mark,
                 row: self.row,
                 next_child: self.mark.first_child(self.node),
                 pending: None,
+                config: self.config,
             }),
         }
     }
@@ -326,7 +379,7 @@ impl<'de> de::Deserializer<'de> for NodeDeserializer<'de> {
         V: Visitor<'de>,
     {
         match self.shape()? {
-            NodeShape::Leaf(cell) => cell.deserialize_option(visitor),
+            NodeShape::Leaf(cell) => cell.deserializer(self.config).deserialize_option(visitor),
             NodeShape::Object => visitor.visit_some(self),
         }
     }
@@ -365,15 +418,16 @@ impl<'de> de::Deserializer<'de> for NodeDeserializer<'de> {
 }
 
 #[cfg(feature = "serde1")]
-struct PathMapAccess<'de> {
+struct PathMapAccess<'de, 'config> {
     mark: &'de mark::Json<'de>,
     row: usize,
     next_child: Option<usize>,
     pending: Option<usize>,
+    config: &'config DeserializeConfig,
 }
 
 #[cfg(feature = "serde1")]
-impl<'de> MapAccess<'de> for PathMapAccess<'de> {
+impl<'de> MapAccess<'de> for PathMapAccess<'de, '_> {
     type Error = JsonDeserializeError;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
@@ -382,11 +436,13 @@ impl<'de> MapAccess<'de> for PathMapAccess<'de> {
     {
         while let Some(index) = self.next_child {
             self.next_child = self.mark.next_sibling(index);
-            if !subtree_is_active(self.mark, self.row, index)? {
+            if !subtree_is_active(self.mark, self.row, index, self.config)? {
                 continue;
             }
             self.pending = Some(index);
-            let key: &'de str = self.mark.node_key(index);
+            let key: &'de str = self
+                .mark
+                .node_key(index, self.config.key_mode == JsonKeyMode::Decode);
             return match seed.deserialize(de::value::BorrowedStrDeserializer::new(key)) {
                 Ok(key) => Ok(Some(key)),
                 Err(error) => Err(error),
@@ -408,6 +464,7 @@ impl<'de> MapAccess<'de> for PathMapAccess<'de> {
             mark: self.mark,
             row: self.row,
             node,
+            config: self.config,
         })
     }
 }
@@ -519,9 +576,31 @@ fn format_wide_number(mut magnitude: [u8; 32], signed: bool, scale: u8) -> WideN
 
 #[cfg(feature = "serde1")]
 #[derive(Clone, Copy)]
-struct CellDeserializer<'de> {
+struct Cell<'de> {
     mark: &'de mark::Mark<'de>,
     row: usize,
+}
+
+#[cfg(feature = "serde1")]
+impl<'de> Cell<'de> {
+    const fn deserializer<'config>(
+        self,
+        config: &'config DeserializeConfig,
+    ) -> CellDeserializer<'de, 'config> {
+        CellDeserializer {
+            mark: self.mark,
+            row: self.row,
+            config,
+        }
+    }
+}
+
+#[cfg(feature = "serde1")]
+#[derive(Clone, Copy)]
+struct CellDeserializer<'de, 'config> {
+    mark: &'de mark::Mark<'de>,
+    row: usize,
+    config: &'config DeserializeConfig,
 }
 
 #[cfg(feature = "serde1")]
@@ -529,13 +608,16 @@ struct CellDeserializer<'de> {
 enum CellState<'de> {
     Missing,
     Null,
-    Present(CellDeserializer<'de>),
+    Present(Cell<'de>),
 }
 
 #[cfg(feature = "serde1")]
-impl<'de> CellDeserializer<'de> {
+impl<'de> CellDeserializer<'de, '_> {
     fn state(self) -> Result<CellState<'de>, JsonDeserializeError> {
-        let mut cell = self;
+        let mut cell = Cell {
+            mark: self.mark,
+            row: self.row,
+        };
         loop {
             match cell.mark {
                 mark::Mark::Empty => return Ok(CellState::Missing),
@@ -554,7 +636,7 @@ impl<'de> CellDeserializer<'de> {
                         return Ok(CellState::Null);
                     }
                     let keys = low_cardinality.keys()?;
-                    cell = Self {
+                    cell = Cell {
                         mark: keys,
                         row: index,
                     };
@@ -563,8 +645,6 @@ impl<'de> CellDeserializer<'de> {
                     let Some(&discriminator) = variant.discriminators.get(cell.row) else {
                         return Ok(CellState::Missing);
                     };
-                    // A typed path stays present when NULL (like `Nullable`); only a NULL
-                    // *dynamic* path means the key is absent from the row.
                     if discriminator == mark::Variant::NULL_DISCRIMINATOR {
                         return Ok(CellState::Null);
                     }
@@ -574,7 +654,7 @@ impl<'de> CellDeserializer<'de> {
                     let Some(mark) = variant.types.get(usize::from(discriminator)) else {
                         return Ok(CellState::Missing);
                     };
-                    cell = Self {
+                    cell = Cell {
                         mark,
                         row: row as usize,
                     };
@@ -583,13 +663,16 @@ impl<'de> CellDeserializer<'de> {
                     let Some(&discriminator) = dynamic.discriminators.get(cell.row) else {
                         return Ok(CellState::Missing);
                     };
+                    if discriminator == mark::Variant::NULL_DISCRIMINATOR {
+                        return Ok(CellState::Null);
+                    }
                     let Some(&row) = dynamic.offsets.get(cell.row) else {
                         return Ok(CellState::Missing);
                     };
                     let Some(mark) = dynamic.columns.get(usize::from(discriminator)) else {
                         return Ok(CellState::Missing);
                     };
-                    cell = Self {
+                    cell = Cell {
                         mark,
                         row: row as usize,
                     };
@@ -644,7 +727,7 @@ impl<'de> CellDeserializer<'de> {
 }
 
 #[cfg(feature = "serde1")]
-impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
+impl<'de> de::Deserializer<'de> for CellDeserializer<'de, '_> {
     type Error = JsonDeserializeError;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -781,14 +864,18 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
                 visitor.visit_seq(ColumnSeqAccess {
                     mark: &array.values,
                     range: start..end,
+                    config: self.config,
                 })
             }
             mark::Mark::Tuple(tuple) => visitor.visit_seq(TupleSeqAccess {
                 tuple,
                 row: cell.row,
                 next: 0,
+                config: self.config,
             }),
-            mark::Mark::Map(map) => visitor.visit_map(ColumnMapAccess::new(map, cell.row)?),
+            mark::Mark::Map(map) => {
+                visitor.visit_map(ColumnMapAccess::new(map, cell.row, self.config)?)
+            }
             mark::Mark::Nested(nested) => {
                 let mark::Mark::Array(array) = nested.array_of_tuples.as_ref() else {
                     return Err(
@@ -805,6 +892,7 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
                     names: &nested.col_names,
                     tuple,
                     range: start..end,
+                    config: self.config,
                 })
             }
             mark::Mark::NamedTuple(named) => {
@@ -817,12 +905,14 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
                     row: cell.row,
                     next: 0,
                     pending: None,
+                    config: self.config,
                 })
             }
             mark::Mark::Json(json) => NodeDeserializer {
                 mark: json,
                 row: cell.row,
                 node: json.root(),
+                config: self.config,
             }
             .deserialize_any(visitor),
             mark::Mark::Nullable(_)
@@ -861,7 +951,7 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
         match self.state()? {
             CellState::Missing => Err(Error::IndexOutOfBounds(self.row, self.mark.as_str()).into()),
             CellState::Null => visitor.visit_none(),
-            CellState::Present(cell) => visitor.visit_some(cell),
+            CellState::Present(cell) => visitor.visit_some(cell.deserializer(self.config)),
         }
     }
 
@@ -905,13 +995,14 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de> {
 }
 
 #[cfg(feature = "serde1")]
-struct ColumnSeqAccess<'de> {
+struct ColumnSeqAccess<'de, 'config> {
     mark: &'de mark::Mark<'de>,
     range: Range<usize>,
+    config: &'config DeserializeConfig,
 }
 
 #[cfg(feature = "serde1")]
-impl<'de> SeqAccess<'de> for ColumnSeqAccess<'de> {
+impl<'de> SeqAccess<'de> for ColumnSeqAccess<'de, '_> {
     type Error = JsonDeserializeError;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
@@ -924,6 +1015,7 @@ impl<'de> SeqAccess<'de> for ColumnSeqAccess<'de> {
         match seed.deserialize(CellDeserializer {
             mark: self.mark,
             row,
+            config: self.config,
         }) {
             Ok(value) => Ok(Some(value)),
             Err(error) => Err(error),
@@ -936,14 +1028,15 @@ impl<'de> SeqAccess<'de> for ColumnSeqAccess<'de> {
 }
 
 #[cfg(feature = "serde1")]
-struct TupleSeqAccess<'de> {
+struct TupleSeqAccess<'de, 'config> {
     tuple: &'de mark::Tuple<'de>,
     row: usize,
     next: usize,
+    config: &'config DeserializeConfig,
 }
 
 #[cfg(feature = "serde1")]
-impl<'de> SeqAccess<'de> for TupleSeqAccess<'de> {
+impl<'de> SeqAccess<'de> for TupleSeqAccess<'de, '_> {
     type Error = JsonDeserializeError;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
@@ -957,6 +1050,7 @@ impl<'de> SeqAccess<'de> for TupleSeqAccess<'de> {
         match seed.deserialize(CellDeserializer {
             mark,
             row: self.row,
+            config: self.config,
         }) {
             Ok(value) => Ok(Some(value)),
             Err(error) => Err(error),
@@ -969,16 +1063,21 @@ impl<'de> SeqAccess<'de> for TupleSeqAccess<'de> {
 }
 
 #[cfg(feature = "serde1")]
-struct ColumnMapAccess<'de> {
+struct ColumnMapAccess<'de, 'config> {
     keys: &'de mark::Mark<'de>,
     values: &'de mark::Mark<'de>,
     range: Range<usize>,
     pending: Option<usize>,
+    config: &'config DeserializeConfig,
 }
 
 #[cfg(feature = "serde1")]
-impl<'de> ColumnMapAccess<'de> {
-    fn new(mark: &'de mark::Map<'de>, row: usize) -> Result<Self, JsonDeserializeError> {
+impl<'de, 'config> ColumnMapAccess<'de, 'config> {
+    fn new(
+        mark: &'de mark::Map<'de>,
+        row: usize,
+        config: &'config DeserializeConfig,
+    ) -> Result<Self, JsonDeserializeError> {
         let Some((start, end)) = mark.offsets.offset_indices(row)? else {
             return Err(Error::IndexOutOfBounds(row, "Map").into());
         };
@@ -987,12 +1086,13 @@ impl<'de> ColumnMapAccess<'de> {
             values: &mark.values,
             range: start..end,
             pending: None,
+            config,
         })
     }
 }
 
 #[cfg(feature = "serde1")]
-impl<'de> MapAccess<'de> for ColumnMapAccess<'de> {
+impl<'de> MapAccess<'de> for ColumnMapAccess<'de, '_> {
     type Error = JsonDeserializeError;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
@@ -1006,6 +1106,7 @@ impl<'de> MapAccess<'de> for ColumnMapAccess<'de> {
         match seed.deserialize(CellDeserializer {
             mark: self.keys,
             row,
+            config: self.config,
         }) {
             Ok(value) => Ok(Some(value)),
             Err(error) => Err(error),
@@ -1024,6 +1125,7 @@ impl<'de> MapAccess<'de> for ColumnMapAccess<'de> {
         seed.deserialize(CellDeserializer {
             mark: self.values,
             row,
+            config: self.config,
         })
     }
 
@@ -1033,16 +1135,17 @@ impl<'de> MapAccess<'de> for ColumnMapAccess<'de> {
 }
 
 #[cfg(feature = "serde1")]
-struct NamedMapAccess<'de> {
+struct NamedMapAccess<'de, 'config> {
     names: &'de [&'de str],
     tuple: &'de mark::Tuple<'de>,
     row: usize,
     next: usize,
     pending: Option<usize>,
+    config: &'config DeserializeConfig,
 }
 
 #[cfg(feature = "serde1")]
-impl<'de> MapAccess<'de> for NamedMapAccess<'de> {
+impl<'de> MapAccess<'de> for NamedMapAccess<'de, '_> {
     type Error = JsonDeserializeError;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
@@ -1077,6 +1180,7 @@ impl<'de> MapAccess<'de> for NamedMapAccess<'de> {
         seed.deserialize(CellDeserializer {
             mark: &self.tuple.values[index],
             row: self.row,
+            config: self.config,
         })
     }
 
@@ -1086,14 +1190,15 @@ impl<'de> MapAccess<'de> for NamedMapAccess<'de> {
 }
 
 #[cfg(feature = "serde1")]
-struct NamedRowsSeqAccess<'de> {
+struct NamedRowsSeqAccess<'de, 'config> {
     names: &'de [&'de str],
     tuple: &'de mark::Tuple<'de>,
     range: Range<usize>,
+    config: &'config DeserializeConfig,
 }
 
 #[cfg(feature = "serde1")]
-impl<'de> SeqAccess<'de> for NamedRowsSeqAccess<'de> {
+impl<'de> SeqAccess<'de> for NamedRowsSeqAccess<'de, '_> {
     type Error = JsonDeserializeError;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
@@ -1107,6 +1212,7 @@ impl<'de> SeqAccess<'de> for NamedRowsSeqAccess<'de> {
             names: self.names,
             tuple: self.tuple,
             row,
+            config: self.config,
         }) {
             Ok(value) => Ok(Some(value)),
             Err(error) => Err(error),
@@ -1120,14 +1226,15 @@ impl<'de> SeqAccess<'de> for NamedRowsSeqAccess<'de> {
 
 #[cfg(feature = "serde1")]
 #[derive(Clone, Copy)]
-struct NamedRowDeserializer<'de> {
+struct NamedRowDeserializer<'de, 'config> {
     names: &'de [&'de str],
     tuple: &'de mark::Tuple<'de>,
     row: usize,
+    config: &'config DeserializeConfig,
 }
 
 #[cfg(feature = "serde1")]
-impl<'de> de::Deserializer<'de> for NamedRowDeserializer<'de> {
+impl<'de> de::Deserializer<'de> for NamedRowDeserializer<'de, '_> {
     type Error = JsonDeserializeError;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -1140,6 +1247,7 @@ impl<'de> de::Deserializer<'de> for NamedRowDeserializer<'de> {
             row: self.row,
             next: 0,
             pending: None,
+            config: self.config,
         })
     }
 
@@ -1180,7 +1288,7 @@ mod serde_tests {
     use serde_json::json;
     use testresult::TestResult;
 
-    use super::{Json, JsonDeserializeError, format_wide_number};
+    use super::{DeserializeConfig, Json, JsonDeserializeError, JsonKeyMode, format_wide_number};
     use crate::{
         DateTime32Data, Ipv4Data, mark, parse::block::parse_single, reader::TryRead as _,
         slice::ByteView,
@@ -1328,6 +1436,7 @@ mod serde_tests {
                 mark::Mark::String(string_view(vec!["x"])),
                 mark::Mark::String(string_view(vec!["y"])),
             ],
+            2,
             1,
         );
         assert!(matches!(duplicate, Err(crate::Error::CorruptedData(_))));
@@ -1338,6 +1447,7 @@ mod serde_tests {
                 mark::Mark::String(string_view(vec!["x"])),
                 mark::Mark::String(string_view(vec!["y"])),
             ],
+            2,
             1,
         )?);
         let error = Json::try_from(&mark)?
@@ -1345,21 +1455,6 @@ mod serde_tests {
             .deserialize::<serde_json::Value>()
             .expect_err("active scalar and child paths must conflict");
         assert!(matches!(error, JsonDeserializeError::StructuralConflict(path) if path == "a"));
-        Ok(())
-    }
-
-    #[test]
-    fn splits_paths_before_decoding_escaped_dots() -> TestResult {
-        let mark = mark::Mark::Json(mark::Json::new(
-            vec!["a%2Eb", "nested.value"],
-            vec![
-                mark::Mark::String(string_view(vec!["dot"])),
-                mark::Mark::String(string_view(vec!["nested"])),
-            ],
-            1,
-        )?);
-        let actual: serde_json::Value = Json::try_from(&mark)?.try_read(0)?.deserialize()?;
-        assert_eq!(actual, json!({"a.b": "dot", "nested": {"value": "nested"}}));
         Ok(())
     }
 
@@ -1379,6 +1474,7 @@ mod serde_tests {
         let nested_json = mark::Json::new(
             vec!["name"],
             vec![mark::Mark::String(string_view(vec!["one", "two", "three"]))],
+            1,
             3,
         )?;
         let inner_offsets = [1_u64.to_le_bytes(), 3_u64.to_le_bytes()].concat();
@@ -1391,7 +1487,7 @@ mod serde_tests {
             offsets: ByteView::try_from(outer_offsets.as_slice())?,
             values: Box::new(inner),
         });
-        let mark = mark::Mark::Json(mark::Json::new(vec!["items"], vec![outer], 1)?);
+        let mark = mark::Mark::Json(mark::Json::new(vec!["items"], vec![outer], 1, 1)?);
 
         let actual: Root<'_> = Json::try_from(&mark)?.try_read(0)?.deserialize()?;
         assert_eq!(
@@ -1422,6 +1518,7 @@ mod serde_tests {
                 mark::Mark::Int64(ByteView::try_from(signed.as_slice())?),
                 mark::Mark::UInt64(ByteView::try_from(unsigned.as_slice())?),
             ],
+            2,
             1,
         )?);
         assert_eq!(
@@ -1459,6 +1556,7 @@ mod serde_tests {
                     data: ByteView::<DateTime32Data>::try_from(datetime_bytes.as_slice())?,
                 }),
             ],
+            5,
             1,
         )?);
         let actual: serde_json::Value = Json::try_from(&formatted)?.try_read(0)?.deserialize()?;
@@ -1508,6 +1606,7 @@ mod serde_tests {
                     data: ByteView::try_from(decimal.as_slice())?,
                 }),
             ],
+            3,
             1,
         )?);
         let actual: serde_json::Value = Json::try_from(&mark)?.try_read(0)?.deserialize()?;
@@ -1540,6 +1639,7 @@ mod serde_tests {
                     })),
                 }),
             ],
+            3,
             1,
         )?);
         let arrays: serde_json::Value = Json::try_from(&array_mark)?.try_read(0)?.deserialize()?;
@@ -1627,6 +1727,7 @@ mod serde_tests {
                 "nullable", "null", "lc", "map", "tuple", "named", "nested", "variant", "dynamic",
             ],
             marks,
+            9,
             1,
         )?);
 
@@ -1771,6 +1872,108 @@ mod serde_tests {
         assert_eq!(
             reader.try_read(3)?.deserialize::<serde_json::Value>()?,
             json!({"n": null, "v": "x", "free": 2})
+        );
+        Ok(())
+    }
+
+    fn check_json_fixture(
+        name: &str,
+        config: &DeserializeConfig,
+        expected: &serde_json::Value,
+    ) -> TestResult {
+        let data = crate::common::load(format!("./testdata/{name}.native"))?;
+        let blocks = crate::parse::block::parse_many(&data)?;
+        let block = blocks
+            .iter()
+            .find(|block| block.num_rows > 0)
+            .expect("row 0");
+        let reader = Json::try_from(block.mark("j")?)?;
+        let actual: serde_json::Value = reader.try_read(0)?.deserialize_with_config(config)?;
+        assert_eq!(&actual, expected);
+        Ok(())
+    }
+
+    // SELECT '{}'::JSON(a Dynamic) AS j FORMAT Native;
+    #[test]
+    fn typed_dynamic_null() -> TestResult {
+        check_json_fixture(
+            "json_typed_dynamic_null",
+            &DeserializeConfig::default(),
+            &json!({"a": null}),
+        )
+    }
+
+    // SELECT '{"a":[1,null,"x"]}'::JSON(a Array(Dynamic)) AS j FORMAT Native;
+    #[test]
+    fn array_dynamic_null() -> TestResult {
+        check_json_fixture(
+            "json_array_dynamic_null",
+            &DeserializeConfig::default(),
+            &json!({"a": [1, null, "x"]}),
+        )
+    }
+
+    // SELECT '{}'::JSON(a Tuple(x Dynamic)) AS j FORMAT Native;
+    #[test]
+    fn tuple_dynamic_null() -> TestResult {
+        check_json_fixture(
+            "json_tuple_dynamic_null",
+            &DeserializeConfig::default(),
+            &json!({"a": {"x": null}}),
+        )
+    }
+
+    // SELECT '{"a%2eb":1,"a%2Eb":2}'::JSON AS j
+    // SETTINGS json_type_escape_dots_in_keys = 0 FORMAT Native;
+    #[test]
+    fn literal_percent_keys() -> TestResult {
+        check_json_fixture(
+            "json_literal_percent_keys",
+            &DeserializeConfig {
+                key_mode: JsonKeyMode::Preserve,
+            },
+            &json!({"a%2Eb": 2, "a%2eb": 1}),
+        )
+    }
+
+    // SELECT '{"a.b":1,"a":{"b":2},"a%2eb":3,"percent%20key":4,
+    //          "arr":[{"c.d":"v%2E"}],"map":{"m%2Ek":{"c.d":"m"}},
+    //          "tuple":{"doc":{"c.d":"t"}},"dynamic":[{"e.f":"d"}]}'
+    //     ::JSON(arr Array(JSON), map Map(String, JSON), tuple Tuple(doc JSON)) AS j
+    // SETTINGS json_type_escape_dots_in_keys=1, output_format_json_quote_64bit_integers=0
+    // FORMAT Native;
+    #[test]
+    fn escaped_keys_support_decoded_and_preserved_borrowing() -> TestResult {
+        let data = crate::common::load("./testdata/json_escaped_keys.native")?;
+        let (_, block) = parse_single(&data)?;
+        let row = Json::try_from(block.mark("j")?)?.try_read(0)?;
+
+        let decoded: BTreeMap<&str, serde_json::Value> = row.deserialize()?;
+        assert_eq!(
+            serde_json::to_value(&decoded)?,
+            json!({
+                "a.b": 1, "a": {"b": 2}, "a%2eb": 3, "percent%20key": 4,
+                "arr": [{"c.d": "v%2E"}], "map": {"m%2Ek": {"c.d": "m"}},
+                "tuple": {"doc": {"c.d": "t"}}, "dynamic": [{"e.f": "d"}]
+            })
+        );
+        let preserved: BTreeMap<&str, serde_json::Value> = {
+            let config = DeserializeConfig {
+                key_mode: JsonKeyMode::Preserve,
+            };
+            row.deserialize_with_config(&config)?
+        };
+        assert_eq!(
+            serde_json::to_value(&preserved)?,
+            json!({
+                "a%2Eb": 1, "a": {"b": 2}, "a%2eb": 3, "percent%20key": 4,
+                "arr": [{"c%2Ed": "v%2E"}], "map": {"m%2Ek": {"c%2Ed": "m"}},
+                "tuple": {"doc": {"c%2Ed": "t"}}, "dynamic": [{"e%2Ef": "d"}]
+            })
+        );
+        assert_eq!(
+            row.deserialize::<BTreeMap<&str, serde_json::Value>>()?,
+            decoded
         );
         Ok(())
     }

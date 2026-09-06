@@ -1,5 +1,5 @@
 #[cfg(feature = "serde1")]
-use std::borrow::Cow;
+use std::sync::OnceLock;
 
 use crate::{Error, mark::Mark, value::Value};
 
@@ -8,6 +8,7 @@ pub struct Json<'a> {
     pub(crate) paths: Box<[&'a str]>,
     /// One column per path, same order as `paths`.
     pub(crate) columns: Box<[Mark<'a>]>,
+    num_typed_paths: usize,
     num_rows: usize,
     #[cfg(feature = "serde1")]
     nodes: Box<[JsonPathNode<'a>]>,
@@ -16,7 +17,8 @@ pub struct Json<'a> {
 #[cfg(feature = "serde1")]
 #[derive(Debug)]
 struct JsonPathNode<'a> {
-    key: Cow<'a, str>,
+    key: &'a str,
+    decoded_key: Option<OnceLock<String>>,
     leaf: Option<usize>,
     first_child: Option<usize>,
     next_sibling: Option<usize>,
@@ -26,6 +28,7 @@ impl<'a> Json<'a> {
     pub(crate) fn new(
         paths: Vec<&'a str>,
         columns: Vec<Mark<'a>>,
+        num_typed_paths: usize,
         rows: usize,
     ) -> crate::Result<Self> {
         if paths.len() != columns.len() {
@@ -48,6 +51,7 @@ impl<'a> Json<'a> {
         Ok(Self {
             paths: paths.into_boxed_slice(),
             columns: columns.into_boxed_slice(),
+            num_typed_paths,
             num_rows: rows,
             #[cfg(feature = "serde1")]
             nodes,
@@ -60,8 +64,15 @@ impl<'a> Json<'a> {
     }
 
     #[cfg(feature = "serde1")]
-    pub(crate) fn node_key(&'a self, node: usize) -> &'a str {
-        self.nodes[node].key.as_ref()
+    pub(crate) fn node_key(&'a self, node: usize, decode: bool) -> &'a str {
+        let node = &self.nodes[node];
+        if decode && let Some(decoded) = &node.decoded_key {
+            decoded
+                .get_or_init(|| node.key.replace("%2E", "."))
+                .as_str()
+        } else {
+            node.key
+        }
     }
 
     #[cfg(feature = "serde1")]
@@ -104,13 +115,16 @@ impl<'a> Json<'a> {
                 "JSON path index {path_index} has no column"
             )));
         };
-        // The path is absent from this row (JSON has no null distinct from a missing key)
-        if let Mark::Dynamic(dynamic) = column
-            && dynamic.is_null(row)
-        {
+        if self.is_absent(path_index, row) {
             return Ok(None);
         }
         column.get(row)
+    }
+
+    pub(crate) fn is_absent(&self, path_index: usize, row: usize) -> bool {
+        // Only an untyped JSON path uses a Dynamic NULL to represent a missing key.
+        path_index >= self.num_typed_paths
+            && matches!(self.columns.get(path_index), Some(Mark::Dynamic(dynamic)) if dynamic.is_null(row))
     }
 }
 
@@ -126,7 +140,8 @@ impl<'a> PathTree<'a> {
     fn new() -> Self {
         Self {
             nodes: vec![JsonPathNode {
-                key: Cow::Borrowed(""),
+                key: "",
+                decoded_key: None,
                 leaf: None,
                 first_child: None,
                 next_sibling: None,
@@ -136,9 +151,8 @@ impl<'a> PathTree<'a> {
 
     fn insert_path(&mut self, path_index: usize, path: &'a str) -> crate::Result<()> {
         let mut parent = Self::ROOT;
-        for raw_key in path.split('.') {
-            let key = decode_key(raw_key);
-            parent = match self.find_child(parent, key.as_ref()) {
+        for key in path.split('.') {
+            parent = match self.find_child(parent, key) {
                 Some(child) => child,
                 None => self.push_child(parent, key),
             };
@@ -164,10 +178,11 @@ impl<'a> PathTree<'a> {
         None
     }
 
-    fn push_child(&mut self, parent: usize, key: Cow<'a, str>) -> usize {
+    fn push_child(&mut self, parent: usize, key: &'a str) -> usize {
         let index = self.nodes.len();
         self.nodes.push(JsonPathNode {
             key,
+            decoded_key: key.contains("%2E").then(OnceLock::new),
             leaf: None,
             first_child: None,
             next_sibling: None,
@@ -182,55 +197,5 @@ impl<'a> PathTree<'a> {
         }
         self.nodes[sibling].next_sibling = Some(index);
         index
-    }
-}
-
-#[cfg(feature = "serde1")]
-fn decode_key(key: &str) -> Cow<'_, str> {
-    let bytes = key.as_bytes();
-    let mut index = 0;
-    while index + 2 < bytes.len()
-        && !(bytes[index] == b'%'
-            && bytes[index + 1] == b'2'
-            && matches!(bytes[index + 2], b'E' | b'e'))
-    {
-        index += 1;
-    }
-    if index + 2 >= bytes.len() {
-        return Cow::Borrowed(key);
-    }
-
-    let mut decoded = String::with_capacity(key.len());
-    let mut copied = 0;
-    while index + 2 < bytes.len() {
-        if bytes[index] == b'%'
-            && bytes[index + 1] == b'2'
-            && matches!(bytes[index + 2], b'E' | b'e')
-        {
-            decoded.push_str(&key[copied..index]);
-            decoded.push('.');
-            index += 3;
-            copied = index;
-        } else {
-            index += 1;
-        }
-    }
-    decoded.push_str(&key[copied..]);
-    Cow::Owned(decoded)
-}
-
-#[cfg(test)]
-mod tests {
-    #[cfg(feature = "serde1")]
-    use super::decode_key;
-    #[cfg(feature = "serde1")]
-    use std::borrow::Cow;
-
-    #[cfg(feature = "serde1")]
-    #[test]
-    fn decodes_only_escaped_dots() {
-        assert!(matches!(decode_key("plain"), Cow::Borrowed("plain")));
-        assert_eq!(decode_key("a%2Eb"), "a.b");
-        assert_eq!(decode_key("a%2eb%20c"), "a.b%20c");
     }
 }

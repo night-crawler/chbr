@@ -304,13 +304,17 @@ fn json<'a>(
     let num_rows = ctx.num_rows;
 
     let mut path_columns = Vec::with_capacity(col_headers.len());
+    let mut num_typed_paths = 0;
     for col_header in col_headers {
+        if matches!(&col_header, JsonColumnHeader::Typed { .. }) {
+            num_typed_paths += 1;
+        }
         let marker;
         (input, marker) = col_header.decode(ctx.fork(input))?;
         path_columns.push(marker);
     }
 
-    let marker = Mark::Json(Json::new(paths, path_columns, num_rows)?);
+    let marker = Mark::Json(Json::new(paths, path_columns, num_typed_paths, num_rows)?);
 
     let (input, shared_data_offsets) =
         take_elements(input, num_rows, 8, "JSON shared data offsets")?;
