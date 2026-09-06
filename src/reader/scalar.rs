@@ -97,7 +97,13 @@ col_view! {
 }
 
 #[derive(Clone, Copy)]
-pub struct Usize<'a>(pub &'a Mark<'a>);
+pub struct Usize<'a>(pub(crate) &'a Mark<'a>);
+
+impl<'a> Usize<'a> {
+    pub fn new(value: &'a Mark<'a>) -> crate::Result<Self> {
+        Self::try_from(value)
+    }
+}
 
 impl<'a> TryRead<'a> for Usize<'a> {
     type Item = usize;
