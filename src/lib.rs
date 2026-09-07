@@ -5,9 +5,8 @@ use std::hint::cold_path;
 use chrono::NaiveDate;
 use chrono_tz::Tz;
 use log::debug;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::{
-    collections::HashMap,
     iter::Peekable,
     net::{Ipv4Addr, Ipv6Addr},
     ops::Range,
@@ -242,50 +241,28 @@ impl<'a> ParsedBlock<'a> {
         mark_by_name(&self.col_names, &self.markers, name)
     }
 
-    fn reorder(&mut self, order: &HashMap<&str, usize>) -> Result<()> {
-        let num_cols = self.col_names.len();
-        let col_names = std::mem::take(&mut self.col_names).into_iter();
-        let markers = std::mem::take(&mut self.markers).into_iter();
-
-        let mut triples = Vec::with_capacity(num_cols);
-        let mut num_used = 0;
-        for (index, (col_name, marker)) in col_names.into_iter().zip(markers).enumerate() {
-            let sort_key = if let Some(key) = order.get(col_name).copied() {
-                num_used += 1;
-                key
-            } else {
-                // if the column is not in the order, we put it at the end
-                num_cols + index
-            };
-            triples.push((col_name, marker, sort_key));
-        }
-
-        if num_used < order.len() {
-            cold_path();
-            let present_columns = triples
+    fn reorder_no_alloc(&mut self, order: &[&str]) {
+        // It's O(1) space but ~O(nk) ~ O(n^2) and 0 allocations.
+        // cols: [x, b, a1, y, a2, a3, z]
+        // order: [a, b, a]
+        //         0  1  2
+        // First `a` is found at index 2 in cols
+        // Everything in range [0..=2] is rotated right, so an item at index 2 (a) goes to index 0
+        // cols become [a1, x, b, y, a2, a3, z]
+        // On the next iteration we skip all previously handled elements
+        for (left, name) in order.iter().copied().enumerate() {
+            let pos = self.col_names[left..]
                 .iter()
-                .map(|(name, _, _)| *name)
-                .collect::<HashSet<_>>();
-            let mut missing = order.keys().copied().collect::<HashSet<_>>();
-            missing.retain(|name| !present_columns.contains(name));
-
-            return Err(Error::InvalidColumnOrder(format!(
-                "Got unexpected columns: {missing:?}; present: {present_columns:?}"
-            )));
+                .copied()
+                .position(|col_name| col_name == name)
+                .expect("bug: we validated columns exists but apparently not good enough");
+            if pos == 0 {
+                continue;
+            }
+            let right = left + pos + 1;
+            self.col_names[left..right].rotate_right(1);
+            self.markers[left..right].rotate_right(1);
         }
-
-        triples.sort_unstable_by_key(|(_, _, sort_key)| *sort_key);
-
-        let mut col_names = Vec::with_capacity(num_cols);
-        let mut markers = Vec::with_capacity(num_cols);
-        for (col_name, marker, _) in triples {
-            col_names.push(col_name);
-            markers.push(marker);
-        }
-        self.col_names = col_names.into_boxed_slice();
-        self.markers = markers.into_boxed_slice();
-
-        Ok(())
     }
 }
 
@@ -313,17 +290,131 @@ impl<'data, 'iter> BlocksIterator<'data, 'iter> {
 }
 
 pub(crate) fn reorder_block_cols(blocks: &mut [ParsedBlock<'_>], order: &[&str]) -> Result<()> {
-    let order_map = order
-        .iter()
-        .enumerate()
-        .map(|(index, name)| (*name, index))
-        .collect::<HashMap<_, _>>();
-    for block in blocks.iter_mut() {
-        block.reorder(&order_map)?;
+    if blocks.is_empty() || order.is_empty() {
+        return Ok(());
+    }
+
+    // Opinionated validation that allows reorders be infallible
+    validate_blocks(blocks, order)?;
+
+    // I read numbers from my ceiling, sorry
+    if order.len() * blocks[0].col_names.len() < 128 {
+        for block in blocks.iter_mut() {
+            block.reorder_no_alloc(order);
+        }
+    } else {
+        reorder_alloc(blocks, order);
     }
 
     if let Some(first) = blocks.first() {
         debug!("reordered: {:?}", first.col_names);
+    }
+
+    Ok(())
+}
+
+fn reorder_alloc(blocks: &mut [ParsedBlock<'_>], order: &[&str]) {
+    let Some(first) = blocks.first() else {
+        return;
+    };
+
+    let mut positions = HashMap::<&str, (Vec<usize>, usize)>::with_capacity(order.len());
+
+    for (index, name) in order.iter().copied().enumerate() {
+        let (indices, _used) = positions.entry(name).or_default();
+        indices.push(index);
+    }
+
+    let mut destinations = Vec::with_capacity(first.col_names.len());
+    let mut tail = order.len();
+
+    for &name in &first.col_names {
+        let target = match positions.get_mut(name) {
+            Some((indices, used)) if *used < indices.len() => {
+                let target = indices[*used];
+                *used += 1;
+                target
+            }
+            _ => {
+                let target = tail;
+                tail += 1;
+                target
+            }
+        };
+
+        destinations.push(target);
+    }
+
+    // At this moment we assume that we are working with validated data and the column layout this
+    // the same everywhere, otherwise we'd need to build dest arr for each col.
+
+    // Not an n^2
+    for i in 0..destinations.len() {
+        while destinations[i] != i {
+            let target = destinations[i];
+            for block in blocks.iter_mut() {
+                block.col_names.swap(i, target);
+                block.markers.swap(i, target);
+            }
+            destinations.swap(i, target);
+        }
+    }
+}
+
+fn validate_blocks(blocks: &[ParsedBlock<'_>], cols: &[&str]) -> Result<()> {
+    // It's more likely that user code messed up columns rather than CH returned some broken blocks
+    // with unmatched columns (unless user hasn't created the vec of blocks manually).
+    let mut want_counts = HashMap::with_capacity(cols.len());
+    for &col in cols {
+        *want_counts.entry(col).or_insert(0usize) += 1;
+    }
+
+    let mut n = cols.len();
+    for &col in &blocks[0].col_names {
+        let Some(count) = want_counts.get_mut(col) else {
+            continue;
+        };
+        if *count == 0 {
+            continue;
+        }
+        *count -= 1;
+        n -= 1;
+        if n == 0 {
+            return Ok(());
+        }
+    }
+
+    want_counts.retain(|_, count| *count != 0);
+
+    if !want_counts.is_empty() {
+        return Err(Error::InvalidColumnOrder(format!(
+            "Missing requested column occurrences: {want_counts:?}"
+        )));
+    }
+
+    // It is questionable if all blocks should share the same layout, because there can exist
+    // such a set of blocks that has a sufficient but different set of columns that can still
+    // satisfy the order / columns can be shuffled for some reason / someone manually created
+    // a bunch of blocks and wants to iterate over them. Anyway, this assumption lets speculate more
+    // and check less in other annoying code here.
+    validate_block_layouts(blocks)?;
+
+    Ok(())
+}
+
+fn validate_block_layouts(blocks: &[ParsedBlock<'_>]) -> Result<()> {
+    let Some((first, rest)) = blocks.split_first() else {
+        return Ok(());
+    };
+
+    for (index, block) in rest.iter().enumerate() {
+        if block.col_names != first.col_names {
+            return Err(Error::InvalidColumnOrder(format!(
+                "Block {} has different column names: {:?}",
+                index + 1,
+                block.col_names,
+            )));
+        }
     }
 
     Ok(())
