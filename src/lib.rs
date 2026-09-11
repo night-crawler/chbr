@@ -380,7 +380,7 @@ fn validate_blocks(blocks: &[ParsedBlock<'_>], cols: &[&str]) -> Result<()> {
         *count -= 1;
         n -= 1;
         if n == 0 {
-            return Ok(());
+            break;
         }
     }
 
@@ -587,6 +587,19 @@ mod tests {
             matches!(&err, Error::InvalidColumnOrder(msg) if msg.contains("zzz")),
             "{err}"
         );
+    }
+
+    #[test]
+    fn reorder_rejects_blocks_with_different_layouts() {
+        // Block 0 alone satisfies the order; block 1 must still be checked.
+        let mut blocks = [block(&["a", "b"], &[0, 1]), block(&["a"], &[0])];
+        let err = reorder_block_cols(&mut blocks, &["b", "a"]).unwrap_err();
+        assert!(matches!(err, Error::InvalidColumnOrder(_)), "{err}");
+
+        // Same width, different names: must not be silently permuted by block 0's layout.
+        let mut blocks = [block(&["a", "b"], &[0, 1]), block(&["b", "a"], &[1, 0])];
+        let err = reorder_block_cols(&mut blocks, &["b", "a"]).unwrap_err();
+        assert!(matches!(err, Error::InvalidColumnOrder(_)), "{err}");
     }
 
     #[test]
