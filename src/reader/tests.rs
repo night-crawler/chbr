@@ -419,6 +419,32 @@ fn derive_iter_blocks_flat() -> TestResult {
 }
 
 #[test]
+fn iter_blocks_size_hint_bounds_error_items() {
+    // The `id` column is missing, so each block yields exactly one `Err`
+    // regardless of `num_rows`.
+    #[derive(FromBlock)]
+    struct Row<'a> {
+        id: I64<'a>,
+    }
+
+    fn bounds_hold(blocks: &[crate::ParsedBlock<'_>]) {
+        let iterator = Row::iter_blocks(blocks);
+        let (lower, upper) = iterator.size_hint();
+        let count = iterator.count();
+        assert!(lower <= count, "lower {lower} > count {count}");
+        assert!(count <= upper.unwrap(), "count {count} > upper {upper:?}");
+    }
+
+    let empty_block = |num_rows| crate::ParsedBlock {
+        markers: Box::new([]),
+        col_names: Box::new([]),
+        num_rows,
+    };
+    bounds_hold(&[empty_block(0)]);
+    bounds_hold(&[empty_block(5)]);
+}
+
+#[test]
 fn try_read_out_of_bounds() -> TestResult {
     let buf = load("./testdata/nullable_string.native")?;
     let (_, block) = parse_single(&buf)?;

@@ -196,11 +196,16 @@ impl<'a, R: FromBlock<'a>> Iterator for BlocksRows<'a, R> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let current = match &self.rows_iter {
-            Some(it) => it.size_hint().0,
+        let mut lower = match &self.rows_iter {
+            Some(it) => it.len(),
             None => 0,
         };
-        let remaining: usize = self.blocks.clone().map(|b| b.num_rows).sum();
-        (current, Some(current + remaining))
+        let mut upper = lower;
+        // A block will have either `num_rows` items or just one `Err` if it failed
+        for block in self.blocks.clone() {
+            lower += block.num_rows.min(1);
+            upper += block.num_rows.max(1);
+        }
+        (lower, Some(upper))
     }
 }
