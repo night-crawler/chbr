@@ -1,6 +1,25 @@
 use bloch::parse::block::parse_single;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+drop table if exists array_lc_string_empty;
+
+create table array_lc_string_empty
+(
+    id  Int64,
+    arr Array(LowCardinality(String)) default []
+) engine = MergeTree order by tuple();
+
+insert into array_lc_string_empty (id, arr) values
+    (0, []),
+    (1, []),
+    (2, []),
+    (3, []),
+    (4, []);
+
+select * from array_lc_string_empty order by id format Native;
+"#;
+
 #[test]
 fn array_lc_string_empty() -> TestResult {
     let data = std::fs::read(crate::common::fixture("array_lc_string_empty.native"))?;

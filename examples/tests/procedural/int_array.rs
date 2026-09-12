@@ -3,6 +3,33 @@ use bloch::zc;
 use pretty_assertions::assert_eq;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+-- The authoring table used `id Int64 default rand()`; the ids below are the
+-- values the committed fixture was generated with.
+drop table if exists array_sample;
+
+create table array_sample
+(
+    id  Int64,
+    arr Array(Int64)
+) engine = MergeTree order by tuple();
+
+insert into array_sample (id, arr) values
+    (0, []),
+    (128969003, [1]),
+    (214500519, [1]),
+    (301458964, []),
+    (475251162, []),
+    (1228122092, [1, 2, 3, 4, 5]),
+    (1873422981, [1, 2, 3, 4]),
+    (2172352370, [1, 2, 3]),
+    (2181458171, [1, 2]),
+    (2793473513, []),
+    (3697287021, [1, 2, 3]);
+
+select * from array_sample order by id format Native;
+"#;
+
 #[test]
 fn int_array() -> TestResult {
     let buf = std::fs::read(crate::common::fixture("array.native"))?;

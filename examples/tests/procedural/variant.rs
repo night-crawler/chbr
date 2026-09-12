@@ -4,6 +4,31 @@ use bloch::zc;
 use pretty_assertions::assert_eq;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+set allow_experimental_variant_type = 1;
+
+drop table if exists variant_sample;
+
+create table variant_sample
+(
+    id  Int64,
+    var Variant(Int64, String, Array(Int64))
+) engine = MergeTree order by tuple();
+
+insert into variant_sample (id, var) values
+    (0, 1),
+    (1, 'a'),
+    (2, [1, 2, 3]),
+    (3, 2),
+    (4, 'b'),
+    (5, [4, 5, 6]),
+    (6, 3);
+
+optimize table variant_sample;
+
+select * from variant_sample order by id format Native;
+"#;
+
 #[test]
 fn variant() -> TestResult {
     let buf = std::fs::read(crate::common::fixture("variant.native"))?;

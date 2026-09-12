@@ -4,6 +4,24 @@ use bloch::parse::block::parse_single;
 use pretty_assertions::assert_eq;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+drop table if exists fixed_string_binary;
+
+create table fixed_string_binary
+(
+    id Int64,
+    fb FixedString(4)
+) engine = MergeTree order by tuple();
+
+insert into fixed_string_binary (id, fb) values
+    (0, unhex('01000000')),
+    (1, unhex('00000000')),
+    (2, unhex('deadbeef')),
+    (3, 'ab');
+
+select * from fixed_string_binary order by id format Native;
+"#;
+
 #[test]
 fn fixed_string_binary() -> TestResult {
     let data = std::fs::read(crate::common::fixture("fixed_string_binary.native"))?;

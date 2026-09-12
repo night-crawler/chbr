@@ -2,6 +2,26 @@ use bloch::FromBlock;
 use bloch::parse::block::parse_single;
 use bloch::reader::{Array, I64, LcStr};
 
+const _SQL: &str = r#"
+drop table if exists array_of_tuples;
+
+create table array_of_tuples
+(
+    id  Int64,
+    arr Array(Tuple(LowCardinality(String), Int64))
+) engine = MergeTree order by tuple();
+
+insert into array_of_tuples (id, arr) values
+    (0, [('apple', 1), ('banana', 2), ('cherry', 3)]),
+    (1, [('date', 4), ('elderberry', 5)]),
+    (2, [('fig', 6), ('grape', 7), ('honeydew', 8)]),
+    (3, [('kiwi', 9)]),
+    (4, []),
+    (5, [('lemon', 10), ('mango', 11)]);
+
+select * from array_of_tuples order by id format Native;
+"#;
+
 #[derive(FromBlock, Copy, Clone)]
 struct Fruit<'a> {
     name: LcStr<'a>,

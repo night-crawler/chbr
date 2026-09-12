@@ -3,6 +3,26 @@ use bloch::value::FixedStringSliceIterator;
 use pretty_assertions::assert_eq;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+drop table if exists fixed_string_array;
+
+create table fixed_string_array
+(
+    id  Int64,
+    arr Array(FixedString(16))
+) engine = MergeTree order by tuple();
+
+insert into fixed_string_array (id, arr) values
+    (0, ['fixed string 1', 'fixed string 2']),
+    (1, ['fixed string 3', 'fixed string 4']),
+    (2, ['fixed string 5', 'fixed string 6']),
+    (3, ['fixed string 7']),
+    (4, []),
+    (5, ['fixed string 8', 'fixed string 9']);
+
+select * from fixed_string_array order by id format Native;
+"#;
+
 #[test]
 fn fixed_string_array() -> TestResult {
     let data = std::fs::read(crate::common::fixture("fixed_string_array.native"))?;

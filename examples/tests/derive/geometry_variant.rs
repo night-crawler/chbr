@@ -2,6 +2,36 @@ use bloch::FromBlock;
 use bloch::parse::block::parse_single;
 use bloch::reader::{Array, ArrayIter, Geometry, I64, Point, Ring, VariantNullable};
 
+const _SQL: &str = r#"
+-- Geometry / MultiPoint: MultiPoint is unknown to ClickHouse 26.3 and older
+-- (including 25.3), so both the server and the client must be 26.8+;
+-- reproduced on ClickHouse 26.8.2.7.
+
+drop table if exists geometry_sample;
+
+create table geometry_sample
+(
+    id  Int64,
+    geo Geometry,
+    mp  MultiPoint,
+    arr Array(Geometry)
+) engine = MergeTree order by id;
+
+insert into geometry_sample values
+    (1, readWKT('POINT(1 2)'), readWKT('MULTIPOINT(1 1,2 2,3 3)'), [readWKT('POINT(1 2)'), NULL]),
+    (2, readWKT('LINESTRING(0 0,1 1,2 0)'), [], []),
+    (3, readWKT('MULTILINESTRING((0 0,1 1),(2 2,3 3,4 2))'), [(7, 7)], [readWKT('LINESTRING(0 0,1 1)')]),
+    (4, readWKT('POLYGON((0 0,10 0,10 10,0 10,0 0),(4 4,5 4,5 5,4 5,4 4))'), [], [NULL]),
+    (5, readWKT('MULTIPOLYGON(((0 0,1 0,1 1,0 0)),((5 5,6 5,6 6,5 5),(5.2 5.2,5.5 5.2,5.5 5.5,5.2 5.2)))'), [], []),
+    (6, CAST([(0, 0), (1, 0), (1, 1)], 'Ring'), [], []),
+    (7, readWKT('MULTIPOINT(1 1,2 2,3 3)'), [], [readWKT('MULTIPOINT(9 9)')]),
+    (8, NULL, [], []);
+
+optimize table geometry_sample final;
+
+select id, geo, mp, arr from geometry_sample order by id format Native;
+"#;
+
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,

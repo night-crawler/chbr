@@ -2,6 +2,16 @@ use bloch::FromBlock;
 use bloch::parse::block::parse_single;
 use bloch::reader::{Array, Nothing, Nullable, U64};
 
+const _SQL: &str = r#"
+select
+    number as id,
+    [] as arr,
+    NULL as n,
+    [NULL] as arr_n,
+    [[]] as arr_arr
+from numbers(3) format Native;
+"#;
+
 /// `Nothing` is the element type of `[]` and the inner type of `NULL`.
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {

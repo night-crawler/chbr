@@ -5,6 +5,12 @@ use bloch::parse::block::parse_single;
 use bloch::reader::JsonIterator;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+set enable_json_type = 1;
+
+select CAST('{"a":[{"x":1}],"b":2}', 'JSON') as j format Native;
+"#;
+
 fn paths_of_row0(data: &[u8]) -> TestResult<Vec<String>> {
     let (_, block) = parse_single(data)?;
     let value = block.markers[0].get(0)?.expect("row 0");

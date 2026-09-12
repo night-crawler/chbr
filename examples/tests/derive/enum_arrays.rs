@@ -2,6 +2,27 @@ use bloch::FromBlock;
 use bloch::parse::block::parse_single;
 use bloch::reader::{Array, Enum8, Enum16, I64};
 
+const _SQL: &str = r#"
+drop table if exists enums_array_sample;
+
+create table enums_array_sample
+(
+    id      Int64,
+    arr_e8  Array(Enum8('Red' = 11, 'Green' = 2, 'Blue' = -23)),
+    arr_e16 Array(Enum16('Foo' = 2000, 'Bar' = 200))
+) engine = MergeTree order by tuple();
+
+insert into enums_array_sample (id, arr_e8, arr_e16) values
+    (0, ['Red', 'Green'], ['Foo']),
+    (1, ['Blue', 'Red'], ['Bar']),
+    (2, ['Green'], ['Foo', 'Bar']),
+    (3, [], ['Foo']),
+    (4, ['Red', 'Blue'], []),
+    (5, ['Green', 'Red', 'Blue'], ['Bar']);
+
+select * from enums_array_sample order by id format Native;
+"#;
+
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,

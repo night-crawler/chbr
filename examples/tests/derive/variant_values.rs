@@ -2,6 +2,31 @@ use bloch::parse::block::parse_single;
 use bloch::reader::{ArrayIter, I64, Variant};
 use bloch::{FromBlock, FromVariant};
 
+const _SQL: &str = r#"
+set allow_experimental_variant_type = 1;
+
+drop table if exists variant_sample;
+
+create table variant_sample
+(
+    id  Int64,
+    var Variant(Int64, String, Array(Int64))
+) engine = MergeTree order by tuple();
+
+insert into variant_sample (id, var) values
+    (0, 1),
+    (1, 'a'),
+    (2, [1, 2, 3]),
+    (3, 2),
+    (4, 'b'),
+    (5, [4, 5, 6]),
+    (6, 3);
+
+optimize table variant_sample;
+
+select * from variant_sample order by id format Native;
+"#;
+
 #[derive(FromVariant)]
 enum Value<'a> {
     Array(ArrayIter<'a, I64<'a>>),

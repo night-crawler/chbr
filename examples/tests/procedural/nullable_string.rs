@@ -3,6 +3,26 @@ use bloch::parse::block::parse_single;
 use pretty_assertions::assert_eq;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+drop table if exists nullable_string;
+
+create table nullable_string
+(
+    id   Int64,
+    nstr Nullable(String)
+) engine = MergeTree order by tuple();
+
+insert into nullable_string (id, nstr) values
+    (0, 'hello'),
+    (1, null),
+    (2, 'world'),
+    (3, 'clickhouse'),
+    (4, null),
+    (5, 'test');
+
+select * from nullable_string order by id format Native;
+"#;
+
 #[test]
 fn nullable_string() -> TestResult {
     let buf = std::fs::read(crate::common::fixture("nullable_string.native"))?;

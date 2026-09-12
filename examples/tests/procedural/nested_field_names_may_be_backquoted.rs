@@ -4,6 +4,12 @@ use bloch::parse::block::parse_single;
 use bloch::value::NestedIterator;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+set flatten_nested = 0;
+
+select [(1, 'x'), (2, 'y')]::Nested(`my field` UInt64, `1x` String) as n format Native;
+"#;
+
 #[test]
 fn nested_field_names_may_be_backquoted() -> TestResult {
     let data = std::fs::read(crate::common::fixture("nested_quoted.native"))?;

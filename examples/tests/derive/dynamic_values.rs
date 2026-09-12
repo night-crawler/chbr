@@ -4,6 +4,37 @@ use bloch::reader::{I64, Value as ValueReader};
 use bloch::value::{MapIterator, Value};
 use std::collections::HashMap;
 
+const _SQL: &str = r#"
+set session_timezone = 'UTC';
+set allow_experimental_dynamic_type = 1;
+
+drop table if exists dynamic_sample;
+
+create table dynamic_sample
+(
+    id  Int64,
+    dyn Dynamic
+) engine = MergeTree order by tuple();
+
+insert into dynamic_sample (id, dyn) values
+    (0, 'string value'),
+    (1, 12345),
+    (2, [1, 2, 3]),
+    (3, {'key': 'value'}),
+    (4, toDate('2023-01-01')),
+    (5, 0),
+    (6, toDateTime('2023-01-01 12:00:00'));
+
+insert into dynamic_sample (id, dyn) values
+    (7, toUUID('d60b7c85-0739-4786-a8d9-f1bbc72104df')),
+    (8, toFloat64(3.14)),
+    (9, toDecimal32(1.23, 2));
+
+optimize table dynamic_sample final;
+
+select * from dynamic_sample order by id format Native;
+"#;
+
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,

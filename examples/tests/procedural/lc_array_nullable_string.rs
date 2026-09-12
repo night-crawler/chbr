@@ -5,6 +5,26 @@ use bloch::value::LowCardinalitySliceIterator;
 use pretty_assertions::assert_eq;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+drop table if exists array_lc_nullable_string;
+
+create table array_lc_nullable_string
+(
+    id  Int64,
+    arr Array(LowCardinality(Nullable(String)))
+) engine = MergeTree order by tuple();
+
+insert into array_lc_nullable_string (id, arr) values
+    (0, ['apple', 'banana', null]),
+    (1, [null, 'date', 'elderberry']),
+    (2, ['fig', null, 'honeydew']),
+    (3, [null]),
+    (4, []),
+    (5, ['lemon', null, 'mango']);
+
+select * from array_lc_nullable_string order by id format Native;
+"#;
+
 #[test]
 fn lc_array_nullable_string() -> TestResult {
     let buf = std::fs::read(crate::common::fixture("array_lc_nullable_string.native"))?;

@@ -2,6 +2,28 @@ use bloch::FromBlock;
 use bloch::parse::block::parse_single;
 use bloch::reader::{Array, I64, Str, U64};
 
+const _SQL: &str = r#"
+set flatten_nested = 0;
+
+drop table if exists array_of_nested;
+
+create table array_of_nested
+(
+    id  Int64,
+    arr Array(Nested(child_id UInt64, child_name String))
+) engine = MergeTree order by tuple();
+
+insert into array_of_nested (id, arr) values
+    (0, [[(1, 'Alice'), (2, 'Bob')]]),
+    (1, [[(3, 'Charlie'), (4, 'Diana')]]),
+    (2, [[(5, 'Eve')]]),
+    (3, [[]]),
+    (4, [[(6, 'Frank'), (7, 'Grace')]]),
+    (5, [[(8, 'Heidi')]]);
+
+select * from array_of_nested order by id format Native;
+"#;
+
 #[derive(FromBlock, Copy, Clone)]
 struct Child<'a> {
     child_id: U64<'a>,

@@ -7,6 +7,24 @@ use bloch::{Error, Interval};
 use chrono::TimeDelta;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+select
+    toIntervalNanosecond(1) as ns,
+    toIntervalMicrosecond(2) as us,
+    toIntervalMillisecond(3) as ms,
+    toIntervalSecond(4) as s,
+    toIntervalMinute(5) as mi,
+    toIntervalHour(6) as h,
+    toIntervalDay(7) as d,
+    toIntervalWeek(8) as w,
+    toIntervalMonth(9) as mo,
+    toIntervalQuarter(10) as q,
+    toIntervalYear(11) as y,
+    [toIntervalSecond(-1), toIntervalSecond(1)] as arr,
+    if(number = 0, NULL, toIntervalHour(number)) as n
+from numbers(2) format Native;
+"#;
+
 #[test]
 fn interval_types_parse() -> TestResult {
     let data = std::fs::read(crate::common::fixture("interval.native"))?;

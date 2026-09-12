@@ -2,6 +2,14 @@ use bloch::parse::block::parse_single;
 use bloch::value::Value;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+select
+    toUUID('61f0c404-5cb3-11e7-907b-a6006ad3dba0') as u,
+    toIPv6('2001:db8::1')                          as ip6,
+    toIPv4('192.168.1.2')                          as ip4
+format Native;
+"#;
+
 #[test]
 fn uuid_and_ip_byte_order_matches_clickhouse_text_form() -> TestResult {
     let data = std::fs::read(crate::common::fixture("uuid_ip_order.native"))?;

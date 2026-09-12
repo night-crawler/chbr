@@ -4,6 +4,16 @@ use bloch::value::{ArraySliceIterator, NullableSliceIterator, Value};
 use pretty_assertions::assert_eq;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+select
+    number as id,
+    [] as arr,
+    NULL as n,
+    [NULL] as arr_n,
+    [[]] as arr_arr
+from numbers(3) format Native;
+"#;
+
 /// A type for `Array(Nothing)` (CH: `[]`)
 struct EmptyRow;
 

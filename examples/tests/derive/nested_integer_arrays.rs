@@ -2,6 +2,26 @@ use bloch::FromBlock;
 use bloch::parse::block::parse_single;
 use bloch::reader::{Array, I64};
 
+const _SQL: &str = r#"
+drop table if exists array_in_array_in64;
+
+create table array_in_array_in64
+(
+    id  Int64,
+    arr Array(Array(Int64))
+) engine = MergeTree order by tuple();
+
+insert into array_in_array_in64 (id, arr) values
+    (0, [[11, 22, 22, 77, 123], [333, 41]]),
+    (1, [[11, 22], [7, 844, 12, 12, 0], [5, 5, 5]]),
+    (2, [[9], [10, 11]]),
+    (3, [[123, 134], [145]]),
+    (4, [[156]]),
+    (5, [[]]);
+
+select * from array_in_array_in64 order by id format Native;
+"#;
+
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,

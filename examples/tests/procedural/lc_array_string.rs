@@ -3,6 +3,32 @@ use bloch::value::LowCardinalitySliceIterator;
 use pretty_assertions::assert_eq;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+drop table if exists array_lc_string;
+
+create table array_lc_string
+(
+    id  Int64,
+    arr Array(LowCardinality(String))
+) engine = MergeTree order by tuple();
+
+insert into array_lc_string (id, arr) values
+    (0, ['apple', 'banana', 'cherry']),
+    (1, ['date', 'elderberry']),
+    (2, ['fig', 'grape', 'honeydew']),
+    (3, ['kiwi']),
+    (4, []),
+    (5, ['lemon', 'mango']),
+    (6, ['apple', 'banana', 'cherry', 'date']),
+    (7, ['elderberry', 'fig', 'grape']),
+    (8, ['honeydew', 'kiwi', 'lemon']),
+    (9, ['mango', 'apple', 'banana']),
+    (10, ['cherry', 'date', 'elderberry']),
+    (11, ['fig', 'grape', 'honeydew', 'kiwi']);
+
+select * from array_lc_string order by id format Native;
+"#;
+
 #[test]
 fn lc_array_string() -> TestResult {
     let buf = std::fs::read(crate::common::fixture("array_lc_string.native"))?;

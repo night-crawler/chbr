@@ -2,6 +2,26 @@ use bloch::FromBlock;
 use bloch::parse::block::parse_single;
 use bloch::reader::{I64, LcNullableStr};
 
+const _SQL: &str = r#"
+drop table if exists nullable_lc_str;
+
+create table nullable_lc_str
+(
+    id      Int64,
+    nlc_str LowCardinality(Nullable(String))
+) engine = MergeTree order by tuple();
+
+insert into nullable_lc_str (id, nlc_str) values
+    (0, 'apple'),
+    (1, null),
+    (2, 'banana'),
+    (3, 'cherry'),
+    (4, null),
+    (5, 'date');
+
+select * from nullable_lc_str order by id format Native;
+"#;
+
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,

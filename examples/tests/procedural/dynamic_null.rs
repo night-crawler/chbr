@@ -3,6 +3,29 @@ use bloch::value::{DynamicSliceIterator, Value};
 use pretty_assertions::assert_eq;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+set allow_experimental_dynamic_type = 1;
+
+drop table if exists dynamic_null_sample;
+
+create table dynamic_null_sample
+(
+    id  Int64,
+    dyn Dynamic,
+    arr Array(Dynamic)
+) engine = MergeTree order by tuple();
+
+insert into dynamic_null_sample (id, dyn, arr) values
+    (0, 42::Int64, [CAST(1::Int64, 'Dynamic'), CAST(NULL, 'Dynamic'), CAST('a', 'Dynamic')]),
+    (1, CAST(NULL, 'Dynamic'), []),
+    (2, 'x', [CAST(NULL, 'Dynamic')]),
+    (3, CAST(NULL, 'Dynamic'), [CAST(NULL, 'Dynamic'), CAST(NULL, 'Dynamic')]);
+
+optimize table dynamic_null_sample final;
+
+select id, dyn, arr from dynamic_null_sample order by id format Native;
+"#;
+
 fn render_variant_value(value: Value<'_>) -> TestResult<String> {
     Ok(match value {
         Value::Empty => "null".to_owned(),

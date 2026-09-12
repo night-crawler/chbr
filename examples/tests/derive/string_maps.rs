@@ -3,6 +3,26 @@ use bloch::parse::block::parse_single;
 use bloch::reader::{I64, Map, Str};
 use std::collections::HashMap;
 
+const _SQL: &str = r#"
+drop table if exists map_sample;
+
+create table map_sample
+(
+    id Int64,
+    m  Map(String, String)
+) engine = MergeTree order by tuple();
+
+insert into map_sample (id, m) values
+    (0, mapFromArrays(['a', 'b', 'c'], ['apple', 'banana', 'cherry'])),
+    (1, mapFromArrays(['d', 'e'], ['date', 'elderberry'])),
+    (2, mapFromArrays(['f', 'g', 'h'], ['fig', 'grape', 'honeydew'])),
+    (3, mapFromArrays(['i'], ['kiwi'])),
+    (4, map()),
+    (5, mapFromArrays(['j', 'k'], ['lemon', 'mango']));
+
+select * from map_sample order by id format Native;
+"#;
+
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,

@@ -4,6 +4,31 @@ use bloch::value::DynamicSliceIterator;
 use pretty_assertions::assert_eq;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+set session_timezone = 'UTC';
+set allow_experimental_dynamic_type = 1;
+set enable_json_type = 1;
+
+drop table if exists dynamic_arr;
+
+create table dynamic_arr
+(
+    id  Int64,
+    arr Array(Dynamic)
+) engine = MergeTree order by tuple();
+
+insert into dynamic_arr (id, arr) values
+    (0, [1, 2, 3]),
+    (1, ['a', 'b', 'c']),
+    (2, [true, false, true]),
+    (3, [1.23, 4.56, 7.89]),
+    (4, [toDate('2023-01-01'), toDate('2023-01-02')]),
+    (5, [toDateTime('2023-01-01 12:00:00'), toDateTime('2023-01-02 12:00:00')]),
+    (6, ['{"sample": true}'::JSON]);
+
+select * from dynamic_arr order by id format Native;
+"#;
+
 #[test]
 fn dynamic_arr() -> TestResult {
     let data = std::fs::read(crate::common::fixture("dynamic_arr.native"))?;

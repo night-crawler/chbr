@@ -3,6 +3,10 @@ use bloch::reader::{Array, LcNullableStr, TryRead as _};
 use bloch::value::{LowCardinalitySliceIterator, Value};
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+select CAST(['a', NULL, 'b'], 'Array(LowCardinality(Nullable(String)))') as arr format Native;
+"#;
+
 #[test]
 fn nullable_low_cardinality_null_inside_array_is_null_via_value_api() -> TestResult {
     let data = std::fs::read(crate::common::fixture(

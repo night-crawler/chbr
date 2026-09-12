@@ -3,6 +3,24 @@ use bloch::parse::block::parse_single;
 use bloch::reader::{Array, Nullable, Time, Time64};
 use chrono::TimeDelta;
 
+const _SQL: &str = r#"
+-- Time / Time64 are not available in ClickHouse 25.3 (the setting
+-- enable_time_time64_type is unknown there); reproduced on ClickHouse 26.8.2.7.
+
+set enable_time_time64_type = 1;
+
+select
+    toTime('12:34:56') as t,
+    toTime('-01:02:03') as neg,
+    toTime64('12:34:56.789', 3) as t3,
+    toTime64('-00:00:01.5', 6) as neg6,
+    toTime64('999:59:59.999999999', 9) as t9,
+    toTime64('00:00:07', 0) as t0,
+    [toTime('00:00:01'), toTime('-00:00:02')] as arr,
+    if(number = 0, NULL, toTime64('01:00:00', 3)) as n
+from numbers(2) format Native;
+"#;
+
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     t: Time<'a>,

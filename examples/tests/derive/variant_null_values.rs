@@ -3,6 +3,30 @@ use bloch::reader::{Array, ArrayIter, I64, Value as ValueReader, VariantNullable
 use bloch::value::Value;
 use bloch::{FromBlock, FromVariant};
 
+const _SQL: &str = r#"
+set allow_experimental_variant_type = 1;
+
+drop table if exists variant_null_sample;
+
+create table variant_null_sample
+(
+    id  Int64,
+    var Variant(Int64, String, Array(Int64)),
+    arr Array(Variant(Int64, String))
+) engine = MergeTree order by tuple();
+
+insert into variant_null_sample (id, var, arr) values
+    (0, 1, [CAST(1::Int64, 'Variant(Int64, String)'), CAST(NULL, 'Variant(Int64, String)'), CAST('a', 'Variant(Int64, String)')]),
+    (1, NULL, []),
+    (2, 'a', [CAST(NULL, 'Variant(Int64, String)')]),
+    (3, [1, 2, 3], [CAST('b', 'Variant(Int64, String)')]),
+    (4, NULL, [CAST(NULL, 'Variant(Int64, String)'), CAST(NULL, 'Variant(Int64, String)')]);
+
+optimize table variant_null_sample final;
+
+select id, var, arr from variant_null_sample order by id format Native;
+"#;
+
 #[derive(FromVariant)]
 enum Var<'a> {
     Array(ArrayIter<'a, I64<'a>>),

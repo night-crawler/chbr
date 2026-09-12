@@ -3,6 +3,14 @@ use bloch::value::BoolSliceIterator;
 use pretty_assertions::assert_eq;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+select
+    number as id,
+    reinterpret(toUInt8(number), 'Bool') as b,
+    arrayMap(x -> reinterpret(toUInt8(x), 'Bool'), [number, 0, 255]) as arr
+from numbers(4) format Native;
+"#;
+
 #[test]
 fn bool_nonzero_bytes() -> TestResult {
     let buf = std::fs::read(crate::common::fixture("bool_nonzero_bytes.native"))?;

@@ -3,6 +3,28 @@ use bloch::value::NestedIterator;
 use pretty_assertions::assert_eq;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+set flatten_nested = 0;
+
+drop table if exists simple_nested;
+
+create table simple_nested
+(
+    id  Int64,
+    nes Nested(child_id UInt64, child_name String)
+) engine = MergeTree order by tuple();
+
+insert into simple_nested (id, nes) values
+    (0, [(1, 'Alice'), (2, 'Bob')]),
+    (1, [(3, 'Charlie'), (4, 'Diana')]),
+    (2, [(5, 'Eve')]),
+    (3, []),
+    (4, [(6, 'Frank'), (7, 'Grace')]),
+    (5, [(8, 'Heidi')]);
+
+select * from simple_nested order by id format Native;
+"#;
+
 #[test]
 fn simple_nested() -> TestResult {
     let data = std::fs::read(crate::common::fixture("simple_nested.native"))?;

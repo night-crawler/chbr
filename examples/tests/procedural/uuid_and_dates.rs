@@ -2,6 +2,29 @@ use bloch::parse::block::parse_single;
 use pretty_assertions::assert_eq;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+set session_timezone = 'UTC';
+
+drop table if exists uuid_and_dates;
+
+create table uuid_and_dates
+(
+    id         UUID,
+    date       Date,
+    date32     Date32,
+    datetime   DateTime,
+    datetime64 DateTime64(3, 'UTC')
+) engine = MergeTree order by tuple();
+
+insert into uuid_and_dates (id, date, date32, datetime, datetime64) values
+    ('00000000-0000-0000-0000-000000000001', '2023-01-01', '2023-01-01', '2023-01-01 12:00:00', '2023-01-01 12:00:00.123'),
+    ('00000000-0000-0000-0000-000000000002', '2023-02-01', '2023-02-01', '2023-02-01 12:00:00', '2023-02-01 12:00:00.456'),
+    ('00000000-0000-0000-0000-000000000003', '2023-03-01', '2023-03-01', '2023-03-01 12:00:00', '2023-03-01 12:00:00.789'),
+    ('00000000-0000-0000-0000-000000000004', '2023-03-01', -100, '2023-03-01 12:00:00', '2023-03-01 12:00:00.789');
+
+select * from uuid_and_dates order by id format Native;
+"#;
+
 #[test]
 fn uuid_and_dates() -> TestResult {
     let buf = std::fs::read(crate::common::fixture("uuid_and_dates.native"))?;

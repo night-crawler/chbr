@@ -5,6 +5,26 @@ use bloch::value::MapIterator;
 use pretty_assertions::assert_eq;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+drop table if exists map_sample;
+
+create table map_sample
+(
+    id Int64,
+    m  Map(String, String)
+) engine = MergeTree order by tuple();
+
+insert into map_sample (id, m) values
+    (0, mapFromArrays(['a', 'b', 'c'], ['apple', 'banana', 'cherry'])),
+    (1, mapFromArrays(['d', 'e'], ['date', 'elderberry'])),
+    (2, mapFromArrays(['f', 'g', 'h'], ['fig', 'grape', 'honeydew'])),
+    (3, mapFromArrays(['i'], ['kiwi'])),
+    (4, map()),
+    (5, mapFromArrays(['j', 'k'], ['lemon', 'mango']));
+
+select * from map_sample order by id format Native;
+"#;
+
 #[test]
 fn map_sample() -> TestResult {
     let buf = std::fs::read(crate::common::fixture("map_sample.native"))?;

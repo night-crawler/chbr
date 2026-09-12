@@ -2,6 +2,16 @@ use bloch::parse::block::parse_single;
 use bloch::value::MapIterator;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+-- Every array in `t` and every map in `m` is empty; a column length derived from the array
+-- elements or the map entries would be 0 instead of 2.
+select
+    ([]::Array(UInt8), toUInt8(number))             as t,
+    map()::Map(String, UInt8)                       as m,
+    (toUInt8(number), '')::Tuple(a UInt8, b String) as nt
+from numbers(2) format Native;
+"#;
+
 /// `Mark::get(row)` is `None` once `row` reaches the column length, for Tuple, Map, and named
 /// Tuple columns alike.
 #[test]

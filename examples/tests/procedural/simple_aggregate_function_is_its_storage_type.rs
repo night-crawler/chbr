@@ -2,6 +2,20 @@ use bloch::parse::block::parse_single;
 use bloch::value::Value;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+drop table if exists simple_agg;
+
+create table simple_agg
+(
+    x SimpleAggregateFunction(sum, UInt64),
+    y SimpleAggregateFunction(anyLast, Nullable(String))
+) engine = AggregatingMergeTree order by tuple();
+
+insert into simple_agg values (7, 'a');
+
+select * from simple_agg format Native;
+"#;
+
 /// `SimpleAggregateFunction(f, T)` is read as a plain `T`.
 #[test]
 fn simple_aggregate_function_is_its_storage_type() -> TestResult {

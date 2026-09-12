@@ -2,6 +2,14 @@ use bloch::FromBlock;
 use bloch::parse::block::parse_single;
 use bloch::reader::{Array, Bool, U64};
 
+const _SQL: &str = r#"
+select
+    number as id,
+    reinterpret(toUInt8(number), 'Bool') as b,
+    arrayMap(x -> reinterpret(toUInt8(x), 'Bool'), [number, 0, 255]) as arr
+from numbers(4) format Native;
+"#;
+
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: U64<'a>,

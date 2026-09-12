@@ -6,6 +6,12 @@ use bloch::reader::JsonIterator;
 use bloch::value::Value;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+set enable_json_type = 1;
+
+select CAST('{"a":{"b":"x"},"c":1}', 'JSON(a.b LowCardinality(String))') as j format Native;
+"#;
+
 #[test]
 fn typed_low_cardinality_path_followed_by_dynamic_path() -> TestResult {
     let data = std::fs::read(crate::common::fixture("json_typed_lc_dynamic.native"))?;

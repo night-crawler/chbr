@@ -1,5 +1,25 @@
 use bloch::{BlocksIterator, parse::block::parse_many, value::Value};
 
+const _SQL: &str = r#"
+drop table if exists example;
+
+create table example
+(
+    id      UInt32,
+    tags    Array(String),
+    attrs   Map(String, String),
+    payload Variant(Array(Int64), Int64, String)
+) engine = MergeTree order by tuple();
+
+insert into example (id, tags, attrs, payload) values
+    (1, ['fast', 'cpu'], mapFromArrays(['region', 'host'], ['eu', 'a1']), 'hello'),
+    (2, [], mapFromArrays(['region'], ['us']), 42::Int64),
+    (3, ['gpu'], map(), [1, 2, 3]::Array(Int64)),
+    (4, ['idle'], mapFromArrays(['region'], ['ap']), NULL);
+
+select * from example order by id format Native;
+"#;
+
 #[test]
 fn basic() -> Result<(), Box<dyn std::error::Error>> {
     let data = std::fs::read(crate::common::fixture("example.native"))?;

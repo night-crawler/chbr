@@ -3,6 +3,13 @@
 use bloch::parse::block::parse_single;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+select
+    [] as a,
+    NULL as n
+format Native;
+"#;
+
 #[test]
 fn array_nothing_and_nullable_nothing_parse() -> TestResult {
     let data = std::fs::read(crate::common::fixture("nothing_scalar.native"))?;

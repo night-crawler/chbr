@@ -5,6 +5,26 @@ use bloch::value::MapIterator;
 use pretty_assertions::assert_eq;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+drop table if exists map_in_map;
+
+create table map_in_map
+(
+    id Int64,
+    m  Map(String, Map(String, String))
+) engine = MergeTree order by tuple();
+
+insert into map_in_map (id, m) values
+    (0, mapFromArrays(['a', 'b'], [mapFromArrays(['x', 'y'], ['apple', 'banana']), mapFromArrays(['z'], ['cherry'])])),
+    (1, mapFromArrays(['c'], [mapFromArrays(['d'], ['date'])])),
+    (2, mapFromArrays(['e', 'f'], [mapFromArrays(['g'], ['elderberry']), mapFromArrays(['h', 'i'], ['fig', 'grape'])])),
+    (3, mapFromArrays(['j'], [mapFromArrays(['k'], ['kiwi'])])),
+    (4, map()),
+    (5, mapFromArrays(['l', 'm'], [mapFromArrays(['n'], ['lemon']), mapFromArrays(['o', 'p'], ['mango', 'nectarine'])]));
+
+select * from map_in_map order by id format Native;
+"#;
+
 #[test]
 fn map_in_map() -> TestResult {
     let buf = std::fs::read(crate::common::fixture("map_in_map.native"))?;

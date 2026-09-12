@@ -4,6 +4,13 @@ use bloch::mark::Mark;
 use bloch::parse::block::parse_single;
 use testresult::TestResult;
 
+const _SQL: &str = r#"
+select
+    tuple(1)::Tuple(_id UInt64)                            as t1,
+    tuple(2, 'x')::Tuple(`my field` UInt64, `1x` String)   as t2
+format Native;
+"#;
+
 #[test]
 fn named_tuple_field_may_start_with_underscore_or_be_backquoted() -> TestResult {
     let data = std::fs::read(crate::common::fixture("named_tuple_quoted.native"))?;

@@ -3,6 +3,26 @@ use bloch::parse::block::parse_single;
 use bloch::reader::{Bf16, F32, F64, I64};
 use half::bf16;
 
+const _SQL: &str = r#"
+drop table if exists float_sample;
+
+create table float_sample
+(
+    id   Int64,
+    f32  Float32,
+    f64  Float64,
+    bf16 BFloat16
+) engine = MergeTree order by tuple();
+
+insert into float_sample (id, f32, f64, bf16) values
+    (0, 3.14, 3.141592653589793, 3.14),
+    (1, 2.71, 2.718281828459045, 2.71),
+    (2, 1.41, 1.4142135623730951, 1.41),
+    (3, 0.57721, 0.5772156649015329, 0.57721);
+
+select * from float_sample order by id format Native;
+"#;
+
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,

@@ -3,6 +3,31 @@ use bloch::parse::block::parse_single;
 use bloch::reader::JsonIterator;
 use bloch::reader::{Array, I64, Value};
 
+const _SQL: &str = r#"
+set session_timezone = 'UTC';
+set allow_experimental_dynamic_type = 1;
+set enable_json_type = 1;
+
+drop table if exists dynamic_arr;
+
+create table dynamic_arr
+(
+    id  Int64,
+    arr Array(Dynamic)
+) engine = MergeTree order by tuple();
+
+insert into dynamic_arr (id, arr) values
+    (0, [1, 2, 3]),
+    (1, ['a', 'b', 'c']),
+    (2, [true, false, true]),
+    (3, [1.23, 4.56, 7.89]),
+    (4, [toDate('2023-01-01'), toDate('2023-01-02')]),
+    (5, [toDateTime('2023-01-01 12:00:00'), toDateTime('2023-01-02 12:00:00')]),
+    (6, ['{"sample": true}'::JSON]);
+
+select * from dynamic_arr order by id format Native;
+"#;
+
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
