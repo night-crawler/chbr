@@ -90,6 +90,84 @@ fn datetime_timezone_forms() -> TestResult {
     Ok(())
 }
 
+fn date32_block(days: i32) -> Vec<u8> {
+    let mut bytes = b"\x01\x01\x01d\x06Date32".to_vec();
+    bytes.extend_from_slice(&days.to_le_bytes());
+    bytes
+}
+
+#[test]
+fn date32_out_of_range_returns_error() -> TestResult {
+    let epoch = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+    let min_days = i32::try_from((chrono::NaiveDate::MIN - epoch).num_days())?;
+    let max_days = i32::try_from((chrono::NaiveDate::MAX - epoch).num_days())?;
+
+    for days in [i32::MIN, min_days - 1, max_days + 1, i32::MAX] {
+        let bytes = date32_block(days);
+        let (_, block) = parse_single(&bytes)?;
+        let mark = block.mark("d")?;
+        assert!(matches!(mark.get(0), Err(Error::ValueOutOfRange(..))));
+        assert!(matches!(
+            Date32::try_from(mark)?.try_read(0),
+            Err(Error::ValueOutOfRange(..))
+        ));
+        assert!(mark.get(1)?.is_none());
+    }
+    Ok(())
+}
+
+#[test]
+fn date32_preserves_representable_dates() -> TestResult {
+    let epoch = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+    let min_days = i32::try_from((chrono::NaiveDate::MIN - epoch).num_days())?;
+    let max_days = i32::try_from((chrono::NaiveDate::MAX - epoch).num_days())?;
+
+    for (days, expected) in [
+        (min_days, chrono::NaiveDate::MIN),
+        (-1, chrono::NaiveDate::from_ymd_opt(1969, 12, 31).unwrap()),
+        (0, epoch),
+        // ClickHouse DATE_LUT_MAX_EXTEND_DAY_NUM.
+        (
+            2_932_896,
+            chrono::NaiveDate::from_ymd_opt(9999, 12, 31).unwrap(),
+        ),
+        (max_days, chrono::NaiveDate::MAX),
+    ] {
+        let bytes = date32_block(days);
+        let (_, block) = parse_single(&bytes)?;
+        let mark = block.mark("d")?;
+        assert!(matches!(
+            mark.get(0)?,
+            Some(crate::value::Value::Date32(date)) if date == expected
+        ));
+        assert_eq!(Date32::try_from(mark)?.try_read(0)?, expected);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "serde1")]
+#[test]
+fn date32_json_conversion_checks_range() -> TestResult {
+    for days in [i32::MIN, 2_932_896, i32::MAX] {
+        let bytes = date32_block(days);
+        let (_, block) = parse_single(&bytes)?;
+        let mark = mark::Mark::Json(mark::Json::new(vec!["d"], block.markers.into_vec(), 1, 1)?);
+        let result = Json::try_from(&mark)?
+            .try_read(0)?
+            .deserialize::<serde_json::Value>();
+        if days == 2_932_896 {
+            assert_eq!(result?, serde_json::json!({"d": "9999-12-31"}));
+        } else {
+            assert!(matches!(
+                result,
+                Err(JsonDeserializeError::Source(error))
+                    if matches!(*error, Error::ValueOutOfRange(..))
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn array_all_empty_rows_from_fixture() -> TestResult {
     let buf = load("./testdata/array_lc_string_empty.native")?;

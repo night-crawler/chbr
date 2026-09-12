@@ -176,8 +176,16 @@ impl_from!(UuidData => Uuid, |d| {
     Uuid::from_u64_pair(hi.get(), lo.get())
 });
 impl_from!(Date16Data => NaiveDate, |d| conv::date16(d.0.get()));
-impl_from!(Date32Data => NaiveDate, |d| conv::date32(d.0.get()));
 impl_from!(DateTime32Data => chrono::DateTime<chrono::Utc>, |d| conv::datetime32(d.0.get()));
+
+impl TryFrom<Date32Data> for NaiveDate {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(value: Date32Data) -> Result<Self> {
+        conv::date32(value.0.get())
+    }
+}
 
 impl DateTime64Data {
     pub(crate) fn with_tz_and_precision(

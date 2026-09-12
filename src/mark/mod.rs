@@ -227,7 +227,12 @@ impl<'a> Mark<'a> {
             Mark::FixedString(fs) => Ok(fs.get(index)),
             Mark::Uuid(bv) => Ok(bv.get(index).map(Value::Uuid)),
             Mark::Date(bv) => Ok(bv.get(index).copied().map(Into::into).map(Value::Date)),
-            Mark::Date32(bv) => Ok(bv.get(index).copied().map(Into::into).map(Value::Date32)),
+            Mark::Date32(bv) => bv
+                .get(index)
+                .copied()
+                .map(chrono::NaiveDate::try_from)
+                .transpose()
+                .map(|date| date.map(Value::Date32)),
             Mark::DateTime(d) => Ok(d.get(index)),
             Mark::DateTime64(d) => Ok(d.get(index)),
             Mark::Time(bv) => Ok(bv

@@ -37,8 +37,18 @@ pub fn date16(days: u16) -> NaiveDate {
     EPOCH_DATE + Duration::days(i64::from(days))
 }
 
-pub fn date32(days: i32) -> NaiveDate {
-    EPOCH_DATE + Duration::days(i64::from(days))
+pub fn date32(days: i32) -> crate::Result<NaiveDate> {
+    match EPOCH_DATE.checked_add_signed(Duration::days(i64::from(days))) {
+        Some(date) => Ok(date),
+        None => {
+            cold_path();
+            Err(Error::ValueOutOfRange(
+                "Date32",
+                "NaiveDate",
+                days.to_string(),
+            ))
+        }
+    }
 }
 
 #[inline(always)]

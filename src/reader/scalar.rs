@@ -92,7 +92,7 @@ col_view! {
     Ipv4, Ipv4, Ipv4Data, Ipv4Addr, |v| Ipv4Addr::from(*v);
     Ipv6, Ipv6, Ipv6Data, Ipv6Addr, |v| Ipv6Addr::from(*v);
     Date, Date, Date16Data, NaiveDate, |v| NaiveDate::from(*v);
-    Date32, Date32, Date32Data, NaiveDate, |v| NaiveDate::from(*v);
+    Date32, Date32, Date32Data, NaiveDate, |v| NaiveDate::try_from(*v)?;
     Time, Time, zc::I32, TimeDelta, |v| TimeDelta::seconds(i64::from(v.get()));
 }
 

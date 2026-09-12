@@ -829,7 +829,7 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de, '_> {
                 visitor.visit_string(value.to_string())
             }
             mark::Mark::Date32(value) => {
-                let value = chrono::NaiveDate::from(*at!(value.get(cell.row)));
+                let value = chrono::NaiveDate::try_from(*at!(value.get(cell.row)))?;
                 visitor.visit_string(value.to_string())
             }
             mark::Mark::DateTime(value) => {
