@@ -339,7 +339,7 @@ impl<'data, 'iter> BlocksIterator<'data, 'iter> {
     }
 }
 
-pub(crate) fn reorder_block_cols(blocks: &mut [ParsedBlock<'_>], order: &[&str]) -> Result<()> {
+pub fn reorder_block_cols(blocks: &mut [ParsedBlock<'_>], order: &[&str]) -> Result<()> {
     if blocks.is_empty() || order.is_empty() {
         return Ok(());
     }
