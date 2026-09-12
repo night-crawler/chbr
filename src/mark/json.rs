@@ -1,5 +1,10 @@
+#[cfg(not(feature = "serde1"))]
+use std::collections::HashSet;
 #[cfg(feature = "serde1")]
-use std::sync::OnceLock;
+use std::{
+    collections::{HashMap, hash_map::Entry},
+    sync::OnceLock,
+};
 
 use crate::{Error, mark::Mark, value::Value};
 
@@ -39,6 +44,18 @@ impl<'a> Json<'a> {
             )));
         }
 
+        #[cfg(not(feature = "serde1"))]
+        {
+            let mut unique_paths = HashSet::with_capacity(paths.len());
+            for &path in &paths {
+                if !unique_paths.insert(path) {
+                    return Err(Error::CorruptedData(format!(
+                        "duplicate JSON path {path:?}"
+                    )));
+                }
+            }
+        }
+
         #[cfg(feature = "serde1")]
         let nodes = {
             let mut tree = PathTree::new();
@@ -61,6 +78,11 @@ impl<'a> Json<'a> {
     #[cfg(feature = "serde1")]
     pub(crate) const fn root(&self) -> usize {
         PathTree::ROOT
+    }
+
+    #[cfg(feature = "serde1")]
+    pub(crate) fn node_count(&self) -> usize {
+        self.nodes.len()
     }
 
     #[cfg(feature = "serde1")]
@@ -131,6 +153,9 @@ impl<'a> Json<'a> {
 #[cfg(feature = "serde1")]
 struct PathTree<'a> {
     nodes: Vec<JsonPathNode<'a>>,
+    // Construction-only metadata; the retained nodes only need traversal links.
+    children: HashMap<(usize, &'a str), usize>,
+    last_child: Vec<Option<usize>>,
 }
 
 #[cfg(feature = "serde1")]
@@ -146,16 +171,15 @@ impl<'a> PathTree<'a> {
                 first_child: None,
                 next_sibling: None,
             }],
+            children: HashMap::new(),
+            last_child: vec![None],
         }
     }
 
     fn insert_path(&mut self, path_index: usize, path: &'a str) -> crate::Result<()> {
         let mut parent = Self::ROOT;
         for key in path.split('.') {
-            parent = match self.find_child(parent, key) {
-                Some(child) => child,
-                None => self.push_child(parent, key),
-            };
+            parent = self.child(parent, key);
         }
 
         if self.nodes[parent].leaf.replace(path_index).is_some() {
@@ -166,36 +190,86 @@ impl<'a> PathTree<'a> {
         Ok(())
     }
 
-    fn find_child(&self, parent: usize, key: &str) -> Option<usize> {
-        let mut child = self.nodes[parent].first_child;
-        while let Some(index) = child {
-            let node = &self.nodes[index];
-            if node.key == key {
-                return Some(index);
+    // Every new node is assigned `nodes.len()` as its index before any of its own
+    // children can be created, so a child's index always exceeds its parent's — callers
+    // may process `nodes` in reverse to resolve every child before its parent.
+    fn child(&mut self, parent: usize, key: &'a str) -> usize {
+        match self.children.entry((parent, key)) {
+            Entry::Occupied(entry) => *entry.get(),
+            Entry::Vacant(entry) => {
+                let index = self.nodes.len();
+                self.nodes.push(JsonPathNode {
+                    key,
+                    decoded_key: key.contains("%2E").then(OnceLock::new),
+                    leaf: None,
+                    first_child: None,
+                    next_sibling: None,
+                });
+                self.last_child.push(None);
+
+                if let Some(sibling) = self.last_child[parent] {
+                    self.nodes[sibling].next_sibling = Some(index);
+                } else {
+                    self.nodes[parent].first_child = Some(index);
+                }
+                self.last_child[parent] = Some(index);
+                entry.insert(index);
+                index
             }
-            child = node.next_sibling;
         }
-        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_duplicate_raw_paths() {
+        let result = Json::new(
+            vec!["nested.key", "other", "nested.key"],
+            vec![Mark::Nothing(1), Mark::Nothing(1), Mark::Nothing(1)],
+            1,
+            1,
+        );
+        assert!(matches!(result, Err(Error::CorruptedData(_))));
     }
 
-    fn push_child(&mut self, parent: usize, key: &'a str) -> usize {
-        let index = self.nodes.len();
-        self.nodes.push(JsonPathNode {
-            key,
-            decoded_key: key.contains("%2E").then(OnceLock::new),
-            leaf: None,
-            first_child: None,
-            next_sibling: None,
-        });
-
-        let Some(mut sibling) = self.nodes[parent].first_child else {
-            self.nodes[parent].first_child = Some(index);
-            return index;
-        };
-        while let Some(next) = self.nodes[sibling].next_sibling {
-            sibling = next;
+    #[test]
+    fn accepts_prefix_paths_in_either_order() {
+        for paths in [vec!["a", "a.b"], vec!["a.b", "a"]] {
+            let json = Json::new(paths, vec![Mark::Nothing(1), Mark::Empty], 2, 1).unwrap();
+            assert!(matches!(json.value(0, 0).unwrap(), Some(Value::Empty)));
+            assert!(json.value(1, 0).unwrap().is_none());
         }
-        self.nodes[sibling].next_sibling = Some(index);
-        index
+    }
+
+    #[cfg(feature = "serde1")]
+    #[test]
+    fn preserves_first_seen_sibling_order() {
+        fn children<'a>(json: &'a Json<'a>, parent: usize) -> Vec<(&'a str, Option<usize>)> {
+            let mut result = Vec::new();
+            let mut child = json.first_child(parent);
+            while let Some(node) = child {
+                result.push((json.node_key(node, false), json.node_leaf(node)));
+                child = json.next_sibling(node);
+            }
+            result
+        }
+
+        let paths = vec!["z.b", "a.b", "z.a", "z", "a.c", "m", "a.b.d"];
+        let columns = paths.iter().map(|_| Mark::Nothing(1)).collect();
+        let json = Json::new(paths, columns, 7, 1).unwrap();
+
+        assert_eq!(
+            children(&json, json.root()),
+            vec![("z", Some(3)), ("a", None), ("m", Some(5))]
+        );
+        let z = json.first_child(json.root()).unwrap();
+        assert_eq!(children(&json, z), vec![("b", Some(0)), ("a", Some(2))]);
+        let a = json.next_sibling(z).unwrap();
+        assert_eq!(children(&json, a), vec![("b", Some(1)), ("c", Some(4))]);
+        let b = json.first_child(a).unwrap();
+        assert_eq!(children(&json, b), vec![("d", Some(6))]);
     }
 }

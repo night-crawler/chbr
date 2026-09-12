@@ -70,5 +70,30 @@ fn deserialize_json(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, deserialize_json);
+fn deserialize_json_wide(c: &mut Criterion) {
+    // Wide+deep JSON fixture pulled from a live ClickHouse server; see
+    // scratch/gen_json_bench_fixture.sh for its exact shape. Stresses PathTree
+    // construction (wide root-level sibling set) and the serde subtree-activity walk.
+    let data = fs::read("testdata/json_wide.native").unwrap();
+
+    c.bench_function("json/wide_parse_and_construct", |b| {
+        b.iter(|| {
+            let (_, block) = parse_single(black_box(&data)).unwrap();
+            black_box(Json::try_from(block.mark("j").unwrap()).unwrap());
+        });
+    });
+
+    let (_, block) = parse_single(&data).unwrap();
+    let reader = Json::try_from(block.mark("j").unwrap()).unwrap();
+    c.bench_function("json/wide_deserialize_all_rows", |b| {
+        b.iter(|| {
+            for row in 0..black_box(reader).len() {
+                let value: serde_json::Value = reader.try_read(row).unwrap().deserialize().unwrap();
+                black_box(value);
+            }
+        });
+    });
+}
+
+criterion_group!(benches, deserialize_json, deserialize_json_wide);
 criterion_main!(benches);

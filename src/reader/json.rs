@@ -101,11 +101,13 @@ impl<'a> JsonValue<'a> {
     where
         T: serde::Deserialize<'a>,
     {
+        let states = build_node_states(self.mark, self.row, config)?;
         T::deserialize(NodeDeserializer {
             mark: self.mark,
             row: self.row,
             node: self.mark.root(),
             config,
+            states: &states,
         })
     }
 }
@@ -248,6 +250,7 @@ struct NodeDeserializer<'de, 'config> {
     row: usize,
     node: usize,
     config: &'config DeserializeConfig,
+    states: &'config [NodeState],
 }
 
 #[cfg(feature = "serde1")]
@@ -258,47 +261,87 @@ enum NodeShape<'de> {
 }
 
 #[cfg(feature = "serde1")]
-impl<'de, 'config> NodeDeserializer<'de, 'config> {
-    fn shape(self) -> Result<NodeShape<'de>, JsonDeserializeError> {
-        let leaf_index = self.mark.node_leaf(self.node);
-        let mut leaf = None;
-        if let Some(path) = leaf_index
-            && let Some(column) = self.mark.columns.get(path)
-            && !self.mark.is_absent(path, self.row)
-        {
-            leaf = Some(Cell {
-                mark: column,
-                row: self.row,
-            });
-        }
-        let leaf_is_active = match leaf {
-            Some(cell) => cell.deserializer(self.config).is_present()?,
-            None => false,
-        };
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NodeState {
+    Absent,
+    Leaf,
+    Object,
+    Conflict,
+}
 
-        let mut child = self.mark.first_child(self.node);
+// Resolves row-dependent presence once, bottom-up, so the entire serde walk shares it
+// instead of every ancestor rescanning each subtree from scratch.
+#[cfg(feature = "serde1")]
+fn build_node_states(
+    mark: &mark::Json<'_>,
+    row: usize,
+    config: &DeserializeConfig,
+) -> Result<Box<[NodeState]>, JsonDeserializeError> {
+    let mut states = vec![NodeState::Absent; mark.node_count()].into_boxed_slice();
+
+    // Node indices increase from parent to child (established in `PathTree::child`),
+    // so this single reverse pass resolves every child before its parent needs it.
+    for node in (0..states.len()).rev() {
+        let leaf = if let Some(path) = mark.node_leaf(node)
+            && let Some(column) = mark.columns.get(path)
+            && !mark.is_absent(path, row)
+        {
+            CellDeserializer {
+                mark: column,
+                row,
+                config,
+            }
+            .is_present()?
+        } else {
+            false
+        };
+        let mut child = mark.first_child(node);
         let mut has_child = false;
         while let Some(index) = child {
-            if subtree_is_active(self.mark, self.row, index, self.config)? {
+            debug_assert!(
+                index > node,
+                "PathTree child index must exceed its parent's"
+            );
+            if states[index] != NodeState::Absent {
                 has_child = true;
                 break;
             }
-            child = self.mark.next_sibling(index);
+            child = mark.next_sibling(index);
         }
+        states[node] = match (leaf, has_child) {
+            (false, false) => NodeState::Absent,
+            (true, false) => NodeState::Leaf,
+            (false, true) => NodeState::Object,
+            (true, true) => NodeState::Conflict,
+        };
+    }
+    Ok(states)
+}
 
-        match (leaf, leaf_is_active, has_child) {
-            (Some(_), true, true) => {
-                let path = match leaf_index {
-                    Some(index) => match self.mark.paths.get(index) {
-                        Some(&path) => path,
-                        None => "",
-                    },
-                    None => "",
-                };
-                Err(JsonDeserializeError::StructuralConflict(path.to_owned()))
+#[cfg(feature = "serde1")]
+impl<'de, 'config> NodeDeserializer<'de, 'config> {
+    fn shape(self) -> Result<NodeShape<'de>, JsonDeserializeError> {
+        match self.states[self.node] {
+            NodeState::Leaf => {
+                let path = self
+                    .mark
+                    .node_leaf(self.node)
+                    .expect("active leaf has a path");
+                Ok(NodeShape::Leaf(Cell {
+                    mark: &self.mark.columns[path],
+                    row: self.row,
+                }))
             }
-            (Some(leaf), true, false) => Ok(NodeShape::Leaf(leaf)),
-            _ => Ok(NodeShape::Object),
+            NodeState::Conflict => {
+                let path = self
+                    .mark
+                    .node_leaf(self.node)
+                    .expect("conflicting leaf has a path");
+                Err(JsonDeserializeError::StructuralConflict(
+                    self.mark.paths[path].to_owned(),
+                ))
+            }
+            NodeState::Absent | NodeState::Object => Ok(NodeShape::Object),
         }
     }
 
@@ -308,36 +351,6 @@ impl<'de, 'config> NodeDeserializer<'de, 'config> {
             NodeShape::Object => Err(JsonDeserializeError::Unsupported("JSON object enum")),
         }
     }
-}
-
-#[cfg(feature = "serde1")]
-fn subtree_is_active(
-    mark: &mark::Json<'_>,
-    row: usize,
-    node_index: usize,
-    config: &DeserializeConfig,
-) -> Result<bool, JsonDeserializeError> {
-    if let Some(path) = mark.node_leaf(node_index)
-        && let Some(column) = mark.columns.get(path)
-        && !mark.is_absent(path, row)
-        && (CellDeserializer {
-            mark: column,
-            row,
-            config,
-        })
-        .is_present()?
-    {
-        return Ok(true);
-    }
-
-    let mut child = mark.first_child(node_index);
-    while let Some(index) = child {
-        if subtree_is_active(mark, row, index, config)? {
-            return Ok(true);
-        }
-        child = mark.next_sibling(index);
-    }
-    Ok(false)
 }
 
 #[cfg(feature = "serde1")]
@@ -356,6 +369,7 @@ impl<'de> de::Deserializer<'de> for NodeDeserializer<'de, '_> {
                 next_child: self.mark.first_child(self.node),
                 pending: None,
                 config: self.config,
+                states: self.states,
             }),
         }
     }
@@ -424,6 +438,7 @@ struct PathMapAccess<'de, 'config> {
     next_child: Option<usize>,
     pending: Option<usize>,
     config: &'config DeserializeConfig,
+    states: &'config [NodeState],
 }
 
 #[cfg(feature = "serde1")]
@@ -436,7 +451,7 @@ impl<'de> MapAccess<'de> for PathMapAccess<'de, '_> {
     {
         while let Some(index) = self.next_child {
             self.next_child = self.mark.next_sibling(index);
-            if !subtree_is_active(self.mark, self.row, index, self.config)? {
+            if self.states[index] == NodeState::Absent {
                 continue;
             }
             self.pending = Some(index);
@@ -465,6 +480,7 @@ impl<'de> MapAccess<'de> for PathMapAccess<'de, '_> {
             row: self.row,
             node,
             config: self.config,
+            states: self.states,
         })
     }
 }
@@ -908,13 +924,17 @@ impl<'de> de::Deserializer<'de> for CellDeserializer<'de, '_> {
                     config: self.config,
                 })
             }
-            mark::Mark::Json(json) => NodeDeserializer {
-                mark: json,
-                row: cell.row,
-                node: json.root(),
-                config: self.config,
+            mark::Mark::Json(json) => {
+                let states = build_node_states(json, cell.row, self.config)?;
+                NodeDeserializer {
+                    mark: json,
+                    row: cell.row,
+                    node: json.root(),
+                    config: self.config,
+                    states: &states,
+                }
+                .deserialize_any(visitor)
             }
-            .deserialize_any(visitor),
             mark::Mark::Nullable(_)
             | mark::Mark::LowCardinality(_)
             | mark::Mark::Variant(_)
@@ -1429,18 +1449,7 @@ mod serde_tests {
     }
 
     #[test]
-    fn rejects_duplicate_and_active_conflicting_paths() -> TestResult {
-        let duplicate = mark::Json::new(
-            vec!["a", "a"],
-            vec![
-                mark::Mark::String(string_view(vec!["x"])),
-                mark::Mark::String(string_view(vec!["y"])),
-            ],
-            2,
-            1,
-        );
-        assert!(matches!(duplicate, Err(crate::Error::CorruptedData(_))));
-
+    fn rejects_active_conflicting_paths() -> TestResult {
         let mark = mark::Mark::Json(mark::Json::new(
             vec!["a", "a.b"],
             vec![
@@ -1455,6 +1464,53 @@ mod serde_tests {
             .deserialize::<serde_json::Value>()
             .expect_err("active scalar and child paths must conflict");
         assert!(matches!(error, JsonDeserializeError::StructuralConflict(path) if path == "a"));
+        Ok(())
+    }
+
+    #[test]
+    fn deserializes_large_sparse_tree_across_rows() -> TestResult {
+        let paths: Vec<_> = (0..80).map(|i| format!("root.branch{i}.leaf")).collect();
+        let columns = paths
+            .iter()
+            .enumerate()
+            .map(|(i, path)| {
+                mark::Mark::Dynamic(mark::Dynamic {
+                    offsets: vec![0; 3].into_boxed_slice(),
+                    discriminators: if i % 2 == 0 {
+                        &[0, 255, 255]
+                    } else {
+                        &[255, 0, 255]
+                    },
+                    columns: vec![mark::Mark::String(string_view(vec![path.as_str()]))]
+                        .into_boxed_slice(),
+                })
+            })
+            .collect();
+        let mark = mark::Mark::Json(mark::Json::new(
+            paths.iter().map(String::as_str).collect(),
+            columns,
+            0,
+            3,
+        )?);
+        let reader = Json::try_from(&mark)?;
+        for row in [0, 1, 2, 0] {
+            let mut expected = serde_json::Map::new();
+            for (i, path) in paths.iter().enumerate() {
+                if i % 2 == row {
+                    expected.insert(format!("branch{i}"), json!({"leaf": path}));
+                }
+            }
+            let expected = if row == 2 {
+                json!({})
+            } else {
+                json!({"root": expected})
+            };
+            assert_eq!(
+                reader.try_read(row)?.deserialize::<serde_json::Value>()?,
+                expected,
+                "row {row}",
+            );
+        }
         Ok(())
     }
 

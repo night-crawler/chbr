@@ -7,7 +7,7 @@ use crate::Error;
 
 const EPOCH_DATE: NaiveDate = NaiveDate::from_yo_opt(1970, 1).expect("1970 day 1 is a valid date");
 
-const UTC_ALIASES: [Tz; 11] = [
+pub const UTC_ALIASES: [Tz; 11] = [
     Tz::UTC,
     Tz::GMT,
     Tz::Zulu,

@@ -257,6 +257,7 @@ impl ExactSizeIterator for BoolSliceIterator<'_> {}
 
 pub struct DateTime32SliceIterator<'a> {
     tz: Tz,
+    cached_offset: Option<chrono_tz::TzOffset>,
     slice: std::slice::Iter<'a, DateTime32Data>,
 }
 
@@ -267,6 +268,7 @@ impl<'a> TryFrom<Value<'a>> for DateTime32SliceIterator<'a> {
         match value {
             Value::DateTime32Slice { tz, slice } => Ok(Self {
                 tz,
+                cached_offset: conv::utc_alias_offset(tz),
                 slice: slice.iter(),
             }),
             other => Err(other.mismatched_type(short_type_name::<Self>())),
@@ -278,7 +280,12 @@ impl Iterator for DateTime32SliceIterator<'_> {
     type Item = chrono::DateTime<Tz>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.slice.next().map(|dt| dt.with_tz(self.tz))
+        let dt = self.slice.next()?;
+        Some(conv::datetime32_resolved(
+            dt.0.get(),
+            self.tz,
+            self.cached_offset,
+        ))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -290,6 +297,7 @@ impl ExactSizeIterator for DateTime32SliceIterator<'_> {}
 
 pub struct DateTime64SliceIterator<'a> {
     tz: Tz,
+    cached_offset: Option<chrono_tz::TzOffset>,
     precision: u8,
     slice: std::slice::Iter<'a, DateTime64Data>,
 }
@@ -305,6 +313,7 @@ impl<'a> TryFrom<Value<'a>> for DateTime64SliceIterator<'a> {
                 slice,
             } => Ok(Self {
                 tz,
+                cached_offset: conv::utc_alias_offset(tz),
                 precision,
                 slice: slice.iter(),
             }),
@@ -317,9 +326,9 @@ impl Iterator for DateTime64SliceIterator<'_> {
     type Item = crate::Result<chrono::DateTime<Tz>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.slice
-            .next()
-            .map(|dt| dt.with_tz_and_precision(self.tz, self.precision))
+        self.slice.next().map(|dt| {
+            conv::datetime64_resolved(dt.0.get(), self.precision, self.tz, self.cached_offset)
+        })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -640,3 +649,129 @@ impl<'a> Iterator for Enum16SliceIterator<'a> {
 }
 
 impl ExactSizeIterator for Enum16SliceIterator<'_> {}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Offset as _, TimeZone as _};
+    use testresult::TestResult;
+
+    use super::*;
+
+    #[test]
+    fn datetime_slice_iterators_preserve_alias_identity() -> TestResult {
+        let seconds = [DateTime32Data(zc::U32::new(1_700_000_000))];
+        let ticks = [DateTime64Data(zc::I64::new(1_700_000_000_123))];
+        let dt32 = DateTime32SliceIterator::try_from(Value::DateTime32Slice {
+            tz: Tz::GMT,
+            slice: &seconds,
+        })?
+        .next()
+        .unwrap();
+        let dt64 = DateTime64SliceIterator::try_from(Value::DateTime64Slice {
+            tz: Tz::GMT,
+            precision: 3,
+            slice: &ticks,
+        })?
+        .next()
+        .unwrap()?;
+
+        for datetime in [dt32, dt64] {
+            assert_eq!(datetime.timezone(), Tz::GMT);
+            assert_eq!(datetime.format("%Z").to_string(), "GMT");
+        }
+        assert_eq!(dt32.timestamp(), 1_700_000_000);
+        assert_eq!(dt64.timestamp_millis(), 1_700_000_000_123);
+        Ok(())
+    }
+
+    #[test]
+    fn datetime_slice_iterators_preserve_seasonal_offsets() -> TestResult {
+        let timestamps = [1, 7].map(|month| {
+            chrono::Utc
+                .with_ymd_and_hms(2024, month, 15, 12, 0, 0)
+                .unwrap()
+                .timestamp()
+        });
+        let seconds = timestamps.map(|timestamp| {
+            DateTime32Data(zc::U32::new(
+                u32::try_from(timestamp).expect("test timestamp fits in u32"),
+            ))
+        });
+        let ticks =
+            timestamps.map(|timestamp| DateTime64Data(zc::I64::new(timestamp * 1_000 + 123)));
+        let mut dt32 = DateTime32SliceIterator::try_from(Value::DateTime32Slice {
+            tz: Tz::Europe__London,
+            slice: &seconds,
+        })?;
+        let mut dt64 = DateTime64SliceIterator::try_from(Value::DateTime64Slice {
+            tz: Tz::Europe__London,
+            precision: 3,
+            slice: &ticks,
+        })?;
+
+        for (timestamp, offset) in timestamps.into_iter().zip([0, 3_600]) {
+            let dt32 = dt32.next().unwrap();
+            let dt64 = dt64.next().unwrap()?;
+            for datetime in [dt32, dt64] {
+                assert_eq!(datetime.timezone(), Tz::Europe__London);
+                assert_eq!(datetime.offset().fix().local_minus_utc(), offset);
+            }
+            assert_eq!(dt32.timestamp(), timestamp);
+            assert_eq!(dt64.timestamp_millis(), timestamp * 1_000 + 123);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn datetime_slice_iterators_match_naive_resolution_for_every_utc_alias() -> TestResult {
+        // Exhaustively checks every alias in `conv::UTC_ALIASES` (the single source of
+        // truth `utc_alias_offset` also reads): the cached-offset path must match the
+        // uncached `with_timezone` ground truth bit-for-bit across the full DateTime32
+        // range plus a negative DateTime64 tick, proving the construction-time cache is
+        // never stale.
+        let seconds: [u32; 3] = [0, 1_700_000_000, u32::MAX];
+        let ticks: [i64; 4] = [-1_700_000_000_123, -1, 0, 1_700_000_000_123];
+
+        for tz in conv::UTC_ALIASES {
+            let data32: Vec<DateTime32Data> = seconds
+                .iter()
+                .map(|&s| DateTime32Data(zc::U32::new(s)))
+                .collect();
+            let data64: Vec<DateTime64Data> = ticks
+                .iter()
+                .map(|&t| DateTime64Data(zc::I64::new(t)))
+                .collect();
+
+            let cached32 =
+                DateTime32SliceIterator::try_from(Value::DateTime32Slice { tz, slice: &data32 })?;
+            for (cached, &s) in cached32.zip(seconds.iter()) {
+                let naive = conv::datetime32(s).with_timezone(&tz);
+                assert_eq!(
+                    cached.to_rfc3339(),
+                    naive.to_rfc3339(),
+                    "{tz:?} DateTime32({s})"
+                );
+                assert_eq!(
+                    cached.timezone(),
+                    tz,
+                    "{tz:?} DateTime32({s}) zone identity"
+                );
+            }
+
+            let cached64 = DateTime64SliceIterator::try_from(Value::DateTime64Slice {
+                tz,
+                precision: 3,
+                slice: &data64,
+            })?;
+            for (cached, &t) in cached64.zip(ticks.iter()) {
+                let naive = conv::datetime64(t, 3)?.with_timezone(&tz);
+                assert_eq!(
+                    cached?.to_rfc3339(),
+                    naive.to_rfc3339(),
+                    "{tz:?} DateTime64({t})"
+                );
+            }
+        }
+        Ok(())
+    }
+}
