@@ -18,6 +18,10 @@ This crate is an attempt to implement a random access iterator over CH blocks.
 It supposedly supports all CH types, supposedly correctly, including stuff like `Dynamic`,
 `JSON`, `LowCardinality`, etc.
 
+## Known limitations
+
+1. Because header parsing is zero-copy, it doesn't support escaping, so escaped enum values will break the parser.
+
 ## Perf
 
 Keep in mind that it still needs the whole block in memory, and, for example, if you use the official `clickhouse-rs`,

@@ -168,6 +168,27 @@ transparent_newtype! {
     pub Bf16Data ([u8; 2]);
 }
 
+impl I256 {
+    #[inline]
+    pub const fn as_le_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl U256 {
+    #[inline]
+    pub const fn as_le_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl Decimal256Data {
+    #[inline]
+    pub const fn as_le_bytes(&self) -> &[u8; 32] {
+        self.0.as_le_bytes()
+    }
+}
+
 impl_from!(Bf16Data => half::bf16, |value| half::bf16::from_le_bytes(value.0));
 impl_from!(Ipv6Data => Ipv6Addr, |d| Ipv6Addr::from(d.0));
 impl_from!(Ipv4Data => Ipv4Addr, |d| Ipv4Addr::from(d.0.get()));

@@ -787,8 +787,8 @@ pub struct Decimal128<'a> {
 
 #[derive(Debug)]
 pub struct Decimal256<'a> {
-    pub(crate) scale: u8,
-    pub(crate) data: ByteView<'a, Decimal256Data>,
+    pub scale: u8,
+    pub data: ByteView<'a, Decimal256Data>,
 }
 
 #[derive(Debug)]
