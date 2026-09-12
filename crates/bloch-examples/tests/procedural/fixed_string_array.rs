@@ -48,7 +48,7 @@ fn fixed_string_array() -> TestResult {
     for (i, expected) in expected.iter().enumerate() {
         let value: FixedStringSliceIterator =
             fixed_string_array_marker.get(i)?.unwrap().try_into()?;
-        let actual = value.map(|item| item.as_ref()).collect::<Vec<&[u8]>>();
+        let actual = value.map(AsRef::as_ref).collect::<Vec<&[u8]>>();
         assert_eq!(actual, *expected, "Mismatch at index {i}");
     }
 

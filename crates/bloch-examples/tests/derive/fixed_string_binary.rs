@@ -30,7 +30,6 @@ struct Row<'a> {
 #[derive(FromBlock, Copy, Clone)]
 struct TextRow<'a> {
     #[col(name = "fb")]
-    #[allow(dead_code)]
     value: FixedStr<'a>,
 }
 

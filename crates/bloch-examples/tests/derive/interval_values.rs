@@ -38,7 +38,6 @@ struct Row<'a> {
 
 #[derive(FromBlock, Copy, Clone)]
 struct CalendarRow<'a> {
-    #[allow(dead_code)]
     mo: Interval<'a>,
 }
 

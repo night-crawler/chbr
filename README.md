@@ -229,10 +229,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 The standalone examples crate keeps both access styles as executable tests:
 
-- [`examples/tests/procedural`](examples/tests/procedural) drives blocks through `Mark`/`Value`
-  accessors directly, without any derive.
-- [`examples/tests/derive`](examples/tests/derive) exercises one schema apiece through
-  `#[derive(FromBlock, Copy, Clone)]` (and `#[derive(FromVariant)]` for variant schemas).
+- [`crates/bloch-examples/tests/procedural`](crates/bloch-examples/tests/procedural) manual parsing using generic `Value` and TryFrom
+- [`crates/bloch-examples/tests/derive`](crates/bloch-examples/tests/derive) derive macro
 
 ```sh
 cargo test -p bloch-examples

@@ -46,7 +46,7 @@ select * from empty_arrays order by id format Native;
 "#;
 
 // `a_v` has no elements, so no payload is ever read.
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[derive(FromVariant)]
 enum Elem<'a> {
     Integer(i64),
@@ -54,7 +54,7 @@ enum Elem<'a> {
 }
 
 // Payload sizes follow the mirrored `Variant(Array(Int64), Int64)`.
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 #[derive(FromVariant)]
 enum Var<'a> {
     Array(ArrayIter<'a, I64<'a>>),

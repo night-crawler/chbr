@@ -34,7 +34,7 @@ struct Pair {
 }
 
 fn deserialize_json(c: &mut Criterion) {
-    let data = fs::read("testdata/json.native").unwrap();
+    let data = fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/json.native")).unwrap();
     let (_, block) = parse_single(&data).unwrap();
     let reader = Json::try_from(block.mark("json").unwrap()).unwrap();
 
@@ -72,9 +72,13 @@ fn deserialize_json(c: &mut Criterion) {
 
 fn deserialize_json_wide(c: &mut Criterion) {
     // Wide+deep JSON fixture pulled from a live ClickHouse server; see
-    // benches/testdata/README.md. Stresses PathTree construction (wide root-level
+    // benches/README.md. Stresses PathTree construction (wide root-level
     // sibling set) and the serde subtree-activity walk.
-    let data = fs::read("benches/testdata/json_wide.native").unwrap();
+    let data = fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/benches/testdata/json_wide.native"
+    ))
+    .unwrap();
 
     c.bench_function("json/wide_parse_and_construct", |b| {
         b.iter(|| {

@@ -1,9 +1,9 @@
 use proc_macro::TokenStream;
 use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{ToTokens, format_ident, quote};
+use quote::{ToTokens as _, format_ident, quote};
 use syn::punctuated::Punctuated;
-use syn::spanned::Spanned;
+use syn::spanned::Spanned as _;
 use syn::token::Comma;
 use syn::{
     Data, DeriveInput, Expr, Field, Fields, Lifetime, Meta, Variant, parse_macro_input, parse_quote,

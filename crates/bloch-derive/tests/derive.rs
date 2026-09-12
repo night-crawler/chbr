@@ -1,7 +1,8 @@
-use database::reader::{Array, ArrayIter, I64, TryRead, U8, VariantNullable};
-use database::{BlocksIterator, FromBlock, FromVariant, ParsedBlock};
+//! `bloch` is renamed for testing purposes
+use renamed_bloch::reader::{Array, ArrayIter, I64, TryRead as _, U8, VariantNullable};
+use renamed_bloch::{BlocksIterator, FromBlock as _, FromVariant, ParsedBlock};
 
-#[derive(database::FromVariant)]
+#[derive(renamed_bloch::FromVariant)]
 enum Payload<'a> {
     #[col(reader = Array<'a, I64<'a>>)]
     Array(ArrayIter<'a, I64<'a>>),
@@ -9,7 +10,7 @@ enum Payload<'a> {
     Text(&'a str),
 }
 
-#[derive(database::FromBlock)]
+#[derive(renamed_bloch::FromBlock)]
 struct GenericRow<'a, T: FromVariant<'a>> {
     id: I64<'a>,
     var: VariantNullable<'a, T>,
@@ -24,9 +25,9 @@ impl<'a, T: FromVariant<'a>> Clone for GenericRow<'a, T> {
 }
 
 #[test]
-fn renamed_derives_read_noncopy_payloads_with_manual_copy() -> database::Result<()> {
-    let data = include_bytes!("../../testdata/variant.native");
-    let (_, block) = database::parse::block::parse_single(data)?;
+fn renamed_derives_read_noncopy_payloads_with_manual_copy() -> renamed_bloch::Result<()> {
+    let data = include_bytes!("../../bloch/testdata/variant.native");
+    let (_, block) = renamed_bloch::parse::block::parse_single(data)?;
     let rows = GenericRow::<Payload<'_>>::rows(&block)?
         .map(|row| {
             let row = row?;
@@ -38,7 +39,7 @@ fn renamed_derives_read_noncopy_payloads_with_manual_copy() -> database::Result<
             };
             Ok((row.id, value))
         })
-        .collect::<database::Result<Vec<_>>>()?;
+        .collect::<renamed_bloch::Result<Vec<_>>>()?;
     assert_eq!(
         rows,
         [
@@ -55,7 +56,7 @@ fn renamed_derives_read_noncopy_payloads_with_manual_copy() -> database::Result<
     Ok(())
 }
 
-#[derive(database::FromBlock, Copy, Clone)]
+#[derive(renamed_bloch::FromBlock, Copy, Clone)]
 struct RepeatedName<'a> {
     #[col(name = "x")]
     first: U8<'a>,
@@ -64,7 +65,8 @@ struct RepeatedName<'a> {
 }
 
 #[test]
-fn name_lookup_repeats_first_match_but_ordering_consumes_occurrences() -> database::Result<()> {
+fn name_lookup_repeats_first_match_but_ordering_consumes_occurrences() -> renamed_bloch::Result<()>
+{
     // Exercise both the small in-place and large allocated reorder paths.
     for width in [4, 64] {
         let values = (10..10 + width).collect::<Vec<u8>>();
@@ -73,7 +75,7 @@ fn name_lookup_repeats_first_match_but_ordering_consumes_occurrences() -> databa
         let mut blocks = [ParsedBlock {
             markers: values
                 .chunks_exact(1)
-                .map(|bytes| database::mark::Mark::UInt8(bytes.try_into().unwrap()))
+                .map(|bytes| renamed_bloch::mark::Mark::UInt8(bytes.try_into().unwrap()))
                 .collect(),
             col_names: names.into(),
             num_rows: 1,
@@ -86,7 +88,7 @@ fn name_lookup_repeats_first_match_but_ordering_consumes_occurrences() -> databa
             .markers
             .iter()
             .map(|mark| U8::try_from(mark)?.try_read(0))
-            .collect::<database::Result<Vec<_>>>()?;
+            .collect::<renamed_bloch::Result<Vec<_>>>()?;
         let mut expected = values.clone();
         expected.swap(1, 2);
         assert_eq!(actual, expected);

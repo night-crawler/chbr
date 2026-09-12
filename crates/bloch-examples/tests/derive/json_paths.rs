@@ -163,9 +163,8 @@ select * from json_shared_sample order by id format Native;
 "#;
 
     let data = std::fs::read(crate::common::fixture("json_shared.native"))?;
-    let error = match parse_single(&data) {
-        Ok(_) => panic!("non-empty shared JSON data must not be silently skipped"),
-        Err(error) => error,
+    let Err(error) = parse_single(&data) else {
+        panic!("non-empty shared JSON data must not be silently skipped")
     };
     assert!(matches!(
         &error,

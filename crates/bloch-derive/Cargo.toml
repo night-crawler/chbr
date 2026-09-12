@@ -1,0 +1,24 @@
+[package]
+name = "bloch-derive"
+description = "Derive macros for `bloch`, a ClickHouse Native format parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro-crate = { workspace = true }
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true }
+
+[dev-dependencies]
+# Renamed on purpose: the tests cover the `proc-macro-crate` lookup that resolves
+# `bloch` under a caller-chosen name.
+renamed_bloch = { package = "bloch", path = "../bloch" }
+
+[lints]
+workspace = true

@@ -1,0 +1,59 @@
+[package]
+name = "bloch"
+description = "A zero-copy-ish parser for the ClickHouse Native format"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+exclude = ["/benches/testdata/*.native", "/benches/testdata/*.rb"]
+
+[features]
+default = []
+serde1 = ["dep:serde"]
+mimalloc = ["dep:mimalloc"]
+
+[dependencies]
+bloch-derive = { workspace = true }
+bstr = { workspace = true }
+chrono = { workspace = true }
+chrono-tz = { workspace = true }
+half = { workspace = true }
+log = { workspace = true }
+mimalloc = { workspace = true, optional = true }
+nom = { workspace = true }
+paste = { workspace = true }
+rust_decimal = { workspace = true }
+serde = { workspace = true, optional = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+zerocopy = { workspace = true }
+
+[dev-dependencies]
+clickhouse = { workspace = true }
+criterion = { workspace = true }
+env_logger = { workspace = true }
+pretty_assertions = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+testresult = { workspace = true }
+
+[[bench]]
+name = "refs"
+harness = false
+
+[[bench]]
+name = "throughput"
+harness = false
+
+# Fixed-work driver for `scripts/perf_rows.py`; not a criterion bench.
+[[bench]]
+name = "rows"
+harness = false
+
+[[bench]]
+name = "json"
+harness = false
+required-features = ["serde1"]
+
+[lints]
+workspace = true
