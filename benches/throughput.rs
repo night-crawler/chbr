@@ -8,7 +8,7 @@ mod common;
 #[path = "common/consume.rs"]
 mod consume;
 
-use chbr::parse::block::parse_many;
+use bloch::parse::block::parse_many;
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use testresult::TestResult;
 
@@ -35,7 +35,7 @@ fn bench_throughput(c: &mut Criterion) {
         b.iter(|| consume_blocks(black_box(&blocks)).unwrap())
     });
 
-    group.bench_function("chbr_derive_sum", |b| {
+    group.bench_function("bloch_derive_sum", |b| {
         b.iter(|| consume_all(black_box(&native_data)).unwrap())
     });
     group.finish();

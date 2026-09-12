@@ -1,5 +1,5 @@
 [package]
-name = "chbr"
+name = "bloch"
 version = "0.1.0"
 edition = "2024"
 
@@ -23,8 +23,8 @@ serde = { version = "1", optional = true }
 bstr = "1"
 mimalloc = { version = "0.1", optional = true }
 
-[dependencies.chbr_derive]
-path = "./chbr_derive"
+[dependencies.bloch_derive]
+path = "./bloch_derive"
 
 
 [dev-dependencies]

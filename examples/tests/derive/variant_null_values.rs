@@ -1,7 +1,7 @@
-use chbr::parse::block::parse_single;
-use chbr::reader::{Array, ArrayIter, I64, Value as ValueReader, VariantNullable};
-use chbr::value::Value;
-use chbr::{FromBlock, FromVariant};
+use bloch::parse::block::parse_single;
+use bloch::reader::{Array, ArrayIter, I64, Value as ValueReader, VariantNullable};
+use bloch::value::Value;
+use bloch::{FromBlock, FromVariant};
 
 #[derive(FromVariant)]
 enum Var<'a> {
@@ -41,7 +41,7 @@ fn reads_null_variant_rows() -> Result<(), Box<dyn std::error::Error>> {
                     other => panic!("unexpected element {other:?}"),
                 })
             })
-            .collect::<chbr::Result<Vec<_>>>()?;
+            .collect::<bloch::Result<Vec<_>>>()?;
         rows.push(format!("{var} {}", elements.join(",")));
     }
     assert_eq!(

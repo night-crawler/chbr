@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{Array, I64, Str, U64};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{Array, I64, Str, U64};
 
 #[derive(FromBlock, Copy, Clone)]
 struct Child<'a> {
@@ -31,7 +31,7 @@ fn reads_nested_rows() -> Result<(), Box<dyn std::error::Error>> {
         let actual = row
             .nes
             .map(|child| child.map(|child| (child.child_id, child.child_name)))
-            .collect::<chbr::Result<Vec<_>>>()?;
+            .collect::<bloch::Result<Vec<_>>>()?;
         assert_eq!(actual, expected[index]);
     }
     Ok(())

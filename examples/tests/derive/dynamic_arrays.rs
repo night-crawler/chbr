@@ -1,7 +1,7 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::JsonIterator;
-use chbr::reader::{Array, I64, Value};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::JsonIterator;
+use bloch::reader::{Array, I64, Value};
 
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
@@ -16,7 +16,7 @@ fn reads_dynamic_arrays() -> Result<(), Box<dyn std::error::Error>> {
     for (index, row) in Row::rows(&block)?.enumerate() {
         let row = row?;
         assert_eq!(row.id, i64::try_from(index)?);
-        let values = row.arr.collect::<chbr::Result<Vec<_>>>()?;
+        let values = row.arr.collect::<bloch::Result<Vec<_>>>()?;
         match index {
             0 => assert_eq!(
                 values

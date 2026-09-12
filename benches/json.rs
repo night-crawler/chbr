@@ -4,7 +4,7 @@ use std::{fs, hint::black_box};
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use chbr::{
+use bloch::{
     parse::block::parse_single,
     reader::{Json, TryRead as _},
 };

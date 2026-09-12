@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{I64, Map, Str};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{I64, Map, Str};
 use std::collections::HashMap;
 
 #[derive(FromBlock, Copy, Clone)]
@@ -38,9 +38,9 @@ fn reads_nested_maps() -> Result<(), Box<dyn std::error::Error>> {
             .values
             .map(|entry| {
                 let (key, values) = entry?;
-                Ok((key, values.collect::<chbr::Result<HashMap<_, _>>>()?))
+                Ok((key, values.collect::<bloch::Result<HashMap<_, _>>>()?))
             })
-            .collect::<chbr::Result<HashMap<_, _>>>()?;
+            .collect::<bloch::Result<HashMap<_, _>>>()?;
         assert_eq!(actual, expected[index]);
     }
     Ok(())

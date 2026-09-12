@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{Enum8, Enum16, I64};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{Enum8, Enum16, I64};
 
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {

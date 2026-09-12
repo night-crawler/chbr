@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{I64, Str};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{I64, Str};
 
 // Field order deliberately differs from the ClickHouse tuple definition.
 // Named tuple fields are resolved through `#[col(name = ...)]`.

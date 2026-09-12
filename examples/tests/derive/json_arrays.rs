@@ -1,7 +1,7 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::JsonIterator;
-use chbr::reader::{Array, I64, Value};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::JsonIterator;
+use bloch::reader::{Array, I64, Value};
 
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
@@ -27,7 +27,7 @@ fn reads_json_arrays() -> Result<(), Box<dyn std::error::Error>> {
             let json: JsonIterator = value?.try_into()?;
             actual.extend(
                 json.map(|item| item.map(|(path, _)| path))
-                    .collect::<chbr::Result<Vec<_>>>()?,
+                    .collect::<bloch::Result<Vec<_>>>()?,
             );
         }
         actual.sort_unstable();

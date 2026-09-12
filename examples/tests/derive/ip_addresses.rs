@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{I64, Ipv4, Ipv6};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{I64, Ipv4, Ipv6};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 #[derive(FromBlock, Copy, Clone)]

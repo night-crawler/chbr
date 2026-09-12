@@ -6,7 +6,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod common;
 
-use chbr::{BlockRow, BlocksIterator, FromBlock as _, parse::block::parse_many};
+use bloch::{BlockRow, BlocksIterator, FromBlock as _, parse::block::parse_many};
 use chrono::Utc;
 use clickhouse::rowbinary::de::deserialize_from;
 use criterion::{Criterion, criterion_group, criterion_main};
@@ -55,13 +55,13 @@ pub struct BenchmarkSample<'a> {
 }
 
 #[inline(always)]
-fn trusted_str(bytes: &chbr::BStr) -> &str {
+fn trusted_str(bytes: &bloch::BStr) -> &str {
     // SAFETY: the benchmark fixture contains UTF-8 string columns.
     unsafe { std::str::from_utf8_unchecked(bytes) }
 }
 
 impl<'data, 'iter> TryFrom<BlockRow<'data, 'iter>> for BenchmarkSample<'data> {
-    type Error = chbr::error::Error;
+    type Error = bloch::error::Error;
 
     fn try_from(row: BlockRow<'data, 'iter>) -> Result<Self, Self::Error> {
         let i = row.row_index();
@@ -270,7 +270,7 @@ fn native_derive_read(input: &[u8]) -> TestResult<()> {
 // allocations occur between reads of later `BenchmarkCols` fields. It measures
 // this interleaved read-and-convert ordering rather than an allocation-free decoder.
 fn native_derive_direct_read(input: &[u8]) -> TestResult<()> {
-    use chbr::reader::TryRead as _;
+    use bloch::reader::TryRead as _;
 
     let blocks = parse_many(input)?;
 
@@ -334,15 +334,15 @@ fn bench_readers(c: &mut Criterion) {
         b.iter(|| ch_rs_read(black_box(&rb_data)).unwrap())
     });
 
-    c.bench_function("chbr", |b| {
+    c.bench_function("bloch", |b| {
         b.iter(|| native_read(black_box(&native_data)).unwrap())
     });
 
-    c.bench_function("chbr_derive", |b| {
+    c.bench_function("bloch_derive", |b| {
         b.iter(|| native_derive_read(black_box(&native_data)).unwrap())
     });
 
-    c.bench_function("chbr_derive_direct", |b| {
+    c.bench_function("bloch_derive_direct", |b| {
         b.iter(|| native_derive_direct_read(black_box(&native_data)).unwrap())
     });
 }

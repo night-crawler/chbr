@@ -1,6 +1,6 @@
 use std::hint::black_box;
 
-use chbr::FromBlock as _;
+use bloch::FromBlock as _;
 use testresult::TestResult;
 
 use crate::common::BenchmarkCols;
@@ -8,7 +8,7 @@ use crate::common::BenchmarkCols;
 // Kept out of line so the row loop is one inspectable symbol (`scripts/asm_summary.py`,
 // `scripts/perf_profile.py --annotate`); criterion already called it out of line.
 #[inline(never)]
-pub fn consume_blocks(blocks: &[chbr::ParsedBlock<'_>]) -> TestResult<()> {
+pub fn consume_blocks(blocks: &[bloch::ParsedBlock<'_>]) -> TestResult<()> {
     for row in BenchmarkCols::iter_blocks(blocks) {
         let row = row?;
 

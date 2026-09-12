@@ -1,13 +1,13 @@
 //! Type names as ClickHouse emits them in `Native` block headers.
 
-use chbr::interval::Kind;
-use chbr::mark::Mark;
-use chbr::parse::block::parse_single;
-use chbr::value::{
+use bloch::interval::Kind;
+use bloch::mark::Mark;
+use bloch::parse::block::parse_single;
+use bloch::value::{
     ArraySliceIterator, IntervalSliceIterator, NestedIterator, Time64SliceIterator,
     TimeSliceIterator, TupleSliceIterator, Value, VariantSliceIterator,
 };
-use chbr::{Error, Interval};
+use bloch::{Error, Interval};
 use chrono::TimeDelta;
 use testresult::TestResult;
 
@@ -159,11 +159,11 @@ fn time_types_parse() -> TestResult {
     Ok(())
 }
 
-fn points(points: TupleSliceIterator<'_>) -> chbr::Result<Vec<(f64, f64)>> {
+fn points(points: TupleSliceIterator<'_>) -> bloch::Result<Vec<(f64, f64)>> {
     points.map(<(f64, f64)>::try_from).collect()
 }
 
-fn rings(value: Value<'_>) -> chbr::Result<Vec<Vec<(f64, f64)>>> {
+fn rings(value: Value<'_>) -> bloch::Result<Vec<Vec<(f64, f64)>>> {
     ArraySliceIterator::<TupleSliceIterator>::try_from(value)?
         .map(|ring| points(ring?))
         .collect()

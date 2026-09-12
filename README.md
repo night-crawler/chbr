@@ -1,4 +1,4 @@
-# chbr (ClickHouseBlockReader)
+# bloch (ClickHouse block reader)
 
 A zero-copy-ish parser for the ClickHouse `Native` format. It does not talk to ClickHouse itself, so you need to get the
 bytes using some existing client, i.e., `clickhouse-client` a dump, whatever.
@@ -29,18 +29,18 @@ you will need to allocate memory for all blocks and only then parse/process it. 
 does not expose the RowBinary reader, I had to hack it to have some sort of apples-to-apples comparison.
 
 - `serde` means `clickhouse-rs` deserializer from a pinned version I need to update some day
-- `chbr` means manual read with column sorting
-- `chbr_derive` - derive a struct and use the generated `*Item` column to access
-- `chbr_derive_direct` read with try_read.
+- `bloch` means manual read with column sorting
+- `bloch_derive` - derive a struct and use the generated `*Item` column to access
+- `bloch_derive_direct` read with try_read.
 
 ```bash
 # LTO, mimalloc, a mixture of LC strings, arrays, and dates, 100k rows
 # AMD Ryzen 9 7940HS
 cargo bench --bench refs --features mimalloc
 serde                   time:   [18.406 ms 18.484 ms 18.562 ms]
-chbr                    time:   [7.6797 ms 7.7583 ms 7.8431 ms]
-chbr_derive             time:   [8.1552 ms 8.2321 ms 8.3130 ms]
-chbr_derive_direct      time:   [7.1309 ms 7.1904 ms 7.2531 ms]
+bloch                    time:   [7.6797 ms 7.7583 ms 7.8431 ms]
+bloch_derive             time:   [8.1552 ms 8.2321 ms 8.3130 ms]
+bloch_derive_direct      time:   [7.1309 ms 7.1904 ms 7.2531 ms]
 ```
 
 ## Quick start
@@ -51,7 +51,7 @@ Create a table and populate:
 clickhouse-client --host 127.0.0.1 --port 9000 \
     --database qweqwe --user lol --password wut \
     --multiquery "
-CREATE TABLE chbr_example
+CREATE TABLE bloch_example
 (
     id      UInt32,
     tags    Array(String),
@@ -61,7 +61,7 @@ CREATE TABLE chbr_example
 ENGINE = MergeTree
 ORDER BY id;
 
-INSERT INTO chbr_example VALUES
+INSERT INTO bloch_example VALUES
     (1, ['fast', 'cpu'], {'region': 'eu', 'host': 'a1'}, 'hello'),
     (2, [], {'region': 'us'}, 42),
     (3, ['gpu'], {}, [1, 2, 3]),
@@ -74,14 +74,14 @@ Dump the table in `Native` format:
 ```sh
 clickhouse-client --host 127.0.0.1 --port 9000 \
     --database qweqwe --user lol --password wut \
-    --query "SELECT * FROM chbr_example ORDER BY id FORMAT Native" \
+    --query "SELECT * FROM bloch_example ORDER BY id FORMAT Native" \
     > testdata/example.native
 ```
 
 Parse it:
 
 ```rust
-use chbr::{BStr, BlocksIterator, parse::block::parse_many, value::Value};
+use bloch::{BStr, BlocksIterator, parse::block::parse_many, value::Value};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data = std::fs::read("testdata/example.native")?;
@@ -141,9 +141,9 @@ matching, mutation, validation, and empty-input behavior.
 Or, instead of matching on `Value` and destructuring `row.cols()` by hand, derive a reader.
 
 ```rust
-use chbr::parse::block::parse_many;
-use chbr::reader::{Array, ArrayIter, I64, Map, Str, U32, VariantNullable};
-use chbr::{FromBlock, FromVariant};
+use bloch::parse::block::parse_many;
+use bloch::reader::{Array, ArrayIter, I64, Map, Str, U32, VariantNullable};
+use bloch::{FromBlock, FromVariant};
 
 // Same order as in Variant(Array(Int64), Int64, String)
 #[derive(FromVariant)]
@@ -175,7 +175,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Arrays, maps, nested / !scalar cols are lazy
         let tags: Vec<&str> = row.tags.try_collect_vec()?;
-        let attrs: Vec<(&str, &str)> = row.attributes.collect::<chbr::Result<_>>()?;
+        let attrs: Vec<(&str, &str)> = row.attributes.collect::<bloch::Result<_>>()?;
 
         let payload = match row.payload {
             Some(Payload::Str(s)) => format!("string: {s}"),
@@ -191,18 +191,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-See the [`FromBlock` derive contract](chbr_derive/src/lib.rs) for reader
+See the [`FromBlock` derive contract](bloch_derive/src/lib.rs) for reader
 copyability, generic bounds, and duplicate-name lookup.
 
-Both `FromBlock` and `FromVariant` support renaming the `chbr` dependency in `Cargo.toml`;
+Both `FromBlock` and `FromVariant` support renaming the `bloch` dependency in `Cargo.toml`;
 the derives automatically resolve the dependency's name. Import the macros and reader types
 through that name, with no derive-specific crate-path configuration.
 
 Read data somewhat more manually:
 
 ```rust
-use chbr::parse::block::parse_many;
-use chbr::reader::TryRead as _;
+use bloch::parse::block::parse_many;
+use bloch::reader::TryRead as _;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data = std::fs::read("testdata/example.native")?;
@@ -245,7 +245,7 @@ The standalone examples crate keeps both access styles as executable tests:
   `#[derive(FromBlock, Copy, Clone)]` (and `#[derive(FromVariant)]` for variant schemas).
 
 ```sh
-cargo test -p chbr-examples
+cargo test -p bloch-examples
 ```
 
 ## ~Slop~ LLM policy

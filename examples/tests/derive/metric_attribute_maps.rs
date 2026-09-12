@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{LcStr, Map};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{LcStr, Map};
 
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
@@ -17,7 +17,7 @@ fn reads_metric_attribute_maps() -> Result<(), Box<dyn std::error::Error>> {
     for row in Row::rows(&block)? {
         let row = row?;
         for map in [row.resource_attrs, row.scope_attrs, row.attrs] {
-            map.collect::<chbr::Result<Vec<_>>>()?;
+            map.collect::<bloch::Result<Vec<_>>>()?;
         }
         rows += 1;
     }

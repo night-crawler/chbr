@@ -1,5 +1,5 @@
-use chbr::FromBlock;
-use chbr::reader::{
+use bloch::FromBlock;
+use bloch::reader::{
     Array, Bool, DateTime, F64, Ipv6, LcNullableTrustedStr, LcTrustedStr, Nullable, U32, U64, U128,
     Uuid,
 };

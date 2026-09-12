@@ -1,9 +1,9 @@
 //! JSON columns whose typed, dynamic, and array-valued paths are declared in different orders
 //! all iterate their paths in name order with the right values.
 
-use chbr::parse::block::parse_single;
-use chbr::reader::JsonIterator;
-use chbr::value::Value;
+use bloch::parse::block::parse_single;
+use bloch::reader::JsonIterator;
+use bloch::value::Value;
 use testresult::TestResult;
 
 fn load(name: &str) -> std::io::Result<Vec<u8>> {

@@ -1,7 +1,7 @@
-use chbr::FromBlock;
-use chbr::error::Error;
-use chbr::parse::block::parse_single;
-use chbr::reader::I64;
+use bloch::FromBlock;
+use bloch::error::Error;
+use bloch::parse::block::parse_single;
+use bloch::reader::I64;
 
 #[derive(FromBlock, Copy, Clone)]
 struct MissingColumn<'a> {

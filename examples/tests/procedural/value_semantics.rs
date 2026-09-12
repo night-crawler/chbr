@@ -1,7 +1,7 @@
-use chbr::parse::block::parse_single;
-use chbr::reader::{Array, LcNullableStr, TryRead as _};
-use chbr::value::{LowCardinalitySliceIterator, MapIterator, Value};
-use chbr::zc;
+use bloch::parse::block::parse_single;
+use bloch::reader::{Array, LcNullableStr, TryRead as _};
+use bloch::value::{LowCardinalitySliceIterator, MapIterator, Value};
+use bloch::zc;
 use testresult::TestResult;
 
 fn load(name: &str) -> std::io::Result<Vec<u8>> {

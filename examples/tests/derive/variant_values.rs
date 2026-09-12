@@ -1,6 +1,6 @@
-use chbr::parse::block::parse_single;
-use chbr::reader::{ArrayIter, I64, Variant};
-use chbr::{FromBlock, FromVariant};
+use bloch::parse::block::parse_single;
+use bloch::reader::{ArrayIter, I64, Variant};
+use bloch::{FromBlock, FromVariant};
 
 #[derive(FromVariant)]
 enum Value<'a> {

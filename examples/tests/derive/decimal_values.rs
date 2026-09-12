@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{Decimal32, Decimal64, Decimal128, I64};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{Decimal32, Decimal64, Decimal128, I64};
 use rust_decimal::Decimal;
 
 #[derive(FromBlock, Copy, Clone)]

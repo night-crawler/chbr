@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{Array, I64};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{Array, I64};
 
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
@@ -26,7 +26,7 @@ fn reads_nested_integer_arrays() -> Result<(), Box<dyn std::error::Error>> {
         let actual = row
             .arr
             .map(|values| values?.try_collect_vec())
-            .collect::<chbr::Result<Vec<_>>>()?;
+            .collect::<bloch::Result<Vec<_>>>()?;
         assert_eq!(actual, expected[index]);
     }
     Ok(())

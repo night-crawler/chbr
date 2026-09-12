@@ -1,4 +1,4 @@
-extern crate self as chbr;
+extern crate self as bloch;
 
 use std::hint::cold_path;
 
@@ -25,8 +25,8 @@ pub(crate) mod types;
 pub mod value;
 pub mod zc;
 
+pub use bloch_derive::{FromBlock, FromVariant};
 pub use bstr::BStr;
-pub use chbr_derive::{FromBlock, FromVariant};
 pub use error::Error;
 pub use interval::Interval;
 // Same name as the derive macro on purpose (macro vs type namespace):

@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{Array, ArrayIter, Geometry, I64, Point, Ring, VariantNullable};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{Array, ArrayIter, Geometry, I64, Point, Ring, VariantNullable};
 
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
@@ -11,11 +11,11 @@ struct Row<'a> {
     arr: Array<'a, VariantNullable<'a, Geometry<'a>>>,
 }
 
-fn ring<'a>(points: ArrayIter<'a, Point<'a>>) -> chbr::Result<Vec<(f64, f64)>> {
+fn ring<'a>(points: ArrayIter<'a, Point<'a>>) -> bloch::Result<Vec<(f64, f64)>> {
     points.try_collect_vec()
 }
 
-fn polygon<'a>(rings: ArrayIter<'a, Ring<'a>>) -> chbr::Result<Vec<Vec<(f64, f64)>>> {
+fn polygon<'a>(rings: ArrayIter<'a, Ring<'a>>) -> bloch::Result<Vec<Vec<(f64, f64)>>> {
     rings.map(|r| ring(r?)).collect()
 }
 
@@ -53,7 +53,7 @@ fn reads_geometry_by_discriminator_order() -> Result<(), Box<dyn std::error::Err
                 ]
             ),
             (5, Some(Geometry::MultiPolygon(mp))) => {
-                let polygons: Vec<_> = mp.map(|p| polygon(p?)).collect::<chbr::Result<_>>()?;
+                let polygons: Vec<_> = mp.map(|p| polygon(p?)).collect::<bloch::Result<_>>()?;
                 assert_eq!(polygons.len(), 2);
                 assert_eq!(
                     polygons[0],

@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{LcStr, Map};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{LcStr, Map};
 
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
@@ -13,7 +13,7 @@ fn preserves_empty_strings_in_low_cardinality_maps() -> Result<(), Box<dyn std::
     let (remaining, block) = parse_single(&data)?;
     assert!(remaining.is_empty());
     for row in Row::rows(&block)? {
-        row?.resource_attrs.collect::<chbr::Result<Vec<_>>>()?;
+        row?.resource_attrs.collect::<bloch::Result<Vec<_>>>()?;
     }
     Ok(())
 }

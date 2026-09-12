@@ -1,4 +1,4 @@
-use chbr::{BlocksIterator, parse::block::parse_many, value::Value};
+use bloch::{BlocksIterator, parse::block::parse_many, value::Value};
 
 #[test]
 fn basic() -> Result<(), Box<dyn std::error::Error>> {
@@ -15,7 +15,7 @@ fn basic() -> Result<(), Box<dyn std::error::Error>> {
         let i = row.row_index();
 
         let id = id.get_u32(i)?.expect("valid row index");
-        let tags: &[&chbr::BStr] = tags.get(i)?.expect("valid row index").try_into()?;
+        let tags: &[&bloch::BStr] = tags.get(i)?.expect("valid row index").try_into()?;
         let tags = tags
             .iter()
             .map(|value| std::str::from_utf8(value))

@@ -1,7 +1,7 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{Array, I64, Value as ValueReader};
-use chbr::value::Value;
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{Array, I64, Value as ValueReader};
+use bloch::value::Value;
 
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
@@ -33,7 +33,7 @@ fn reads_null_dynamic_rows() -> Result<(), Box<dyn std::error::Error>> {
         let elements = row
             .arr
             .map(|value| value.map(render))
-            .collect::<chbr::Result<Vec<_>>>()?;
+            .collect::<bloch::Result<Vec<_>>>()?;
         rows.push(format!("{} {}", render(row.value), elements.join(",")));
     }
     assert_eq!(rows, ["42 1,null,a", "null ", "x null", "null null,null"]);

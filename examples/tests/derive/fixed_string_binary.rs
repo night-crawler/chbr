@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{FixedBytes, FixedStr, I64};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{FixedBytes, FixedStr, I64};
 
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
@@ -36,7 +36,7 @@ fn reads_fixed_string_binary_payloads() -> Result<(), Box<dyn std::error::Error>
     // The `&str` reader refuses the column: row 2 is not UTF-8.
     assert!(matches!(
         TextRow::rows(&block),
-        Err(chbr::Error::Utf8Decode(_, _))
+        Err(bloch::Error::Utf8Decode(_, _))
     ));
     Ok(())
 }

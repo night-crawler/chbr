@@ -1,17 +1,17 @@
-use chbr::parse::block::parse_single;
-use chbr::value::{
+use bloch::parse::block::parse_single;
+use bloch::value::{
     ArraySliceIterator, BoolSliceIterator, DateTime64SliceIterator, Decimal64SliceIterator,
     DynamicSliceIterator, Enum8SliceIterator, FixedStringSliceIterator,
     LowCardinalitySliceIterator, MapSliceIterator, NamedTupleSliceIterator, NestedIterator,
     NullableSliceIterator, TupleSliceIterator, Value, VariantSliceIterator,
 };
-use chbr::zc;
-use chbr::{BStr, ParsedBlock};
+use bloch::zc;
+use bloch::{BStr, ParsedBlock};
 use testresult::TestResult;
 
 fn all_rows_empty<'a, I>(block: &'a ParsedBlock<'a>, col: &str) -> TestResult
 where
-    I: TryFrom<Value<'a>, Error = chbr::Error> + ExactSizeIterator,
+    I: TryFrom<Value<'a>, Error = bloch::Error> + ExactSizeIterator,
 {
     let mark = block.mark(col)?;
     for row in 0..block.num_rows {
@@ -72,7 +72,7 @@ fn empty_array_and_null_stay_distinct() -> TestResult {
                     },
                 })
             })
-            .collect::<chbr::Result<_>>()?;
+            .collect::<bloch::Result<_>>()?;
         assert_eq!(rows, ["[]", "null", "7"], "{col}");
     }
     Ok(())

@@ -175,14 +175,14 @@ mod tests {
         let (rest, block) = parse_single(&b)?;
         assert!(rest.is_empty());
 
-        let chbr::mark::Mark::Dynamic(dynamic) = &block.markers[0] else {
+        let bloch::mark::Mark::Dynamic(dynamic) = &block.markers[0] else {
             panic!("expected Dynamic mark, got {:?}", block.markers[0]);
         };
         assert!(matches!(
             dynamic.get(0)?,
-            Some(chbr::value::Value::Int64(42))
+            Some(bloch::value::Value::Int64(42))
         ));
-        assert!(matches!(dynamic.get(1)?, Some(chbr::value::Value::Empty)));
+        assert!(matches!(dynamic.get(1)?, Some(bloch::value::Value::Empty)));
         assert!(dynamic.get(2)?.is_none());
         Ok(())
     }

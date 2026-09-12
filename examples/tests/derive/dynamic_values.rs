@@ -1,7 +1,7 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{I64, Value as ValueReader};
-use chbr::value::{MapIterator, Value};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{I64, Value as ValueReader};
+use bloch::value::{MapIterator, Value};
 use std::collections::HashMap;
 
 #[derive(FromBlock, Copy, Clone)]
@@ -29,7 +29,7 @@ fn reads_dynamic_values() -> Result<(), Box<dyn std::error::Error>> {
             (3, value) => {
                 let map: MapIterator<&str, &str> = value.try_into()?;
                 assert_eq!(
-                    map.collect::<chbr::Result<HashMap<_, _>>>()?.get("key"),
+                    map.collect::<bloch::Result<HashMap<_, _>>>()?.get("key"),
                     Some(&"value")
                 );
             }

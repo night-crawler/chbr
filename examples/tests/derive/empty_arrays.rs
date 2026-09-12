@@ -1,10 +1,10 @@
-use chbr::parse::block::parse_single;
-use chbr::reader::{
+use bloch::parse::block::parse_single;
+use bloch::reader::{
     Array, ArrayIter, Bool, DateTime64, Decimal64, Enum8, FixedStr, I64, LcNullableStr, LcStr, Map,
     Nullable, Str, Tuple, U8, Value as ValueReader, VariantNullable,
 };
-use chbr::value::Value;
-use chbr::{FromBlock, FromVariant};
+use bloch::value::Value;
+use bloch::{FromBlock, FromVariant};
 
 // `a_v` has no elements, so no payload is ever read.
 #[allow(dead_code)]

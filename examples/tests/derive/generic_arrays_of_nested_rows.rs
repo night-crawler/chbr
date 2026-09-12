@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{Array, I64, Str, U64};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{Array, I64, Str, U64};
 
 #[derive(FromBlock, Copy, Clone)]
 struct Child<'a> {
@@ -10,7 +10,7 @@ struct Child<'a> {
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a, C>
 where
-    C: chbr::reader::TryRead<'a> + 'a,
+    C: bloch::reader::TryRead<'a> + 'a,
 {
     id: I64<'a>,
     arr: Array<'a, Array<'a, C>>,
@@ -36,9 +36,9 @@ fn reads_arrays_of_nested_rows() -> Result<(), Box<dyn std::error::Error>> {
             .map(|children| {
                 children?
                     .map(|child| child.map(|child| (child.child_id, child.child_name)))
-                    .collect::<chbr::Result<Vec<_>>>()
+                    .collect::<bloch::Result<Vec<_>>>()
             })
-            .collect::<chbr::Result<Vec<_>>>()?;
+            .collect::<bloch::Result<Vec<_>>>()?;
         assert_eq!(actual, expected[index]);
     }
     Ok(())

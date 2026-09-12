@@ -1,6 +1,6 @@
 use std::{collections::HashMap, str::FromStr as _};
 
-use chbr::{
+use bloch::{
     BStr, Bf16Data,
     error::Error,
     parse::block::parse_single,
@@ -726,7 +726,7 @@ fn decimal_sample() -> TestResult {
     let decimal256_marker = &block.markers[4];
     assert!(matches!(
         rust_decimal::Decimal::try_from(decimal256_marker.get(0)?.unwrap()),
-        Err(chbr::Error::NotImplemented(_))
+        Err(bloch::Error::NotImplemented(_))
     ));
 
     Ok(())

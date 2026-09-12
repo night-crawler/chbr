@@ -1,6 +1,6 @@
-use chbr::parse::block::parse_single;
-use chbr::reader::{Array, ArrayIter, I64, JsonValue, U64, Variant};
-use chbr::{FromBlock, FromVariant};
+use bloch::parse::block::parse_single;
+use bloch::reader::{Array, ArrayIter, I64, JsonValue, U64, Variant};
+use bloch::{FromBlock, FromVariant};
 
 // Variant alternatives follow ClickHouse's canonical type order:
 // Array(UInt64), JSON, String, UInt64.

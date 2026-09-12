@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{Array, Nullable, Time, Time64};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{Array, Nullable, Time, Time64};
 use chrono::TimeDelta;
 
 #[derive(FromBlock, Copy, Clone)]

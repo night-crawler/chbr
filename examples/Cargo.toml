@@ -1,11 +1,11 @@
 [package]
-name = "chbr-examples"
+name = "bloch-examples"
 version = "0.0.0"
 edition = "2024"
 publish = false
 
 [dependencies]
-chbr = { path = ".." }
+bloch = { path = ".." }
 chrono = "0.4"
 chrono-tz = "0.10"
 half = "2.6"

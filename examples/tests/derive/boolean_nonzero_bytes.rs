@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{Array, Bool, U64};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{Array, Bool, U64};
 
 #[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {

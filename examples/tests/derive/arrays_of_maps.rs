@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{Array, I64, Map, Str};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{Array, I64, Map, Str};
 use std::collections::HashMap;
 
 #[derive(FromBlock, Copy, Clone)]
@@ -32,8 +32,8 @@ fn reads_arrays_of_maps() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(row.id, i64::try_from(index)?);
         let actual = row
             .arr_map
-            .map(|map| map?.collect::<chbr::Result<HashMap<_, _>>>())
-            .collect::<chbr::Result<Vec<_>>>()?;
+            .map(|map| map?.collect::<bloch::Result<HashMap<_, _>>>())
+            .collect::<bloch::Result<Vec<_>>>()?;
         assert_eq!(actual, expected[index]);
     }
     Ok(())

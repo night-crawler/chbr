@@ -1,7 +1,7 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{Array, Interval, Nullable};
-use chbr::{Error, ParsedBlock};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{Array, Interval, Nullable};
+use bloch::{Error, ParsedBlock};
 use chrono::TimeDelta;
 
 #[derive(FromBlock, Copy, Clone)]

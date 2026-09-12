@@ -8,7 +8,7 @@ mod common;
 #[path = "common/consume.rs"]
 mod consume;
 
-use chbr::parse::block::parse_many;
+use bloch::parse::block::parse_many;
 
 use crate::consume::consume_blocks;
 

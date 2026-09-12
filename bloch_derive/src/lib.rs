@@ -19,7 +19,7 @@ struct ColSpec {
     name: TokenStream2,
 }
 
-/// Derives `chbr::reader::FromBlock` for a named struct of column readers.
+/// Derives `bloch::reader::FromBlock` for a named struct of column readers.
 ///
 /// The reader struct must implement `Copy` and `Clone`, usually via
 /// `#[derive(FromBlock, Copy, Clone)]`. This macro does not implement either
@@ -33,8 +33,8 @@ struct ColSpec {
 /// # Example
 ///
 /// ```ignore
-/// use chbr::reader::{Array, I64, Map, Str};
-/// use chbr::{FromBlock, ParsedBlock};
+/// use bloch::reader::{Array, I64, Map, Str};
+/// use bloch::{FromBlock, ParsedBlock};
 ///
 /// const ID_COLUMN: &str = "id";
 ///
@@ -46,7 +46,7 @@ struct ColSpec {
 ///     maps: Array<'a, Map<'a, Str<'a>, Str<'a>>>,
 /// }
 ///
-/// fn read(block: &ParsedBlock<'_>) -> chbr::Result<()> {
+/// fn read(block: &ParsedBlock<'_>) -> bloch::Result<()> {
 ///     let mut total_pairs = 0;
 ///     for (row_index, row) in MapRow::rows(block)?.enumerate() {
 ///         let row = row?;
@@ -68,13 +68,13 @@ pub fn derive_from_block(input: TokenStream) -> TokenStream {
         .into()
 }
 
-/// Derives `chbr::reader::FromVariant` for an enum representing one ClickHouse `Variant` value.
+/// Derives `bloch::reader::FromVariant` for an enum representing one ClickHouse `Variant` value.
 ///
 /// # Example
 ///
 /// ```ignore
-/// use chbr::reader::{Array, ArrayIter, I64, TryRead as _, Variant};
-/// use chbr::FromVariant;
+/// use bloch::reader::{Array, ArrayIter, I64, TryRead as _, Variant};
+/// use bloch::FromVariant;
 ///
 /// // This order matches Variant(Array(Int64), Int64, String).
 /// #[derive(FromVariant)]
@@ -101,12 +101,12 @@ pub fn derive_from_variant(input: TokenStream) -> TokenStream {
         .into()
 }
 
-fn chbr_path() -> Result<TokenStream2, syn::Error> {
-    match crate_name("chbr")
+fn bloch_path() -> Result<TokenStream2, syn::Error> {
+    match crate_name("bloch")
         .map_err(|error| syn::Error::new(proc_macro2::Span::call_site(), error))?
     {
         // `crate` would name the integration-test/example target, not the library.
-        FoundCrate::Itself => Ok(quote! { ::chbr }),
+        FoundCrate::Itself => Ok(quote! { ::bloch }),
         FoundCrate::Name(name) => {
             let ident = format_ident!("{}", name);
             Ok(quote! { ::#ident })
@@ -115,7 +115,7 @@ fn chbr_path() -> Result<TokenStream2, syn::Error> {
 }
 
 fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Error> {
-    let chbr = chbr_path()?;
+    let bloch = bloch_path()?;
     let fields: &Punctuated<Field, Comma> = extract_fields(input)?;
     let lt = extract_lifetime(input)?;
 
@@ -137,7 +137,7 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
         read_generics
             .make_where_clause()
             .predicates
-            .push(parse_quote! { #ty: #chbr::reader::TryRead<#lt> });
+            .push(parse_quote! { #ty: #bloch::reader::TryRead<#lt> });
     }
     let (_, _, item_where) = read_generics.split_for_impl();
 
@@ -155,11 +155,11 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
     for ColSpec { ty, .. } in &specs {
         let predicates = &mut mark_generics.make_where_clause().predicates;
         predicates.push(parse_quote! {
-            #ty: ::core::convert::TryFrom<&#lt #chbr::mark::Mark<#lt>>
+            #ty: ::core::convert::TryFrom<&#lt #bloch::mark::Mark<#lt>>
         });
         predicates.push(parse_quote! {
-            #chbr::error::Error: ::core::convert::From<
-                <#ty as ::core::convert::TryFrom<&#lt #chbr::mark::Mark<#lt>>>::Error,
+            #bloch::error::Error: ::core::convert::From<
+                <#ty as ::core::convert::TryFrom<&#lt #bloch::mark::Mark<#lt>>>::Error,
             >
         });
     }
@@ -168,7 +168,7 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
     let item_fields = specs
         .iter()
         .map(|ColSpec { ident, ty, vis, .. }| {
-            quote! { #vis #ident: <#ty as #chbr::reader::TryRead<#lt>>::Item }
+            quote! { #vis #ident: <#ty as #bloch::reader::TryRead<#lt>>::Item }
         })
         .collect::<Vec<_>>();
 
@@ -206,13 +206,13 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
     let read_fields_unchecked = specs
         .iter()
         .map(|ColSpec { ident, .. }| {
-            quote! { #ident: #chbr::reader::TryRead::try_read_unchecked(&self.#ident, idx)? }
+            quote! { #ident: #bloch::reader::TryRead::try_read_unchecked(&self.#ident, idx)? }
         })
         .collect::<Vec<_>>();
 
     let field_lens = specs
         .iter()
-        .map(|ColSpec { ident, .. }| quote! { #chbr::reader::TryRead::len(&self.#ident) })
+        .map(|ColSpec { ident, .. }| quote! { #bloch::reader::TryRead::len(&self.#ident) })
         .collect::<Vec<_>>();
 
     Ok(quote! {
@@ -221,14 +221,14 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
         }
 
         #[automatically_derived]
-        impl #impl_generics #chbr::reader::FromBlock<#lt> for #ident #ty_generics #mark_where {
-            fn from_block(block: &#lt #chbr::ParsedBlock<#lt>) -> #chbr::Result<Self> {
+        impl #impl_generics #bloch::reader::FromBlock<#lt> for #ident #ty_generics #mark_where {
+            fn from_block(block: &#lt #bloch::ParsedBlock<#lt>) -> #bloch::Result<Self> {
                 ::core::result::Result::Ok(Self { #(#block_inits,)* })
             }
         }
 
         #[automatically_derived]
-        impl #impl_generics #chbr::reader::TryRead<#lt> for #ident #ty_generics #read_where {
+        impl #impl_generics #bloch::reader::TryRead<#lt> for #ident #ty_generics #read_where {
             type Item = #item_ident #ty_generics;
             const NAME: &'static str = ::core::stringify!(#ident);
 
@@ -236,36 +236,36 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
             fn len(&self) -> usize {
                 // The shortest column: `try_read_unchecked(idx)` is sound for every field only
                 // when `idx` is below all of their lengths.
-                let len = #chbr::parse::consts::MAX_NUM_ROWS;
+                let len = #bloch::parse::consts::MAX_NUM_ROWS;
                 #( let len = ::core::cmp::min(len, #field_lens); )*
                 len
             }
 
             #[inline(always)]
-            unsafe fn try_read_unchecked(&self, idx: usize) -> #chbr::Result<Self::Item> {
+            unsafe fn try_read_unchecked(&self, idx: usize) -> #bloch::Result<Self::Item> {
                 // SAFETY: `idx < len()`, and `len()` is the minimum over the columns.
                 unsafe { ::core::result::Result::Ok(#item_ident { #(#read_fields_unchecked,)* }) }
             }
         }
 
         #[automatically_derived]
-        impl #impl_generics ::core::convert::TryFrom<&#lt #chbr::mark::Mark<#lt>>
+        impl #impl_generics ::core::convert::TryFrom<&#lt #bloch::mark::Mark<#lt>>
             for #ident #ty_generics
         #mark_where
         {
-            type Error = #chbr::error::Error;
+            type Error = #bloch::error::Error;
 
             fn try_from(
-                mark: &#lt #chbr::mark::Mark<#lt>,
+                mark: &#lt #bloch::mark::Mark<#lt>,
             ) -> ::core::result::Result<Self, Self::Error> {
                 match mark {
-                    #chbr::mark::Mark::NamedTuple(nt) => {
+                    #bloch::mark::Mark::NamedTuple(nt) => {
                         ::core::result::Result::Ok(Self { #(#named_inits,)* })
                     }
-                    #chbr::mark::Mark::Tuple(tuple) => {
+                    #bloch::mark::Mark::Tuple(tuple) => {
                         if tuple.values.len() != #num_fields {
                             return ::core::result::Result::Err(
-                                #chbr::error::Error::MismatchedType(
+                                #bloch::error::Error::MismatchedType(
                                     "Tuple",
                                     "Tuple with matching arity",
                                 ),
@@ -273,7 +273,7 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
                         }
                         ::core::result::Result::Ok(Self { #(#positional_inits,)* })
                     }
-                    other => ::core::result::Result::Err(#chbr::error::Error::MismatchedType(
+                    other => ::core::result::Result::Err(#bloch::error::Error::MismatchedType(
                         other.as_str(),
                         "NamedTuple/Tuple",
                     )),
@@ -284,7 +284,7 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
 }
 
 fn derive_from_variant_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Error> {
-    let chbr = chbr_path()?;
+    let bloch = bloch_path()?;
     let Data::Enum(en) = &input.data else {
         return Err(syn::Error::new(
             input.span(),
@@ -301,7 +301,7 @@ fn derive_from_variant_inner(input: &DeriveInput) -> Result<TokenStream2, syn::E
     // Zero lifetimes is fine (all-owned payloads); a fresh one is used then.
     let lt = match extract_optional_lifetime(input)? {
         Some(lt) => lt.clone(),
-        None => Lifetime::new("'chbr", proc_macro2::Span::call_site()),
+        None => Lifetime::new("'bloch", proc_macro2::Span::call_site()),
     };
 
     let ident = &input.ident;
@@ -315,7 +315,7 @@ fn derive_from_variant_inner(input: &DeriveInput) -> Result<TokenStream2, syn::E
         let payload = extract_payload(variant)?;
         let reader_ty = match parse_col_reader(variant)? {
             Some(ty) => ty.to_token_stream(),
-            None => quote! { <#payload as #chbr::reader::Readable<#lt>>::Reader },
+            None => quote! { <#payload as #bloch::reader::Readable<#lt>>::Reader },
         };
         reader_tys.push(reader_ty);
 
@@ -323,7 +323,7 @@ fn derive_from_variant_inner(input: &DeriveInput) -> Result<TokenStream2, syn::E
         let tuple_idx = syn::Index::from(index);
         read_arms.push(quote! {
             #index => ::core::result::Result::Ok(Self::#var_ident(
-                #chbr::reader::TryRead::try_read(&readers.#tuple_idx, idx)?,
+                #bloch::reader::TryRead::try_read(&readers.#tuple_idx, idx)?,
             ))
         });
         init_exprs.push(quote! { ::core::convert::TryFrom::try_from(&marks[#index])? });
@@ -334,15 +334,15 @@ fn derive_from_variant_inner(input: &DeriveInput) -> Result<TokenStream2, syn::E
 
     Ok(quote! {
         #[automatically_derived]
-        impl<#lt> #chbr::reader::FromVariant<#lt> for #ident #ty_generics {
+        impl<#lt> #bloch::reader::FromVariant<#lt> for #ident #ty_generics {
             type Readers = (#(#reader_tys,)*);
 
             fn from_marks(
-                marks: &#lt [#chbr::mark::Mark<#lt>],
-            ) -> #chbr::Result<Self::Readers> {
+                marks: &#lt [#bloch::mark::Mark<#lt>],
+            ) -> #bloch::Result<Self::Readers> {
                 if marks.len() != #num_variants {
                     return ::core::result::Result::Err(
-                        #chbr::error::Error::MismatchedType("Variant", #arity_msg),
+                        #bloch::error::Error::MismatchedType("Variant", #arity_msg),
                     );
                 }
                 ::core::result::Result::Ok((#(#init_exprs,)*))
@@ -353,11 +353,11 @@ fn derive_from_variant_inner(input: &DeriveInput) -> Result<TokenStream2, syn::E
                 readers: &Self::Readers,
                 discriminator: usize,
                 idx: usize,
-            ) -> #chbr::Result<Self> {
+            ) -> #bloch::Result<Self> {
                 match discriminator {
                     #(#read_arms,)*
                     _ => ::core::result::Result::Err(
-                        #chbr::error::Error::IndexOutOfBounds(discriminator, #disc_msg),
+                        #bloch::error::Error::IndexOutOfBounds(discriminator, #disc_msg),
                     ),
                 }
             }

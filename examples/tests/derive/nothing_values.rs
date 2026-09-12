@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{Array, Nothing, Nullable, U64};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{Array, Nothing, Nullable, U64};
 
 /// `Nothing` is the element type of `[]` and the inner type of `NULL`.
 #[derive(FromBlock, Copy, Clone)]

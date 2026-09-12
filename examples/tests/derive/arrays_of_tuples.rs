@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{Array, I64, LcStr};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{Array, I64, LcStr};
 
 #[derive(FromBlock, Copy, Clone)]
 struct Fruit<'a> {
@@ -31,7 +31,7 @@ fn reads_arrays_of_tuples() -> Result<(), Box<dyn std::error::Error>> {
         let actual = row
             .arr
             .map(|fruit| fruit.map(|fruit| (fruit.name, fruit.rank)))
-            .collect::<chbr::Result<Vec<_>>>()?;
+            .collect::<bloch::Result<Vec<_>>>()?;
         assert_eq!(actual, expected[index]);
     }
     Ok(())

@@ -1,6 +1,6 @@
-use chbr::FromBlock;
-use chbr::parse::block::parse_single;
-use chbr::reader::{I64, Map, Str};
+use bloch::FromBlock;
+use bloch::parse::block::parse_single;
+use bloch::reader::{I64, Map, Str};
 use std::collections::HashMap;
 
 #[derive(FromBlock, Copy, Clone)]
@@ -26,7 +26,7 @@ fn reads_string_maps() -> Result<(), Box<dyn std::error::Error>> {
         let row = row?;
         assert_eq!(row.id, i64::try_from(index)?);
         assert_eq!(
-            row.values.collect::<chbr::Result<HashMap<_, _>>>()?,
+            row.values.collect::<bloch::Result<HashMap<_, _>>>()?,
             expected[index]
         );
     }
