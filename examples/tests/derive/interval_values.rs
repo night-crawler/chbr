@@ -4,7 +4,7 @@ use chbr::reader::{Array, Interval, Nullable};
 use chbr::{Error, ParsedBlock};
 use chrono::TimeDelta;
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     ns: Interval<'a>,
     us: Interval<'a>,
@@ -18,7 +18,7 @@ struct Row<'a> {
     n: Nullable<'a, Interval<'a>>,
 }
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct CalendarRow<'a> {
     #[allow(dead_code)]
     mo: Interval<'a>,

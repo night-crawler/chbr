@@ -3,7 +3,7 @@ use chbr::reader::{I64, Value};
 use chbr::{Error, FromBlock};
 use chbr::{reader::JsonIterator, value::Value as JsonValue};
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     json: Value<'a>,

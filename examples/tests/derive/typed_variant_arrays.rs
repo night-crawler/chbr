@@ -12,7 +12,7 @@ enum VariantValue<'a> {
     Integer(u64),
 }
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     #[col(name = "variant")]

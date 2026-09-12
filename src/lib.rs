@@ -309,6 +309,27 @@ impl<'data, 'iter> BlocksIterator<'data, 'iter> {
         }
     }
 
+    /// Reorders each block's columns in place, then iterates over its rows.
+    ///
+    /// The requested columns form a prefix in `order`. Duplicate names are matched
+    /// by occurrence: the kth request for a name selects the kth occurrence of
+    /// that name in the original column layout. All unselected columns, including
+    /// surplus occurrences of requested names, follow in their original relative
+    /// order. Column names and their markers move together; row order is unchanged.
+    /// The reordered layout remains in `blocks` after the iterator is dropped.
+    ///
+    /// For example, source columns `[x, a₁, b, a₂, y, a₃]` and an order of
+    /// `["a", "b", "a"]` produce `[a₁, b, a₂, x, y, a₃]`, where subscripts
+    /// distinguish source columns all named `"a"`.
+    ///
+    /// If either `blocks` or `order` is empty, no reordering or validation occurs.
+    /// Otherwise, before mutating any block, checks that the first block contains
+    /// every requested occurrence and that all blocks have identical column-name
+    /// sequences (including duplicates and their positions). These checks do not
+    /// compare column types. A failed check returns [`Error::InvalidColumnOrder`]
+    /// without changing any block.
+    ///
+    /// For name-based reader construction, see [`macro@FromBlock`].
     pub fn new_ordered(blocks: &'iter mut [ParsedBlock<'data>], order: &[&str]) -> Result<Self> {
         reorder_block_cols(blocks, order)?;
         Ok(Self {
@@ -513,6 +534,7 @@ pub fn iter_blocks<'data, 'iter>(
     BlocksIterator::new(blocks)
 }
 
+/// Equivalent to [`BlocksIterator::new_ordered`]; see its ordering and validation contract.
 pub fn iter_blocks_ordered<'data, 'iter>(
     blocks: &'iter mut [ParsedBlock<'data>],
     order: &[&str],

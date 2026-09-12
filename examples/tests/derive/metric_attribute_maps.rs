@@ -2,7 +2,7 @@ use chbr::FromBlock;
 use chbr::parse::block::parse_single;
 use chbr::reader::{LcStr, Map};
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     resource_attrs: Map<'a, LcStr<'a>, LcStr<'a>>,
     scope_attrs: Map<'a, LcStr<'a>, LcStr<'a>>,

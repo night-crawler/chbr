@@ -16,7 +16,7 @@ pub use json::*;
 pub use scalar::*;
 pub use string::*;
 
-/// Reads values by index from an underlying storage, i.e., from a [`crate::Mark`].
+/// Reads values by index from an underlying storage, i.e., from a [`crate::mark::Mark`].
 ///
 /// Indexes are interpreted within the context for which this trait is implemented. For example,
 /// for simple cases it reads from a transparent Mark wrapper, otherwise - from unpacked Mark.
@@ -55,7 +55,7 @@ pub trait TryRead<'a>: Copy {
 /// `try_read(row)` passes the same block row index to every selected reader.
 /// It combines their items into `Self::Item`.
 pub trait FromBlock<'a>: TryRead<'a> {
-    /// Looks up a [`crate::Mark`] by name in the [`crate::ParsedBlock`] and constructs the instance
+    /// Looks up a [`crate::mark::Mark`] by name in the [`crate::ParsedBlock`] and constructs the instance
     /// if it can.
     fn from_block(block: &'a crate::ParsedBlock<'a>) -> crate::Result<Self>;
 
@@ -92,10 +92,10 @@ pub trait ReadSlice<'a>: TryRead<'a> {
 /// Declared enum variants must use the same order.
 /// The discriminator contains an index, not a type name.
 pub trait FromVariant<'a>: Sized {
-    /// One reader for each entry in [`crate::mark::Variant::types`], in the same order.
+    /// One reader for each entry in [`crate::mark::Variant`]'s types, in the same order.
     type Readers: Copy;
 
-    /// Builds the readers from [`crate::mark::Variant::types`].
+    /// Builds the readers from [`crate::mark::Variant`]'s types.
     ///
     /// `marks[i]` initializes the reader for enum variant `i`.
     fn from_marks(marks: &'a [crate::mark::Mark<'a>]) -> crate::Result<Self::Readers>;
@@ -114,15 +114,15 @@ pub trait FromVariant<'a>: Sized {
 /// setting the inverse relation between a rust type and a corresponding reader, for examples see
 /// [`Str`].
 ///
-/// For [`crate::Mark::Variant`], enum variant `i` corresponds to the i-th type.
+/// For [`crate::mark::Mark::Variant`], enum variant `i` corresponds to the i-th type.
 /// Without `#[col(reader = ...)]`, the derive uses the default `<FieldType as Readable>::Reader`
-/// for that child [`crate::Mark`].
+/// for that child [`crate::mark::Mark`].
 ///
 /// For example, `Readable<'a> for &'a str` defines [`Str`] as its default
 /// reader. A variant `Text(&'a str)` therefore uses [`Str`].
 ///
 /// You need to specify the reader explicitly (`#[col(reader = ...)]`) when the corresponding
-/// child [`crate::Mark`] needs a `FixedString`, `Enum8`, or `Enum16` reader.
+/// child [`crate::mark::Mark`] needs a `FixedString`, `Enum8`, or `Enum16` reader.
 pub trait Readable<'a>: Sized {
     type Reader: TryRead<'a, Item = Self> + TryFrom<&'a crate::mark::Mark<'a>, Error = Error>;
 }

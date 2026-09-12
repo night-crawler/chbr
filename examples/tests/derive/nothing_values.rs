@@ -3,7 +3,7 @@ use chbr::parse::block::parse_single;
 use chbr::reader::{Array, Nothing, Nullable, U64};
 
 /// `Nothing` is the element type of `[]` and the inner type of `NULL`.
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: U64<'a>,
     arr: Array<'a, Nothing>,

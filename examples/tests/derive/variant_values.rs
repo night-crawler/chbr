@@ -8,7 +8,7 @@ enum Value<'a> {
     Integer(i64),
     String(&'a str),
 }
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     #[col(name = "var")]

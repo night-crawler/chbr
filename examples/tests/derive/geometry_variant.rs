@@ -2,7 +2,7 @@ use chbr::FromBlock;
 use chbr::parse::block::parse_single;
 use chbr::reader::{Array, ArrayIter, Geometry, I64, Point, Ring, VariantNullable};
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     // Variant is implicitly nullable, and so is Geometry.

@@ -2,7 +2,7 @@ use chbr::FromBlock;
 use chbr::parse::block::parse_single;
 use chbr::reader::{I64, Nullable, Str};
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     nstr: Nullable<'a, Str<'a>>,

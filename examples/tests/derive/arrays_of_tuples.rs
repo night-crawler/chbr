@@ -2,12 +2,12 @@ use chbr::FromBlock;
 use chbr::parse::block::parse_single;
 use chbr::reader::{Array, I64, LcStr};
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Fruit<'a> {
     name: LcStr<'a>,
     rank: I64<'a>,
 }
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     arr: Array<'a, Fruit<'a>>,

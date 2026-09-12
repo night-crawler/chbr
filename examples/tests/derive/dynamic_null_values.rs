@@ -3,7 +3,7 @@ use chbr::parse::block::parse_single;
 use chbr::reader::{Array, I64, Value as ValueReader};
 use chbr::value::Value;
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     #[col(name = "dyn")]

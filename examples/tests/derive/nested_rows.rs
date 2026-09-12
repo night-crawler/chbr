@@ -2,12 +2,12 @@ use chbr::FromBlock;
 use chbr::parse::block::parse_single;
 use chbr::reader::{Array, I64, Str, U64};
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Child<'a> {
     child_id: U64<'a>,
     child_name: Str<'a>,
 }
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     nes: Array<'a, Child<'a>>,

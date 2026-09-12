@@ -22,19 +22,19 @@ enum Var<'a> {
     Integer(i64),
 }
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Pair<'a> {
     a: Str<'a>,
     b: U8<'a>,
 }
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Child<'a> {
     x: U8<'a>,
     y: Str<'a>,
 }
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     a_bool: Array<'a, Bool<'a>>,

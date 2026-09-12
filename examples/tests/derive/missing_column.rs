@@ -3,7 +3,7 @@ use chbr::error::Error;
 use chbr::parse::block::parse_single;
 use chbr::reader::I64;
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct MissingColumn<'a> {
     #[col(name = "no_such_column")]
     value: I64<'a>,

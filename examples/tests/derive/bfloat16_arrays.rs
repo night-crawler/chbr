@@ -3,7 +3,7 @@ use chbr::parse::block::parse_single;
 use chbr::reader::{Array, Bf16, I64};
 use half::bf16;
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     arr_bf16: Array<'a, Bf16<'a>>,

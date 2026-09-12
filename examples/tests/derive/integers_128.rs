@@ -2,7 +2,7 @@ use chbr::FromBlock;
 use chbr::parse::block::parse_single;
 use chbr::reader::{Array, I64, I128, U128};
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     u128_single: U128<'a>,

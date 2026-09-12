@@ -187,7 +187,7 @@ fn array_all_empty_rows_from_fixture() -> TestResult {
 fn derive_from_block_with_names() -> TestResult {
     const ID_COL: &str = "id";
 
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct ArrMapRow<'a> {
         #[col(name = ID_COL)]
         id: I64<'a>,
@@ -233,13 +233,13 @@ fn derive_from_block_with_names() -> TestResult {
 
 #[test]
 fn derive_nested_struct_in_array_of_tuples() -> TestResult {
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct Fruit<'a> {
         name: LcStr<'a>,
         rank: I64<'a>,
     }
 
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct Row<'a> {
         id: I64<'a>,
         arr: Array<'a, Fruit<'a>>,
@@ -272,13 +272,13 @@ fn derive_nested_struct_in_array_of_tuples() -> TestResult {
 
 #[test]
 fn derive_nested_column_positional() -> TestResult {
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct Child<'a> {
         child_id: U64<'a>,
         child_name: Str<'a>,
     }
 
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct Row<'a> {
         id: I64<'a>,
         nes: Array<'a, Child<'a>>,
@@ -311,7 +311,7 @@ fn derive_nested_column_positional() -> TestResult {
 
 #[test]
 fn derive_col_tuple() -> TestResult {
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct Row<'a> {
         id: I64<'a>,
         tup: Tuple<(I64<'a>, Str<'a>)>,
@@ -341,7 +341,7 @@ fn derive_col_tuple() -> TestResult {
 
 #[test]
 fn derive_nullable() -> TestResult {
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct NullableRow<'a> {
         id: I64<'a>,
         nstr: Nullable<'a, Str<'a>>,
@@ -369,7 +369,7 @@ fn derive_nullable() -> TestResult {
 
 #[test]
 fn derive_lc_nullable() -> TestResult {
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct LcRow<'a> {
         id: I64<'a>,
         nlc_str: LcNullableStr<'a>,
@@ -398,7 +398,7 @@ fn derive_lc_nullable() -> TestResult {
 
 #[test]
 fn derive_missing_column() -> TestResult {
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct Row<'a> {
         #[col(name = "no_such_column")]
         id: I64<'a>,
@@ -420,7 +420,7 @@ fn derive_missing_column() -> TestResult {
 
 #[test]
 fn array_try_as_slice() -> TestResult {
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct Row<'a> {
         id: I64<'a>,
         u128_array: Array<'a, U128<'a>>,
@@ -454,7 +454,7 @@ fn array_try_as_slice() -> TestResult {
 
 #[test]
 fn derive_col_value_escape_hatch() -> TestResult {
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct Row<'a> {
         id: I64<'a>,
         #[col(name = "dyn")]
@@ -475,7 +475,7 @@ fn derive_col_value_escape_hatch() -> TestResult {
 
 #[test]
 fn derive_iter_blocks_flat() -> TestResult {
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct Row<'a> {
         id: Uuid<'a>,
     }
@@ -500,7 +500,7 @@ fn derive_iter_blocks_flat() -> TestResult {
 fn iter_blocks_size_hint_bounds_error_items() {
     // The `id` column is missing, so each block yields exactly one `Err`
     // regardless of `num_rows`.
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct Row<'a> {
         id: I64<'a>,
     }
@@ -542,14 +542,14 @@ fn try_read_out_of_bounds() -> TestResult {
 #[test]
 fn named_tuple_by_name() -> TestResult {
     // Field order deliberately doesn't match the def
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct Fruit<'a> {
         rank: I64<'a>,
         #[col(name = "name")]
         title: Str<'a>,
     }
 
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct Row<'a> {
         id: I64<'a>,
         tup: Fruit<'a>,
@@ -578,7 +578,7 @@ fn named_tuple_by_name() -> TestResult {
 
 #[test]
 fn named_tuple_missing_field() -> TestResult {
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct Fruit<'a> {
         #[col(name = "no_such_field")]
         rank: I64<'a>,
@@ -612,7 +612,7 @@ fn col_tuple_reads_named_tuple_positionally() -> TestResult {
 
 #[test]
 fn empty_tuple_keeps_row_count() -> TestResult {
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct Row<'a> {
         t: Value<'a>,
         at: Array<'a, Value<'a>>,
@@ -765,7 +765,7 @@ fn derive_variant_in_from_block() -> TestResult {
         Str(&'a str),
     }
 
-    #[derive(FromBlock)]
+    #[derive(FromBlock, Copy, Clone)]
     struct Row<'a> {
         id: I64<'a>,
         var: VariantNullable<'a, Var<'a>>,

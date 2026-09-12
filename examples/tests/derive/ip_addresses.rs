@@ -3,7 +3,7 @@ use chbr::parse::block::parse_single;
 use chbr::reader::{I64, Ipv4, Ipv6};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     ip4: Ipv4<'a>,

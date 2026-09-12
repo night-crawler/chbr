@@ -4,14 +4,14 @@ use chbr::reader::{I64, Str};
 
 // Field order deliberately differs from the ClickHouse tuple definition.
 // Named tuple fields are resolved through `#[col(name = ...)]`.
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Fruit<'a> {
     rank: I64<'a>,
     #[col(name = "name")]
     title: Str<'a>,
 }
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     tup: Fruit<'a>,

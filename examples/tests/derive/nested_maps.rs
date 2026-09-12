@@ -3,7 +3,7 @@ use chbr::parse::block::parse_single;
 use chbr::reader::{I64, Map, Str};
 use std::collections::HashMap;
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     #[col(name = "m")]

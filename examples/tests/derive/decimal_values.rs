@@ -3,7 +3,7 @@ use chbr::parse::block::parse_single;
 use chbr::reader::{Decimal32, Decimal64, Decimal128, I64};
 use rust_decimal::Decimal;
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     d32: Decimal32<'a>,

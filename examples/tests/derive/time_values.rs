@@ -3,7 +3,7 @@ use chbr::parse::block::parse_single;
 use chbr::reader::{Array, Nullable, Time, Time64};
 use chrono::TimeDelta;
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     t: Time<'a>,
     neg: Time<'a>,

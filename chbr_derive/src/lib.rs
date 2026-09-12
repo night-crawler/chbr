@@ -1,4 +1,5 @@
 use proc_macro::TokenStream;
+use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{ToTokens, format_ident, quote};
 use syn::punctuated::Punctuated;
@@ -20,6 +21,15 @@ struct ColSpec {
 
 /// Derives `chbr::reader::FromBlock` for a named struct of column readers.
 ///
+/// The reader struct must implement `Copy` and `Clone`, usually via
+/// `#[derive(FromBlock, Copy, Clone)]`. This macro does not implement either
+/// trait, so manual implementations can avoid unnecessary generic bounds.
+///
+/// Fields look up their identifier, or the `#[col(name = ...)]` override, in
+/// the source. Each field independently selects the first matching column,
+/// including in named tuples; repeated names do not consume successive occurrences.
+/// Unnamed tuples are read positionally, in field declaration order.
+///
 /// # Example
 ///
 /// ```ignore
@@ -28,7 +38,7 @@ struct ColSpec {
 ///
 /// const ID_COLUMN: &str = "id";
 ///
-/// #[derive(FromBlock)]
+/// #[derive(FromBlock, Copy, Clone)]
 /// struct MapRow<'a> {
 ///     #[col(name = ID_COLUMN)]
 ///     id: I64<'a>,
@@ -91,7 +101,21 @@ pub fn derive_from_variant(input: TokenStream) -> TokenStream {
         .into()
 }
 
+fn chbr_path() -> Result<TokenStream2, syn::Error> {
+    match crate_name("chbr")
+        .map_err(|error| syn::Error::new(proc_macro2::Span::call_site(), error))?
+    {
+        // `crate` would name the integration-test/example target, not the library.
+        FoundCrate::Itself => Ok(quote! { ::chbr }),
+        FoundCrate::Name(name) => {
+            let ident = format_ident!("{}", name);
+            Ok(quote! { ::#ident })
+        }
+    }
+}
+
 fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Error> {
+    let chbr = chbr_path()?;
     let fields: &Punctuated<Field, Comma> = extract_fields(input)?;
     let lt = extract_lifetime(input)?;
 
@@ -107,28 +131,35 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
 
     let (impl_generics, ty_generics, _) = input.generics.split_for_impl();
 
-    // Every field type must be a reader: needed by the item struct's `::Item`
-    // projections and, via the `TryRead: Copy` supertrait, by `Copy`/`Clone`.
+    // Every field type must be a reader for the item struct's `::Item` projections.
     let mut read_generics = input.generics.clone();
     for ColSpec { ty, .. } in &specs {
         read_generics
             .make_where_clause()
             .predicates
-            .push(parse_quote! { #ty: ::chbr::reader::TryRead<#lt> });
+            .push(parse_quote! { #ty: #chbr::reader::TryRead<#lt> });
     }
-    let (_, _, read_where) = read_generics.split_for_impl();
+    let (_, _, item_where) = read_generics.split_for_impl();
+
+    // Bound the reader itself so manual Copy impls can choose their own generic bounds.
+    let mut reader_generics = read_generics.clone();
+    reader_generics
+        .make_where_clause()
+        .predicates
+        .push(parse_quote! { #ident #ty_generics: ::core::marker::Copy });
+    let (_, _, read_where) = reader_generics.split_for_impl();
 
     // Constructing from marks additionally needs `TryFrom<&Mark>` per field,
     // with its error convertible for `?`.
-    let mut mark_generics = read_generics.clone();
+    let mut mark_generics = reader_generics.clone();
     for ColSpec { ty, .. } in &specs {
         let predicates = &mut mark_generics.make_where_clause().predicates;
         predicates.push(parse_quote! {
-            #ty: ::core::convert::TryFrom<&#lt ::chbr::mark::Mark<#lt>>
+            #ty: ::core::convert::TryFrom<&#lt #chbr::mark::Mark<#lt>>
         });
         predicates.push(parse_quote! {
-            ::chbr::error::Error: ::core::convert::From<
-                <#ty as ::core::convert::TryFrom<&#lt ::chbr::mark::Mark<#lt>>>::Error,
+            #chbr::error::Error: ::core::convert::From<
+                <#ty as ::core::convert::TryFrom<&#lt #chbr::mark::Mark<#lt>>>::Error,
             >
         });
     }
@@ -137,7 +168,7 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
     let item_fields = specs
         .iter()
         .map(|ColSpec { ident, ty, vis, .. }| {
-            quote! { #vis #ident: <#ty as ::chbr::reader::TryRead<#lt>>::Item }
+            quote! { #vis #ident: <#ty as #chbr::reader::TryRead<#lt>>::Item }
         })
         .collect::<Vec<_>>();
 
@@ -175,40 +206,29 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
     let read_fields_unchecked = specs
         .iter()
         .map(|ColSpec { ident, .. }| {
-            quote! { #ident: ::chbr::reader::TryRead::try_read_unchecked(&self.#ident, idx)? }
+            quote! { #ident: #chbr::reader::TryRead::try_read_unchecked(&self.#ident, idx)? }
         })
         .collect::<Vec<_>>();
 
     let field_lens = specs
         .iter()
-        .map(|ColSpec { ident, .. }| quote! { ::chbr::reader::TryRead::len(&self.#ident) })
+        .map(|ColSpec { ident, .. }| quote! { #chbr::reader::TryRead::len(&self.#ident) })
         .collect::<Vec<_>>();
 
     Ok(quote! {
-        #vis struct #item_ident #impl_generics #read_where {
+        #vis struct #item_ident #impl_generics #item_where {
             #(#item_fields,)*
         }
 
         #[automatically_derived]
-        impl #impl_generics ::core::marker::Copy for #ident #ty_generics #read_where {}
-
-        #[automatically_derived]
-        impl #impl_generics ::core::clone::Clone for #ident #ty_generics #read_where {
-            #[inline]
-            fn clone(&self) -> Self {
-                *self
-            }
-        }
-
-        #[automatically_derived]
-        impl #impl_generics ::chbr::reader::FromBlock<#lt> for #ident #ty_generics #mark_where {
-            fn from_block(block: &#lt ::chbr::ParsedBlock<#lt>) -> ::chbr::Result<Self> {
+        impl #impl_generics #chbr::reader::FromBlock<#lt> for #ident #ty_generics #mark_where {
+            fn from_block(block: &#lt #chbr::ParsedBlock<#lt>) -> #chbr::Result<Self> {
                 ::core::result::Result::Ok(Self { #(#block_inits,)* })
             }
         }
 
         #[automatically_derived]
-        impl #impl_generics ::chbr::reader::TryRead<#lt> for #ident #ty_generics #read_where {
+        impl #impl_generics #chbr::reader::TryRead<#lt> for #ident #ty_generics #read_where {
             type Item = #item_ident #ty_generics;
             const NAME: &'static str = ::core::stringify!(#ident);
 
@@ -216,36 +236,36 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
             fn len(&self) -> usize {
                 // The shortest column: `try_read_unchecked(idx)` is sound for every field only
                 // when `idx` is below all of their lengths.
-                let len = ::chbr::parse::consts::MAX_NUM_ROWS;
+                let len = #chbr::parse::consts::MAX_NUM_ROWS;
                 #( let len = ::core::cmp::min(len, #field_lens); )*
                 len
             }
 
             #[inline(always)]
-            unsafe fn try_read_unchecked(&self, idx: usize) -> ::chbr::Result<Self::Item> {
+            unsafe fn try_read_unchecked(&self, idx: usize) -> #chbr::Result<Self::Item> {
                 // SAFETY: `idx < len()`, and `len()` is the minimum over the columns.
                 unsafe { ::core::result::Result::Ok(#item_ident { #(#read_fields_unchecked,)* }) }
             }
         }
 
         #[automatically_derived]
-        impl #impl_generics ::core::convert::TryFrom<&#lt ::chbr::mark::Mark<#lt>>
+        impl #impl_generics ::core::convert::TryFrom<&#lt #chbr::mark::Mark<#lt>>
             for #ident #ty_generics
         #mark_where
         {
-            type Error = ::chbr::error::Error;
+            type Error = #chbr::error::Error;
 
             fn try_from(
-                mark: &#lt ::chbr::mark::Mark<#lt>,
+                mark: &#lt #chbr::mark::Mark<#lt>,
             ) -> ::core::result::Result<Self, Self::Error> {
                 match mark {
-                    ::chbr::mark::Mark::NamedTuple(nt) => {
+                    #chbr::mark::Mark::NamedTuple(nt) => {
                         ::core::result::Result::Ok(Self { #(#named_inits,)* })
                     }
-                    ::chbr::mark::Mark::Tuple(tuple) => {
+                    #chbr::mark::Mark::Tuple(tuple) => {
                         if tuple.values.len() != #num_fields {
                             return ::core::result::Result::Err(
-                                ::chbr::error::Error::MismatchedType(
+                                #chbr::error::Error::MismatchedType(
                                     "Tuple",
                                     "Tuple with matching arity",
                                 ),
@@ -253,7 +273,7 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
                         }
                         ::core::result::Result::Ok(Self { #(#positional_inits,)* })
                     }
-                    other => ::core::result::Result::Err(::chbr::error::Error::MismatchedType(
+                    other => ::core::result::Result::Err(#chbr::error::Error::MismatchedType(
                         other.as_str(),
                         "NamedTuple/Tuple",
                     )),
@@ -264,6 +284,7 @@ fn derive_from_block_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Err
 }
 
 fn derive_from_variant_inner(input: &DeriveInput) -> Result<TokenStream2, syn::Error> {
+    let chbr = chbr_path()?;
     let Data::Enum(en) = &input.data else {
         return Err(syn::Error::new(
             input.span(),
@@ -294,7 +315,7 @@ fn derive_from_variant_inner(input: &DeriveInput) -> Result<TokenStream2, syn::E
         let payload = extract_payload(variant)?;
         let reader_ty = match parse_col_reader(variant)? {
             Some(ty) => ty.to_token_stream(),
-            None => quote! { <#payload as ::chbr::reader::Readable<#lt>>::Reader },
+            None => quote! { <#payload as #chbr::reader::Readable<#lt>>::Reader },
         };
         reader_tys.push(reader_ty);
 
@@ -302,7 +323,7 @@ fn derive_from_variant_inner(input: &DeriveInput) -> Result<TokenStream2, syn::E
         let tuple_idx = syn::Index::from(index);
         read_arms.push(quote! {
             #index => ::core::result::Result::Ok(Self::#var_ident(
-                ::chbr::reader::TryRead::try_read(&readers.#tuple_idx, idx)?,
+                #chbr::reader::TryRead::try_read(&readers.#tuple_idx, idx)?,
             ))
         });
         init_exprs.push(quote! { ::core::convert::TryFrom::try_from(&marks[#index])? });
@@ -313,15 +334,15 @@ fn derive_from_variant_inner(input: &DeriveInput) -> Result<TokenStream2, syn::E
 
     Ok(quote! {
         #[automatically_derived]
-        impl<#lt> ::chbr::reader::FromVariant<#lt> for #ident #ty_generics {
+        impl<#lt> #chbr::reader::FromVariant<#lt> for #ident #ty_generics {
             type Readers = (#(#reader_tys,)*);
 
             fn from_marks(
-                marks: &#lt [::chbr::mark::Mark<#lt>],
-            ) -> ::chbr::Result<Self::Readers> {
+                marks: &#lt [#chbr::mark::Mark<#lt>],
+            ) -> #chbr::Result<Self::Readers> {
                 if marks.len() != #num_variants {
                     return ::core::result::Result::Err(
-                        ::chbr::error::Error::MismatchedType("Variant", #arity_msg),
+                        #chbr::error::Error::MismatchedType("Variant", #arity_msg),
                     );
                 }
                 ::core::result::Result::Ok((#(#init_exprs,)*))
@@ -332,11 +353,11 @@ fn derive_from_variant_inner(input: &DeriveInput) -> Result<TokenStream2, syn::E
                 readers: &Self::Readers,
                 discriminator: usize,
                 idx: usize,
-            ) -> ::chbr::Result<Self> {
+            ) -> #chbr::Result<Self> {
                 match discriminator {
                     #(#read_arms,)*
                     _ => ::core::result::Result::Err(
-                        ::chbr::error::Error::IndexOutOfBounds(discriminator, #disc_msg),
+                        #chbr::error::Error::IndexOutOfBounds(discriminator, #disc_msg),
                     ),
                 }
             }

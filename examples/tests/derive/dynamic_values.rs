@@ -4,7 +4,7 @@ use chbr::reader::{I64, Value as ValueReader};
 use chbr::value::{MapIterator, Value};
 use std::collections::HashMap;
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     #[col(name = "dyn")]

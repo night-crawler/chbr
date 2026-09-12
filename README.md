@@ -135,6 +135,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+See the [`BlocksIterator::new_ordered` contract](src/lib.rs) for duplicate-name
+matching, mutation, validation, and empty-input behavior.
+
 Or, instead of matching on `Value` and destructuring `row.cols()` by hand, derive a reader.
 
 ```rust
@@ -150,7 +153,7 @@ enum Payload<'a> {
     Str(&'a str),
 }
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: U32<'a>,
     tags: Array<'a, Str<'a>>,
@@ -187,6 +190,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+See the [`FromBlock` derive contract](chbr_derive/src/lib.rs) for reader
+copyability, generic bounds, and duplicate-name lookup.
+
+Both `FromBlock` and `FromVariant` support renaming the `chbr` dependency in `Cargo.toml`;
+the derives automatically resolve the dependency's name. Import the macros and reader types
+through that name, with no derive-specific crate-path configuration.
 
 Read data somewhat more manually:
 
@@ -232,7 +242,7 @@ The standalone examples crate keeps both access styles as executable tests:
 - [`examples/tests/procedural`](examples/tests/procedural) drives blocks through `Mark`/`Value`
   accessors directly, without any derive.
 - [`examples/tests/derive`](examples/tests/derive) exercises one schema apiece through
-  `#[derive(FromBlock)]` (and `#[derive(FromVariant)]` for variant schemas).
+  `#[derive(FromBlock, Copy, Clone)]` (and `#[derive(FromVariant)]` for variant schemas).
 
 ```sh
 cargo test -p chbr-examples

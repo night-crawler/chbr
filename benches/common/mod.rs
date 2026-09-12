@@ -4,7 +4,7 @@ use chbr::reader::{
     Uuid,
 };
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 pub struct BenchmarkCols<'a> {
     pub id: Uuid<'a>,
     pub lc_string_cd10: LcTrustedStr<'a>,

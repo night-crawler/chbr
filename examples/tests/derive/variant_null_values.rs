@@ -10,7 +10,7 @@ enum Var<'a> {
     String(&'a str),
 }
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     var: VariantNullable<'a, Var<'a>>,

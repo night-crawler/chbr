@@ -2,14 +2,14 @@ use chbr::FromBlock;
 use chbr::parse::block::parse_single;
 use chbr::reader::{FixedBytes, FixedStr, I64};
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct Row<'a> {
     id: I64<'a>,
     #[col(name = "fb")]
     value: FixedBytes<'a>,
 }
 
-#[derive(FromBlock)]
+#[derive(FromBlock, Copy, Clone)]
 struct TextRow<'a> {
     #[col(name = "fb")]
     #[allow(dead_code)]
