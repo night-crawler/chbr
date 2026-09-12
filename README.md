@@ -135,9 +135,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-See the [`BlocksIterator::new_ordered` contract](src/lib.rs) for duplicate-name
-matching, mutation, validation, and empty-input behavior.
-
 Or, instead of matching on `Value` and destructuring `row.cols()` by hand, derive a reader.
 
 ```rust
@@ -190,13 +187,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
-
-See the [`FromBlock` derive contract](bloch_derive/src/lib.rs) for reader
-copyability, generic bounds, and duplicate-name lookup.
-
-Both `FromBlock` and `FromVariant` support renaming the `bloch` dependency in `Cargo.toml`;
-the derives automatically resolve the dependency's name. Import the macros and reader types
-through that name, with no derive-specific crate-path configuration.
 
 Read data somewhat more manually:
 
