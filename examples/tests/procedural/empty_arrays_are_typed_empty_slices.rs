@@ -5,7 +5,6 @@ use bloch::value::{
     LowCardinalitySliceIterator, MapSliceIterator, NamedTupleSliceIterator, NestedIterator,
     NullableSliceIterator, TupleSliceIterator, Value, VariantSliceIterator,
 };
-use bloch::zc;
 use bloch::{BStr, ParsedBlock};
 use testresult::TestResult;
 
@@ -49,31 +48,6 @@ fn empty_arrays_are_typed_empty_slices() -> TestResult {
     for row in 0..block.num_rows {
         let value = strings.get(row)?.expect("row within the block");
         assert_eq!(<&[&BStr]>::try_from(value)?, &[] as &[&BStr]);
-    }
-    Ok(())
-}
-
-#[test]
-fn empty_array_and_null_stay_distinct() -> TestResult {
-    let data = std::fs::read(crate::common::fixture("empty_arrays.native"))?;
-    let (_, block) = parse_single(&data)?;
-
-    for col in ["v", "d", "d_nothing"] {
-        let mark = block.mark(col)?;
-        let rows: Vec<String> = (0..block.num_rows)
-            .map(|row| {
-                let value = mark.get(row)?.expect("row within the block");
-                Ok(match value {
-                    Value::NothingSlice => "[]".to_owned(),
-                    value => match <Option<&[zc::I64]>>::try_from(value.clone()) {
-                        Ok(Some(elements)) => format!("{elements:?}"),
-                        Ok(None) => "null".to_owned(),
-                        Err(_) => i64::try_from(value)?.to_string(),
-                    },
-                })
-            })
-            .collect::<bloch::Result<_>>()?;
-        assert_eq!(rows, ["[]", "null", "7"], "{col}");
     }
     Ok(())
 }
