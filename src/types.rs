@@ -1,82 +1,106 @@
-pub use chrono_tz::Tz;
-use zerocopy::little_endian::U64;
+use std::hint::cold_path;
 
+use crate::mark::BoolView;
+use crate::zc;
 use crate::{
+    interval,
     mark::{
         DateTime, DateTime64, Decimal32, Decimal64, Decimal128, Decimal256, Enum8, Enum16,
-        FixedString, Mark,
+        FixedString, Interval, Mark, Time64,
     },
     parse::typ::parse_type,
     slice::ByteView,
 };
+pub use chrono_tz::Tz;
 
-pub type Offsets<'a> = ByteView<'a, U64>;
+pub type Offsets<'a> = ByteView<'a, zc::U64>;
 
-pub(crate) trait OffsetIndexPair {
+pub trait OffsetIndexPair {
     fn offset_indices(&self, index: usize) -> crate::Result<Option<(usize, usize)>>;
-    fn get_cast<T>(&self, index: usize) -> crate::Result<Option<T>>
-    where
-        T: TryFrom<u64>;
+    /// # Safety
+    /// `index < self.len()`.
+    unsafe fn offset_indices_unchecked(&self, index: usize) -> crate::Result<(usize, usize)>;
     fn last_or_default(&self) -> crate::Result<usize>;
+}
+
+impl OffsetIndexPair for [zc::U64] {
+    #[inline(always)]
+    fn offset_indices(&self, index: usize) -> crate::Result<Option<(usize, usize)>> {
+        let Some(end) = self.get(index) else {
+            return Ok(None);
+        };
+        let end = cast_offset(end.get())?;
+        let start = if index == 0 {
+            0
+        } else {
+            // SAFETY: the successful `get` above proves `index < self.len()`.
+            cast_offset(unsafe { self.get_unchecked(index - 1) }.get())?
+        };
+        Ok(Some((start, end)))
+    }
+
+    #[inline(always)]
+    unsafe fn offset_indices_unchecked(&self, index: usize) -> crate::Result<(usize, usize)> {
+        let end = cast_offset(unsafe { self.get_unchecked(index) }.get())?;
+        let start = if index == 0 {
+            0
+        } else {
+            cast_offset(unsafe { self.get_unchecked(index - 1) }.get())?
+        };
+        Ok((start, end))
+    }
+
+    fn last_or_default(&self) -> crate::Result<usize> {
+        match self.last() {
+            Some(last) => cast_offset(last.get()),
+            None => Ok(0),
+        }
+    }
 }
 
 impl OffsetIndexPair for Offsets<'_> {
     #[inline(always)]
     fn offset_indices(&self, index: usize) -> crate::Result<Option<(usize, usize)>> {
-        let start = if index == 0 {
-            0
-        } else {
-            let Some(start) = self.get_cast(index.saturating_sub(1))? else {
-                return Ok(None);
-            };
-            start
-        };
-
-        let Some(end) = self.get_cast(index)? else {
-            return Ok(None);
-        };
-        Ok(Some((start, end)))
+        self.as_slice().offset_indices(index)
     }
 
-    fn get_cast<T>(&self, index: usize) -> crate::Result<Option<T>>
-    where
-        T: TryFrom<u64>,
-    {
-        let Some(value) = self.get(index).map(|v| v.get()) else {
-            return Ok(None);
-        };
-        let value = T::try_from(value).map_err(|_| crate::Error::Overflow(value.to_string()))?;
-        Ok(Some(value))
+    #[inline(always)]
+    unsafe fn offset_indices_unchecked(&self, index: usize) -> crate::Result<(usize, usize)> {
+        unsafe { self.as_slice().offset_indices_unchecked(index) }
     }
 
     fn last_or_default(&self) -> crate::Result<usize> {
-        if let Some(last) = self.last().map(|last| last.get()) {
-            let last =
-                usize::try_from(last).map_err(|_| crate::Error::Overflow(last.to_string()))?;
-            Ok(last)
-        } else {
-            Ok(usize::default())
+        self.as_slice().last_or_default()
+    }
+}
+
+#[inline(always)]
+fn cast_offset(value: u64) -> crate::Result<usize> {
+    match usize::try_from(value) {
+        Ok(value) => Ok(value),
+        Err(_) => {
+            cold_path();
+            Err(crate::Error::Overflow(value.to_string()))
         }
     }
 }
 
 #[derive(Debug)]
 pub struct MapHeader<'a> {
-    pub key: TypeHeader<'a>,
-    pub value: TypeHeader<'a>,
+    pub(crate) key: TypeHeader<'a>,
+    pub(crate) value: TypeHeader<'a>,
 }
 
 #[derive(Debug)]
 pub struct DynamicHeader<'a> {
-    pub types: Vec<Type<'a>>,
-    pub headers: Vec<TypeHeader<'a>>,
+    pub(crate) types: Vec<Type<'a>>,
+    pub(crate) headers: Vec<TypeHeader<'a>>,
 }
 
 #[derive(Debug)]
 pub struct JsonHeader<'a> {
-    pub paths: Vec<&'a str>,
-    pub col_headers: Vec<JsonColumnHeader<'a>>,
-    pub type_headers: Vec<TypeHeader<'a>>,
+    pub(crate) paths: Vec<&'a str>,
+    pub(crate) col_headers: Vec<JsonColumnHeader<'a>>,
 }
 
 #[derive(Debug)]
@@ -88,72 +112,55 @@ pub enum TypeHeader<'a> {
     Variant(Vec<TypeHeader<'a>>),
     Array(Box<TypeHeader<'a>>),
     Dynamic(Box<DynamicHeader<'a>>),
-    Nullable(Box<TypeHeader<'a>>),
     Nested(Vec<TypeHeader<'a>>),
 }
 
 impl<'a> TypeHeader<'a> {
-    #[inline]
-    pub fn into_array(self) -> TypeHeader<'a> {
+    pub(crate) fn into_array(self) -> TypeHeader<'a> {
         match self {
             TypeHeader::Array(inner) => *inner,
-            e => unreachable!("Unexpected type header: {e:?}"),
+            e => unreachable!("bug: unexpected type header: {e:?}"),
         }
     }
 
-    #[inline]
-    pub fn into_tuple(self) -> Vec<TypeHeader<'a>> {
+    pub(crate) fn into_tuple(self) -> Vec<TypeHeader<'a>> {
         match self {
             TypeHeader::Tuple(t) => t,
-            e => unreachable!("Unexpected type header: {e:?}"),
+            e => unreachable!("bug: unexpected type header: {e:?}"),
         }
     }
 
-    #[inline]
-    pub fn into_map(self) -> MapHeader<'a> {
+    pub(crate) fn into_map(self) -> MapHeader<'a> {
         match self {
             TypeHeader::Map(map) => *map,
-            e => unreachable!("Unexpected type header: {e:?}"),
+            e => unreachable!("bug: unexpected type header: {e:?}"),
         }
     }
 
-    #[inline]
-    pub fn into_variant(self) -> Vec<TypeHeader<'a>> {
+    pub(crate) fn into_variant(self) -> Vec<TypeHeader<'a>> {
         match self {
             TypeHeader::Variant(variants) => variants,
-            e => unreachable!("Unexpected type header: {e:?}"),
+            e => unreachable!("bug: unexpected type header: {e:?}"),
         }
     }
 
-    #[inline]
-    pub fn into_json(self) -> JsonHeader<'a> {
+    pub(crate) fn into_json(self) -> JsonHeader<'a> {
         match self {
             TypeHeader::Json(json) => *json,
-            e => unreachable!("Unexpected type header: {e:?}"),
+            e => unreachable!("bug: unexpected type header: {e:?}"),
         }
     }
 
-    #[inline]
-    pub fn into_dynamic(self) -> DynamicHeader<'a> {
+    pub(crate) fn into_dynamic(self) -> DynamicHeader<'a> {
         match self {
             TypeHeader::Dynamic(d) => *d,
-            e => unreachable!("Unexpected type header: {e:?}"),
+            e => unreachable!("bug: unexpected type header: {e:?}"),
         }
     }
 
-    #[inline]
-    pub fn into_nested(self) -> Vec<TypeHeader<'a>> {
+    pub(crate) fn into_nested(self) -> Vec<TypeHeader<'a>> {
         match self {
             TypeHeader::Nested(n) => n,
-            e => unreachable!("Unexpected type header: {e:?}"),
-        }
-    }
-
-    #[inline]
-    pub fn into_nullable(self) -> TypeHeader<'a> {
-        match self {
-            TypeHeader::Nullable(inner) => *inner,
-            TypeHeader::Empty => TypeHeader::Empty,
             e => unreachable!("Unexpected type header: {e:?}"),
         }
     }
@@ -195,6 +202,13 @@ pub enum Type<'a> {
     Date32,
     DateTime(Tz),
     DateTime64(u8, Tz),
+    /// Signed seconds as `Int32` (`DataTypeTime : DataTypeNumberBase<Int32>`); no timezone.
+    /// ClickHouse saturates only the text form at `±999:59:59`; stored values may exceed it.
+    Time,
+    /// Signed `Int64` ticks of `10^-precision` seconds
+    /// (`DataTypeTime64 : DataTypeDecimalBase<Time64>`); no timezone.
+    Time64(u8),
+    Interval(interval::Kind),
 
     Ipv4,
     Ipv6,
@@ -220,6 +234,14 @@ pub enum Type<'a> {
     /// MultiLineString is multiple lines stored as an array of LineString: Array(LineString).
     MultiLineString,
 
+    /// MultiPoint is a set of points stored as Array(Point).
+    MultiPoint,
+
+    /// Geometry is a Variant over every geo type with a fixed discriminator order
+    /// (`registerDataTypeDomainGeo`): LineString, MultiLineString, MultiPolygon, Point, Polygon,
+    /// Ring, MultiPoint. New geo types are appended, never sorted in.
+    Geometry,
+
     Enum8(Vec<(&'a str, i8)>),
     Enum16(Vec<(&'a str, i16)>),
 
@@ -239,24 +261,56 @@ pub enum Type<'a> {
     NamedTuple(Vec<Field<'a>>),
 
     Dynamic,
-    Json,
+    Json(Vec<Field<'a>>),
 
+    Nothing,
+
+    /// From `src/Columns/ColumnDynamic.h`:
+    ///
+    /// > When new values are inserted into Dynamic column, the internal Variant type and
+    /// > column are extended if the inserted value has new type. When the limit on number of
+    /// > dynamic types is exceeded, all values with new types are inserted into special
+    /// > shared variant with type String that contains values and their types in binary
+    /// > format.
+    /// >
+    /// > When max_dynamic_types = 0, we will have only shared variant and insert all values
+    /// > into it.
+    ///
+    /// From `src/Columns/ColumnDynamic.cpp`:
+    ///
+    /// > Shared variant will contain String values but we cannot use usual String type
+    /// > because we can have regular variant with type String. To solve it, we use String
+    /// > type with custom name for shared variant.
     SharedVariant,
 }
 
 #[expect(clippy::multiple_inherent_impl)]
 impl<'a> Type<'a> {
-    pub const fn is_nullable(&self) -> bool {
+    pub(crate) const fn is_nullable(&self) -> bool {
         matches!(self, Type::Nullable(_))
     }
-    pub fn strip_null(&self) -> &Type<'a> {
+    pub(crate) fn strip_null(&self) -> &Type<'a> {
         match self {
             Type::Nullable(inner) => inner,
             _ => self,
         }
     }
 
-    pub const fn size(&self) -> Option<usize> {
+    /// The `Variant` a `Geometry` column is serialized as. The element order is the
+    /// discriminator order, see [`Type::Geometry`].
+    pub(crate) fn geometry_variant() -> Type<'a> {
+        Type::Variant(vec![
+            Type::LineString,
+            Type::MultiLineString,
+            Type::MultiPolygon,
+            Type::Point,
+            Type::Polygon,
+            Type::Ring,
+            Type::MultiPoint,
+        ])
+    }
+
+    pub(crate) const fn size(&self) -> Option<usize> {
         #[expect(clippy::match_same_arms)]
         match self {
             Self::Bool => Some(1),
@@ -293,8 +347,12 @@ impl<'a> Type<'a> {
             Self::Date32 => Some(4),
             Self::DateTime(_) => Some(4),
             Self::DateTime64(_, _) => Some(8),
+            Self::Time => Some(4),
+            Self::Time64(_) => Some(8),
+            Self::Interval(_) => Some(8),
             Self::Enum8(_) => Some(1),
             Self::Enum16(_) => Some(2),
+            Self::Nothing => Some(1),
 
             // Point is represented by its X and Y coordinates, stored as a Tuple(Float64, Float64).
             Self::Point => None,
@@ -305,6 +363,8 @@ impl<'a> Type<'a> {
             Self::MultiPolygon => None,
             Self::LineString => None,
             Self::MultiLineString => None,
+            Self::MultiPoint => None,
+            Self::Geometry => None,
             Self::Map(_, _) => None,
 
             Self::Array(_) => None,
@@ -317,7 +377,7 @@ impl<'a> Type<'a> {
             // TODO: is it always variable?
             Self::Variant(_) => None,
             Self::Dynamic => None,
-            Self::Json => None,
+            Self::Json(_) => None,
 
             Self::Nullable(_) => None,
             Self::LowCardinality(_) => None,
@@ -327,9 +387,26 @@ impl<'a> Type<'a> {
         }
     }
 
-    pub fn from_bytes(s: &[u8]) -> Result<Type<'_>, crate::Error> {
-        let (remainder, typ) = parse_type(s).map_err(|e| crate::Error::Parse(e.to_string()))?;
+    pub(crate) fn from_bytes(s: &[u8]) -> Result<Type<'_>, crate::Error> {
+        // `SerializationAggregateFunction::serializeBinaryBulk` writes each row's state via
+        // `IAggregateFunction::serialize` with no length prefix, so the column can be neither
+        // decoded nor skipped without a per-function state layout.
+        if s.starts_with(b"AggregateFunction(") {
+            cold_path();
+            return Err(crate::Error::NotImplemented(format!(
+                "aggregate function state column {}",
+                String::from_utf8_lossy(s)
+            )));
+        }
+        let (remainder, typ) = match parse_type(s) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                cold_path();
+                return Err(crate::Error::Parse(e.to_string()));
+            }
+        };
         if !remainder.trim_ascii().is_empty() {
+            cold_path();
             return Err(crate::Error::Parse(format!(
                 "Unparsed remainder: {remainder:?}"
             )));
@@ -338,9 +415,9 @@ impl<'a> Type<'a> {
         Ok(typ)
     }
 
-    pub fn into_fixed_size_marker(self, data: &'a [u8]) -> crate::Result<Mark<'a>> {
+    pub(crate) fn into_fixed_size_marker(self, data: &'a [u8]) -> crate::Result<Mark<'a>> {
         let mark = match self {
-            Type::Bool => Mark::Bool(data),
+            Type::Bool => Mark::Bool(BoolView { data }),
             Type::Int8 => Mark::Int8(ByteView::try_from(data)?),
             Type::Int16 => Mark::Int16(ByteView::try_from(data)?),
             Type::Int32 => Mark::Int32(ByteView::try_from(data)?),
@@ -356,20 +433,20 @@ impl<'a> Type<'a> {
             Type::Float32 => Mark::Float32(ByteView::try_from(data)?),
             Type::Float64 => Mark::Float64(ByteView::try_from(data)?),
             Type::BFloat16 => Mark::BFloat16(ByteView::try_from(data)?),
-            Type::Decimal32(precision) => Mark::Decimal32(Decimal32 {
-                precision,
+            Type::Decimal32(scale) => Mark::Decimal32(Decimal32 {
+                scale,
                 data: ByteView::try_from(data)?,
             }),
-            Type::Decimal64(precision) => Mark::Decimal64(Decimal64 {
-                precision,
+            Type::Decimal64(scale) => Mark::Decimal64(Decimal64 {
+                scale,
                 data: ByteView::try_from(data)?,
             }),
-            Type::Decimal128(precision) => Mark::Decimal128(Decimal128 {
-                precision,
+            Type::Decimal128(scale) => Mark::Decimal128(Decimal128 {
+                scale,
                 data: ByteView::try_from(data)?,
             }),
-            Type::Decimal256(precision) => Mark::Decimal256(Decimal256 {
-                precision,
+            Type::Decimal256(scale) => Mark::Decimal256(Decimal256 {
+                scale,
                 data: ByteView::try_from(data)?,
             }),
             Type::FixedString(size) => Mark::FixedString(FixedString { size, data }),
@@ -385,39 +462,53 @@ impl<'a> Type<'a> {
                 tz,
                 data: ByteView::try_from(data)?,
             }),
+            Type::Time => Mark::Time(ByteView::try_from(data)?),
+            Type::Time64(precision) => Mark::Time64(Time64 {
+                precision,
+                data: ByteView::try_from(data)?,
+            }),
+            Type::Interval(kind) => Mark::Interval(Interval {
+                kind,
+                data: ByteView::try_from(data)?,
+            }),
             Type::Ipv4 => Mark::Ipv4(ByteView::try_from(data)?),
             Type::Ipv6 => Mark::Ipv6(ByteView::try_from(data)?),
 
             Type::Enum8(variants) => Mark::Enum8(Enum8 {
-                variants,
+                variants: variants.into_boxed_slice(),
                 data: ByteView::try_from(data)?,
             }),
             Type::Enum16(variants) => Mark::Enum16(Enum16 {
-                variants,
+                variants: variants.into_boxed_slice(),
                 data: ByteView::try_from(data)?,
             }),
+            Type::Nothing => Mark::Nothing(data.len()),
 
-            _ => unimplemented!("Const size is not implemented for type: {:?}", self),
+            _ => {
+                cold_path();
+                return Err(crate::Error::NotImplemented(format!(
+                    "fixed-size marker conversion for {self:?}"
+                )));
+            }
         };
 
         Ok(mark)
     }
 }
 
+/// A dynamic path is a whole `Dynamic` column: `SerializationObject` delegates its prefix and data
+/// to `SerializationDynamic`.
 #[derive(Debug)]
-pub struct JsonColumnHeader<'a> {
-    pub path_version: u64,
-    pub max_types: usize,
-    pub total_types: usize,
-    pub typ: Box<Type<'a>>,
-    pub variant_version: u64,
-    pub mark: Mark<'a>,
-    pub discriminators: &'a [u8],
-    pub offsets: Vec<usize>,
+pub enum JsonColumnHeader<'a> {
+    Typed {
+        typ: Type<'a>,
+        header: TypeHeader<'a>,
+    },
+    Dynamic(DynamicHeader<'a>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Field<'a> {
-    pub name: &'a str,
-    pub typ: Type<'a>,
+    pub(crate) name: &'a str,
+    pub(crate) typ: Type<'a>,
 }

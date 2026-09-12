@@ -1,42 +1,59 @@
+extern crate self as chbr;
+
+use std::hint::cold_path;
+
+use chrono::NaiveDate;
+use chrono_tz::Tz;
+use log::debug;
+use std::collections::HashMap;
 use std::{
-    collections::{HashMap, HashSet},
     iter::Peekable,
     net::{Ipv4Addr, Ipv6Addr},
     ops::Range,
 };
-
-use chrono::{NaiveDate, TimeZone};
-use chrono_tz::Tz;
-use log::debug;
 use uuid::Uuid;
-use zerocopy::little_endian::{I32, I64, I128, U16, U32, U64};
 
-use crate::{
-    conv::{date16, date32, datetime32, datetime32_tz, datetime64_tz},
-    mark::Mark,
-    value::Value,
-};
-
-pub mod conv;
+pub(crate) mod conv;
 pub mod error;
-pub mod index;
+pub mod interval;
 mod macros;
 pub mod mark;
 pub mod parse;
+pub mod reader;
 pub mod slice;
-pub mod types;
+pub(crate) mod types;
 pub mod value;
+pub mod zc;
 
+pub use bstr::BStr;
+pub use chbr_derive::{FromBlock, FromVariant};
 pub use error::Error;
+pub use interval::Interval;
+// Same name as the derive macro on purpose (macro vs type namespace):
+// `use crate::FromBlock;` imports both, serde-style.
+pub use reader::{FromBlock, FromVariant};
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+fn mark_by_name<'a, T>(col_names: &[&str], columns: &'a [T], name: &str) -> Result<&'a T> {
+    let column = col_names
+        .iter()
+        .zip(columns)
+        .find_map(|(column_name, column)| (*column_name == name).then_some(column));
+    match column {
+        Some(column) => Ok(column),
+        None => {
+            cold_path();
+            Err(Error::ColumnNotFound(name.to_owned()))
+        }
+    }
+}
 
 pub(crate) trait ByteExt {
     fn rtrim_zeros(&self) -> &[u8];
 }
 
 impl ByteExt for [u8] {
-    #[inline(always)]
     fn rtrim_zeros(&self) -> &[u8] {
         let mut end = self.len();
         while end > 0 && self[end - 1] == 0 {
@@ -49,8 +66,8 @@ impl ByteExt for [u8] {
 /// This range represents a starting offset and a length, as opposed to the
 /// Rust's range, which stores start and end positions.
 /// In particular, this range encodes row numbers/offsets within a ClickHouse block,
-/// so it should not be wildly huge. Nevertheless, if the end position exceeds `u32::MAX`,
-/// we still have a good chance of not failing to convert the Range<usize> to TinyRange.
+/// so it should not be wildly huge. Nevertheless, if the end position exceeds [`u32::MAX`],
+/// we still have a good chance of not failing to convert the [`Range<usize>`] to [`TinyRange`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TinyRange {
     pub start: u32,
@@ -58,11 +75,11 @@ pub struct TinyRange {
 }
 
 impl From<TinyRange> for Range<usize> {
-    #[inline(always)]
     fn from(value: TinyRange) -> Self {
+        let start = value.start as usize;
         Range {
-            start: value.start as usize,
-            end: (value.start + value.length) as usize,
+            start,
+            end: start + value.length as usize,
         }
     }
 }
@@ -70,20 +87,37 @@ impl From<TinyRange> for Range<usize> {
 impl TryFrom<Range<usize>> for TinyRange {
     type Error = Error;
 
-    #[inline(always)]
     fn try_from(value: Range<usize>) -> std::result::Result<Self, Self::Error> {
-        let start = u32::try_from(value.start)
-            .map_err(|_| Error::ValueOutOfRange("usize", "u32", value.start.to_string()))?;
+        let Ok(start) = u32::try_from(value.start) else {
+            cold_path();
+            return Err(Error::ValueOutOfRange(
+                "usize",
+                "u32",
+                value.start.to_string(),
+            ));
+        };
 
-        let length = u32::try_from(value.end - value.start).map_err(|_| {
-            Error::ValueOutOfRange("usize", "u32", (value.end - value.start).to_string())
-        })?;
+        let Some(raw_length) = value.end.checked_sub(value.start) else {
+            cold_path();
+            return Err(Error::ValueOutOfRange(
+                "Range<usize>",
+                "TinyRange",
+                format!("{}..{}", value.start, value.end),
+            ));
+        };
+        let Ok(length) = u32::try_from(raw_length) else {
+            cold_path();
+            return Err(Error::ValueOutOfRange(
+                "usize",
+                "u32",
+                raw_length.to_string(),
+            ));
+        };
 
         Ok(TinyRange { start, length })
     }
 }
 
-#[macro_export]
 macro_rules! transparent_newtype {
     ( $( $vis:vis $name:ident ( $inner:ty ) ; )+ ) => {
         $(
@@ -101,12 +135,11 @@ macro_rules! transparent_newtype {
                 zerocopy::FromBytes,
                 zerocopy::Unaligned,
             )]
-            $vis struct $name(pub $inner);
+            $vis struct $name(pub(crate) $inner);
         )+
     };
 }
 
-#[macro_export]
 macro_rules! impl_from {
     ( $src:ty => $dst:ty , |$v:ident| $body:expr ) => {
         impl From<$src> for $dst {
@@ -121,18 +154,39 @@ macro_rules! impl_from {
 transparent_newtype! {
     pub I256 ([u8; 32]);
     pub U256 ([u8; 32]);
-    pub UuidData([U64; 2]);
-    pub Ipv4Data (U32);
+    pub UuidData([zc::U64; 2]);
+    pub Ipv4Data (zc::U32);
     pub Ipv6Data ([u8; 16]);
-    pub Date16Data (U16);
-    pub Date32Data (I32);
-    pub DateTime32Data (U32);
-    pub DateTime64Data (I64);
-    pub Decimal32Data (I32);
-    pub Decimal64Data (I64);
-    pub Decimal128Data (I128);
+    pub Date16Data (zc::U16);
+    pub Date32Data (zc::I32);
+    pub DateTime32Data (zc::U32);
+    pub DateTime64Data (zc::I64);
+    pub Decimal32Data (zc::I32);
+    pub Decimal64Data (zc::I64);
+    pub Decimal128Data (zc::I128);
     pub Decimal256Data (I256);
     pub Bf16Data ([u8; 2]);
+}
+
+impl I256 {
+    #[inline]
+    pub const fn as_le_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl U256 {
+    #[inline]
+    pub const fn as_le_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl Decimal256Data {
+    #[inline]
+    pub const fn as_le_bytes(&self) -> &[u8; 32] {
+        self.0.as_le_bytes()
+    }
 }
 
 impl_from!(Bf16Data => half::bf16, |value| half::bf16::from_le_bytes(value.0));
@@ -142,115 +196,141 @@ impl_from!(UuidData => Uuid, |d| {
     let [hi, lo] = d.0;
     Uuid::from_u64_pair(hi.get(), lo.get())
 });
-impl_from!(Date16Data => NaiveDate, |d| date16(d.0.get()));
-impl_from!(Date32Data => NaiveDate, |d| date32(d.0.get()));
-impl_from!(DateTime32Data => chrono::DateTime<chrono::Utc>, |d| datetime32(d.0.get()));
+impl_from!(Date16Data => NaiveDate, |d| conv::date16(d.0.get()));
+impl_from!(DateTime32Data => chrono::DateTime<chrono::Utc>, |d| conv::datetime32(d.0.get()));
+
+impl TryFrom<Date32Data> for NaiveDate {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(value: Date32Data) -> Result<Self> {
+        conv::date32(value.0.get())
+    }
+}
 
 impl DateTime64Data {
-    #[inline(always)]
-    pub fn with_tz_and_precision(&self, tz: Tz, precision: u8) -> Option<chrono::DateTime<Tz>> {
-        datetime64_tz(self.0.get(), precision, tz)
+    pub(crate) fn with_tz_and_precision(
+        &self,
+        tz: Tz,
+        precision: u8,
+    ) -> Result<chrono::DateTime<Tz>> {
+        conv::datetime64_tz(self.0.get(), precision, tz)
     }
 }
 
 impl DateTime32Data {
     #[inline(always)]
-    pub fn with_tz(&self, tz: Tz) -> chrono::DateTime<Tz> {
-        datetime32_tz(self.0.get(), tz)
+    pub(crate) fn with_tz(&self, tz: Tz) -> chrono::DateTime<Tz> {
+        conv::datetime32_tz(self.0.get(), tz)
     }
 }
 
 impl Decimal32Data {
-    #[inline(always)]
-    pub fn with_precision(&self, precision: u8) -> rust_decimal::Decimal {
+    pub(crate) fn with_scale(&self, scale: u8) -> rust_decimal::Decimal {
         let value = self.0.get();
-        rust_decimal::Decimal::new(i64::from(value), u32::from(precision))
+        rust_decimal::Decimal::new(i64::from(value), u32::from(scale))
     }
 }
 
 impl Decimal64Data {
-    #[inline(always)]
-    pub fn with_precision(&self, precision: u8) -> rust_decimal::Decimal {
+    pub(crate) fn with_scale(&self, scale: u8) -> rust_decimal::Decimal {
         let value = self.0.get();
-        rust_decimal::Decimal::new(value, u32::from(precision))
+        rust_decimal::Decimal::new(value, u32::from(scale))
     }
 }
 
 impl Decimal128Data {
-    #[inline(always)]
-    pub fn with_precision(&self, precision: u8) -> Result<rust_decimal::Decimal> {
+    pub(crate) fn with_scale(&self, scale: u8) -> Result<rust_decimal::Decimal> {
+        if u32::from(scale) > rust_decimal::Decimal::MAX_SCALE {
+            cold_path();
+            return Err(Error::NotImplemented(format!(
+                "Decimal128 with scale {scale} (rust_decimal supports at most {})",
+                rust_decimal::Decimal::MAX_SCALE
+            )));
+        }
         let value = self.0.get();
-        let value = rust_decimal::Decimal::try_from_i128_with_scale(value, u32::from(precision))
-            .map_err(|_| Error::Overflow(value.to_string()))?;
-        Ok(value)
+        match rust_decimal::Decimal::try_from_i128_with_scale(value, u32::from(scale)) {
+            Ok(value) => Ok(value),
+            Err(_) => {
+                cold_path();
+                Err(Error::Overflow(value.to_string()))
+            }
+        }
     }
 }
 
 pub struct ParsedBlock<'a> {
-    pub markers: Vec<Mark<'a>>,
-    pub col_names: Vec<&'a str>,
+    pub markers: Box<[mark::Mark<'a>]>,
+    pub col_names: Box<[&'a str]>,
     pub num_rows: usize,
 }
 
-impl ParsedBlock<'_> {
-    fn reorder(&mut self, order: &HashMap<&str, usize>) -> Result<()> {
-        let num_cols = self.col_names.len();
-        let col_names = std::mem::replace(&mut self.col_names, Vec::with_capacity(num_cols));
-        let markers = std::mem::replace(&mut self.markers, Vec::with_capacity(num_cols));
+impl<'a> ParsedBlock<'a> {
+    pub fn mark(&self, name: &str) -> Result<&mark::Mark<'a>> {
+        mark_by_name(&self.col_names, &self.markers, name)
+    }
 
-        let mut triples = Vec::with_capacity(num_cols);
-        let mut num_used = 0;
-        for (index, (col_name, marker)) in col_names.into_iter().zip(markers).enumerate() {
-            let sort_key = if let Some(key) = order.get(col_name).copied() {
-                num_used += 1;
-                key
-            } else {
-                // if the column is not in the order, we put it at the end
-                num_cols + index
-            };
-            triples.push((col_name, marker, sort_key));
-        }
-
-        if num_used < order.len() {
-            let present_columns = triples
+    fn reorder_no_alloc(&mut self, order: &[&str]) {
+        // It's O(1) space but ~O(nk) ~ O(n^2) and 0 allocations.
+        // cols: [x, b, a1, y, a2, a3, z]
+        // order: [a, b, a]
+        //         0  1  2
+        // First `a` is found at index 2 in cols
+        // Everything in range [0..=2] is rotated right, so an item at index 2 (a) goes to index 0
+        // cols become [a1, x, b, y, a2, a3, z]
+        // On the next iteration we skip all previously handled elements
+        for (left, name) in order.iter().copied().enumerate() {
+            let pos = self.col_names[left..]
                 .iter()
-                .map(|(name, _, _)| *name)
-                .collect::<HashSet<_>>();
-            let mut missing = order.keys().copied().collect::<HashSet<_>>();
-            missing.retain(|name| !present_columns.contains(name));
-
-            return Err(Error::InvalidColumnOrder(format!(
-                "Got unexpected columns: {missing:?}; present: {present_columns:?}"
-            )));
+                .copied()
+                .position(|col_name| col_name == name)
+                .expect("bug: we validated columns exists but apparently not good enough");
+            if pos == 0 {
+                continue;
+            }
+            let right = left + pos + 1;
+            self.col_names[left..right].rotate_right(1);
+            self.markers[left..right].rotate_right(1);
         }
-
-        triples.sort_unstable_by_key(|(_, _, sort_key)| *sort_key);
-
-        for (col_name, marker, _) in triples {
-            self.col_names.push(col_name);
-            self.markers.push(marker);
-        }
-
-        Ok(())
     }
 }
 
 #[derive(Clone)]
-pub struct BlocksIterator<'a> {
-    blocks: Peekable<std::slice::Iter<'a, ParsedBlock<'a>>>,
+pub struct BlocksIterator<'data: 'iter, 'iter> {
+    blocks: Peekable<std::slice::Iter<'iter, ParsedBlock<'data>>>,
     block_row: usize,
 }
 
-impl<'a> BlocksIterator<'a> {
-    #[inline]
-    pub fn new(blocks: &'a [ParsedBlock<'a>]) -> Self {
+impl<'data, 'iter> BlocksIterator<'data, 'iter> {
+    pub fn new(blocks: &'iter [ParsedBlock<'data>]) -> Self {
         Self {
             blocks: blocks.iter().peekable(),
             block_row: 0,
         }
     }
 
-    pub fn new_ordered(blocks: &'a mut [ParsedBlock<'a>], order: &[&str]) -> Result<Self> {
+    /// Reorders each block's columns in place, then iterates over its rows.
+    ///
+    /// The requested columns form a prefix in `order`. Duplicate names are matched
+    /// by occurrence: the kth request for a name selects the kth occurrence of
+    /// that name in the original column layout. All unselected columns, including
+    /// surplus occurrences of requested names, follow in their original relative
+    /// order. Column names and their markers move together; row order is unchanged.
+    /// The reordered layout remains in `blocks` after the iterator is dropped.
+    ///
+    /// For example, source columns `[x, a₁, b, a₂, y, a₃]` and an order of
+    /// `["a", "b", "a"]` produce `[a₁, b, a₂, x, y, a₃]`, where subscripts
+    /// distinguish source columns all named `"a"`.
+    ///
+    /// If either `blocks` or `order` is empty, no reordering or validation occurs.
+    /// Otherwise, before mutating any block, checks that the first block contains
+    /// every requested occurrence and that all blocks have identical column-name
+    /// sequences (including duplicates and their positions). These checks do not
+    /// compare column types. A failed check returns [`Error::InvalidColumnOrder`]
+    /// without changing any block.
+    ///
+    /// For name-based reader construction, see [`macro@FromBlock`].
+    pub fn new_ordered(blocks: &'iter mut [ParsedBlock<'data>], order: &[&str]) -> Result<Self> {
         reorder_block_cols(blocks, order)?;
         Ok(Self {
             blocks: blocks.iter().peekable(),
@@ -259,14 +339,21 @@ impl<'a> BlocksIterator<'a> {
     }
 }
 
-pub fn reorder_block_cols(blocks: &mut [ParsedBlock<'_>], order: &[&str]) -> Result<()> {
-    let order_map = order
-        .iter()
-        .enumerate()
-        .map(|(index, name)| (*name, index))
-        .collect::<HashMap<_, _>>();
-    for block in blocks.iter_mut() {
-        block.reorder(&order_map)?;
+pub(crate) fn reorder_block_cols(blocks: &mut [ParsedBlock<'_>], order: &[&str]) -> Result<()> {
+    if blocks.is_empty() || order.is_empty() {
+        return Ok(());
+    }
+
+    // Opinionated validation that allows reorders be infallible
+    validate_blocks(blocks, order)?;
+
+    // I read numbers from my ceiling, sorry
+    if order.len() * blocks[0].col_names.len() < 128 {
+        for block in blocks.iter_mut() {
+            block.reorder_no_alloc(order);
+        }
+    } else {
+        reorder_alloc(blocks, order);
     }
 
     if let Some(first) = blocks.first() {
@@ -276,58 +363,139 @@ pub fn reorder_block_cols(blocks: &mut [ParsedBlock<'_>], order: &[&str]) -> Res
     Ok(())
 }
 
-pub struct BlockRow<'a> {
-    col_names: &'a [&'a str],
-    cols: &'a [Mark<'a>],
-    col_index: usize,
+fn reorder_alloc(blocks: &mut [ParsedBlock<'_>], order: &[&str]) {
+    let Some(first) = blocks.first() else {
+        return;
+    };
+
+    let mut positions = HashMap::<&str, (Vec<usize>, usize)>::with_capacity(order.len());
+
+    for (index, name) in order.iter().copied().enumerate() {
+        let (indices, _used) = positions.entry(name).or_default();
+        indices.push(index);
+    }
+
+    let mut destinations = Vec::with_capacity(first.col_names.len());
+    let mut tail = order.len();
+
+    for &name in &first.col_names {
+        let target = match positions.get_mut(name) {
+            Some((indices, used)) if *used < indices.len() => {
+                let target = indices[*used];
+                *used += 1;
+                target
+            }
+            _ => {
+                let target = tail;
+                tail += 1;
+                target
+            }
+        };
+
+        destinations.push(target);
+    }
+
+    // At this moment we assume that we are working with validated data and the column layout this
+    // the same everywhere, otherwise we'd need to build dest arr for each col.
+
+    // Not an n^2
+    for i in 0..destinations.len() {
+        while destinations[i] != i {
+            let target = destinations[i];
+            for block in blocks.iter_mut() {
+                block.col_names.swap(i, target);
+                block.markers.swap(i, target);
+            }
+            destinations.swap(i, target);
+        }
+    }
+}
+
+fn validate_blocks(blocks: &[ParsedBlock<'_>], cols: &[&str]) -> Result<()> {
+    // It's more likely that user code messed up columns rather than CH returned some broken blocks
+    // with unmatched columns (unless user hasn't created the vec of blocks manually).
+    let mut want_counts = HashMap::with_capacity(cols.len());
+    for &col in cols {
+        *want_counts.entry(col).or_insert(0usize) += 1;
+    }
+
+    let mut n = cols.len();
+    for &col in &blocks[0].col_names {
+        let Some(count) = want_counts.get_mut(col) else {
+            continue;
+        };
+        if *count == 0 {
+            continue;
+        }
+        *count -= 1;
+        n -= 1;
+        if n == 0 {
+            break;
+        }
+    }
+
+    want_counts.retain(|_, count| *count != 0);
+
+    if !want_counts.is_empty() {
+        return Err(Error::InvalidColumnOrder(format!(
+            "Missing requested column occurrences: {want_counts:?}"
+        )));
+    }
+
+    // It is questionable if all blocks should share the same layout, because there can exist
+    // such a set of blocks that has a sufficient but different set of columns that can still
+    // satisfy the order / columns can be shuffled for some reason / someone manually created
+    // a bunch of blocks and wants to iterate over them. Anyway, this assumption lets speculate more
+    // and check less in other annoying code here.
+    validate_block_layouts(blocks)?;
+
+    Ok(())
+}
+
+fn validate_block_layouts(blocks: &[ParsedBlock<'_>]) -> Result<()> {
+    let Some((first, rest)) = blocks.split_first() else {
+        return Ok(());
+    };
+
+    for (index, block) in rest.iter().enumerate() {
+        if block.col_names != first.col_names {
+            return Err(Error::InvalidColumnOrder(format!(
+                "Block {} has different column names: {:?}",
+                index + 1,
+                block.col_names,
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+pub struct BlockRow<'data: 'iter, 'iter> {
+    col_names: &'iter [&'data str],
+    cols: &'iter [mark::Mark<'data>],
     row_index: usize,
 }
 
-impl<'a> BlockRow<'a> {
-    pub const fn cols(&self) -> &'a [Mark<'a>] {
+impl<'data, 'iter> BlockRow<'data, 'iter> {
+    pub const fn cols(&self) -> &'iter [mark::Mark<'data>] {
         self.cols
     }
 
-    pub const fn col_names(&self) -> &'a [&'a str] {
+    pub const fn col_names(&self) -> &'iter [&'data str] {
         self.col_names
     }
 
     pub const fn row_index(&self) -> usize {
         self.row_index
     }
-
-    pub const fn col_index(&self) -> usize {
-        self.col_index
-    }
 }
 
-impl<'a> Iterator for BlockRow<'a> {
-    type Item = (&'a str, ColumnAccessor<'a>);
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        let col_name = self.col_names.get(self.col_index)?;
-        let marker = self.cols.get(self.col_index)?;
-
-        self.col_index += 1;
-
-        Some((
-            col_name,
-            ColumnAccessor {
-                col_name,
-                marker,
-                row_index: self.row_index,
-            },
-        ))
-    }
-}
-
-impl<'a> Iterator for BlocksIterator<'a> {
-    type Item = BlockRow<'a>;
+impl<'data, 'iter> Iterator for BlocksIterator<'data, 'iter> {
+    type Item = BlockRow<'data, 'iter>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            let block = self.blocks.peek()?;
+            let block = *self.blocks.peek()?;
             if self.block_row >= block.num_rows {
                 self.blocks.next();
                 self.block_row = 0;
@@ -337,7 +505,6 @@ impl<'a> Iterator for BlocksIterator<'a> {
             let block_row = BlockRow {
                 col_names: &block.col_names,
                 cols: &block.markers,
-                col_index: 0,
                 row_index: self.block_row,
             };
             self.block_row += 1;
@@ -345,93 +512,33 @@ impl<'a> Iterator for BlocksIterator<'a> {
             break Some(block_row);
         }
     }
-}
 
-pub struct ColumnAccessor<'a> {
-    pub col_name: &'a str,
-    pub marker: &'a Mark<'a>,
-    row_index: usize,
-}
-
-/// Provides access to the column value and allows to avoid constructing new
-/// Value instances. For small types it can have a large performance impact.
-impl<'a> ColumnAccessor<'a> {
-    #[inline]
-    pub fn get(self) -> Value<'a> {
-        // row index is private and created by us, so it should always be valid, thus safe
-        // to unwrap
-        self.marker.get(self.row_index).unwrap()
-    }
-
-    #[inline]
-    pub fn into_str(self) -> Result<&'a str> {
-        let str = self.marker.get_str(self.row_index)?;
-        Ok(str.unwrap())
-    }
-
-    #[inline]
-    pub fn into_opt_str(self) -> Result<Option<&'a str>> {
-        let str = self.marker.get_opt_str(self.row_index)?;
-        Ok(str.unwrap())
-    }
-
-    #[inline]
-    pub fn into_datetime<T: TimeZone>(self, tz: T) -> Result<chrono::DateTime<T>> {
-        let dt = self.marker.get_datetime(self.row_index, tz)?;
-        Ok(dt.unwrap())
-    }
-
-    #[inline]
-    pub fn into_uuid(self) -> Result<Uuid> {
-        let uuid = self.marker.get_uuid(self.row_index)?;
-        Ok(uuid.unwrap())
-    }
-
-    #[inline]
-    pub fn into_ipv4(self) -> Result<Ipv4Addr> {
-        let ipv4 = self.marker.get_ipv4(self.row_index)?;
-        Ok(ipv4.unwrap())
-    }
-
-    #[inline]
-    pub fn into_ipv6(self) -> Result<Ipv6Addr> {
-        let ipv6 = self.marker.get_ipv6(self.row_index)?;
-        Ok(ipv6.unwrap())
-    }
-
-    #[inline]
-    pub fn into_opt_ipv6(self) -> Result<Option<Ipv6Addr>> {
-        let ipv6 = self.marker.get_opt_ipv6(self.row_index)?;
-        Ok(ipv6.unwrap())
-    }
-
-    #[inline]
-    pub fn into_bool(self) -> Result<bool> {
-        let value = self.marker.get_bool(self.row_index)?;
-        Ok(value.unwrap())
-    }
-
-    #[inline]
-    pub fn into_f64(self) -> Result<f64> {
-        let value = self.marker.get_f64(self.row_index)?;
-        Ok(value.unwrap())
-    }
-
-    #[inline]
-    pub fn into_array_lc_strs(self) -> Result<impl Iterator<Item = &'a str>> {
-        let it = self.marker.get_array_lc_strs(self.row_index)?.unwrap();
-        Ok(it.into_iter())
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let mut blocks = self.blocks.clone();
+        let mut remaining = match blocks.next() {
+            Some(block) => block.num_rows.saturating_sub(self.block_row),
+            None => 0,
+        };
+        for block in blocks {
+            remaining += block.num_rows;
+        }
+        (remaining, Some(remaining))
     }
 }
 
-pub fn iter_blocks<'a>(blocks: &'a [ParsedBlock]) -> BlocksIterator<'a> {
+impl ExactSizeIterator for BlocksIterator<'_, '_> {}
+
+pub fn iter_blocks<'data, 'iter>(
+    blocks: &'iter [ParsedBlock<'data>],
+) -> BlocksIterator<'data, 'iter> {
     BlocksIterator::new(blocks)
 }
 
-pub fn iter_blocks_ordered<'a>(
-    blocks: &'a mut [ParsedBlock<'a>],
+/// Equivalent to [`BlocksIterator::new_ordered`]; see its ordering and validation contract.
+pub fn iter_blocks_ordered<'data, 'iter>(
+    blocks: &'iter mut [ParsedBlock<'data>],
     order: &[&str],
-) -> Result<BlocksIterator<'a>> {
+) -> Result<BlocksIterator<'data, 'iter>> {
     BlocksIterator::new_ordered(blocks, order)
 }
 
@@ -470,5 +577,102 @@ pub(crate) mod common {
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
         Ok(buf)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::slice::ByteView;
+
+    fn block<'a>(names: &[&'a str], cells: &'a [u8]) -> ParsedBlock<'a> {
+        let markers = cells
+            .iter()
+            .map(|cell| mark::Mark::UInt8(ByteView::try_from(std::slice::from_ref(cell)).unwrap()))
+            .collect();
+        ParsedBlock {
+            markers,
+            col_names: names.into(),
+            num_rows: 1,
+        }
+    }
+
+    fn cells(block: &ParsedBlock<'_>) -> Vec<u8> {
+        block
+            .markers
+            .iter()
+            .map(|mark| mark.get_u8(0).unwrap().unwrap())
+            .collect()
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn tiny_range_round_trips_when_end_exceeds_u32_max() -> Result<()> {
+        let range = (u32::MAX as usize - 1)..(u32::MAX as usize + 10);
+        let tiny = TinyRange::try_from(range.clone())?;
+        assert_eq!(
+            tiny,
+            TinyRange {
+                start: u32::MAX - 1,
+                length: 11
+            }
+        );
+        assert_eq!(Range::<usize>::from(tiny), range);
+        Ok(())
+    }
+
+    #[test]
+    fn reorder_moves_markers_with_names_and_keeps_unrequested_tail() -> Result<()> {
+        let mut blocks = [block(&["a", "b", "c", "d", "e"], &[0, 1, 2, 3, 4])];
+        reorder_block_cols(&mut blocks, &["e", "c", "a"])?;
+        assert_eq!(*blocks[0].col_names, ["e", "c", "a", "b", "d"]);
+        assert_eq!(cells(&blocks[0]), [4, 2, 0, 1, 3]);
+        Ok(())
+    }
+
+    #[test]
+    fn reorder_reports_missing_requested_columns() {
+        let mut blocks = [block(&["a", "b"], &[0, 1])];
+        let err = reorder_block_cols(&mut blocks, &["b", "zzz"]).unwrap_err();
+        assert!(
+            matches!(&err, Error::InvalidColumnOrder(msg) if msg.contains("zzz")),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn reorder_rejects_blocks_with_different_layouts() {
+        // Block 0 alone satisfies the order; block 1 must still be checked.
+        let mut blocks = [block(&["a", "b"], &[0, 1]), block(&["a"], &[0])];
+        let err = reorder_block_cols(&mut blocks, &["b", "a"]).unwrap_err();
+        assert!(matches!(err, Error::InvalidColumnOrder(_)), "{err}");
+
+        // Same width, different names: must not be silently permuted by block 0's layout.
+        let mut blocks = [block(&["a", "b"], &[0, 1]), block(&["b", "a"], &[1, 0])];
+        let err = reorder_block_cols(&mut blocks, &["b", "a"]).unwrap_err();
+        assert!(matches!(err, Error::InvalidColumnOrder(_)), "{err}");
+    }
+
+    #[test]
+    fn decimal128_unsupported_scale_is_not_implemented() {
+        let data = Decimal128Data(zc::I128::new(1));
+        for scale in [29u8, 38] {
+            let err = data.with_scale(scale).unwrap_err();
+            assert!(
+                matches!(&err, Error::NotImplemented(msg) if msg.contains(&format!("scale {scale}"))),
+                "{err}"
+            );
+        }
+        assert_eq!(
+            data.with_scale(28).unwrap(),
+            rust_decimal::Decimal::try_from_i128_with_scale(1, 28).unwrap()
+        );
+    }
+
+    #[test]
+    fn decimal128_value_overflow_stays_overflow() {
+        let data = Decimal128Data(zc::I128::new(i128::MAX));
+        let err = data.with_scale(0).unwrap_err();
+        assert!(matches!(err, Error::Overflow(_)), "{err}");
     }
 }

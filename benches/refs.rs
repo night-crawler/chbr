@@ -1,11 +1,18 @@
-use std::{fs, hint::black_box, net::Ipv6Addr};
+use std::{fs, hint::black_box, net::Ipv6Addr, time::Duration};
 
-use chbr::{BlockRow, BlocksIterator, parse::block::parse_many};
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+mod common;
+
+use chbr::{BlockRow, BlocksIterator, FromBlock as _, parse::block::parse_many};
 use chrono::Utc;
 use clickhouse::rowbinary::de::deserialize_from;
 use criterion::{Criterion, criterion_group, criterion_main};
 use testresult::TestResult;
-use zerocopy::little_endian::{U64, U128};
+
+use crate::common::BenchmarkCols;
 
 #[derive(clickhouse::Row, serde::Deserialize, Debug)]
 pub struct BenchmarkSample<'a> {
@@ -47,10 +54,16 @@ pub struct BenchmarkSample<'a> {
     pub nested_some_other_id: Vec<u64>,
 }
 
-impl<'a> TryFrom<BlockRow<'a>> for BenchmarkSample<'a> {
+#[inline(always)]
+fn trusted_str(bytes: &chbr::BStr) -> &str {
+    // SAFETY: the benchmark fixture contains UTF-8 string columns.
+    unsafe { std::str::from_utf8_unchecked(bytes) }
+}
+
+impl<'data, 'iter> TryFrom<BlockRow<'data, 'iter>> for BenchmarkSample<'data> {
     type Error = chbr::error::Error;
 
-    fn try_from(row: BlockRow<'a>) -> Result<Self, Self::Error> {
+    fn try_from(row: BlockRow<'data, 'iter>) -> Result<Self, Self::Error> {
         let i = row.row_index();
 
         let [
@@ -80,37 +93,71 @@ impl<'a> TryFrom<BlockRow<'a>> for BenchmarkSample<'a> {
             unreachable!()
         };
 
-        let tags = lc_tags.get_array_lc_strs(i)?.unwrap().collect::<Vec<_>>();
+        let tags = lc_tags
+            .get_array_lc_strs(i)?
+            .unwrap()
+            .map(|value| value.map(trusted_str))
+            .collect::<Result<Vec<_>, _>>()?;
         let nested_strs = nested_field_lc_string_cd10
             .get_array_lc_strs(i)?
             .unwrap()
-            .collect::<Vec<_>>();
+            .map(|value| value.map(trusted_str))
+            .collect::<Result<Vec<_>, _>>()?;
 
         let mut nested_some_id = Vec::with_capacity(nested_strs.len());
-        let slice: &[U128] = nested_field_some_id.get_arr_uint128_slice(i)?.unwrap();
+        let slice: &[zerocopy::little_endian::U128] =
+            nested_field_some_id.get_arr_uint128_slice(i)?.unwrap();
         nested_some_id.extend(slice.iter().map(|v| v.get()));
 
         let mut nested_some_other_id = Vec::with_capacity(nested_strs.len());
-        let slice: &[U64] = nested_field_some_other_id.get_arr_uint64_slice(i)?.unwrap();
+        let slice: &[zerocopy::little_endian::U64] =
+            nested_field_some_other_id.get_arr_uint64_slice(i)?.unwrap();
         nested_some_other_id.extend(slice.iter().map(|v| v.get()));
 
         let row = Self {
             id: id.get_uuid(i)?.unwrap(),
-            lc_string_cd10: lc_string_cd10.get_str(i)?.unwrap(),
+            lc_string_cd10: trusted_str(lc_string_cd10.get_str(i)?.unwrap()),
             timestamp: timestamp.get_datetime(i, Utc)?.unwrap(),
             count: count.get_f64(i)?.unwrap(),
             some_number: some_number.get_u32(i)?.unwrap(),
-            lc_nullable_string_cd1000: lc_nullable_string_cd1000.get_opt_str(i)?.unwrap(),
-            lc_nullable_string_cd5000: lc_nullable_string_cd5000.get_opt_str(i)?.unwrap(),
-            lc_nullable_string_cd3000: lc_nullable_string_cd3000.get_opt_str(i)?.unwrap(),
-            lc_nullable_string_cd4000: lc_nullable_string_cd4000.get_opt_str(i)?.unwrap(),
-            lc_nullable_string_cd50000: lc_nullable_string_cd50000.get_opt_str(i)?.unwrap(),
-            lc_nullable_string_cd100: lc_nullable_string_cd100.get_opt_str(i)?.unwrap(),
-            lc_nullable_string_cd500: lc_nullable_string_cd500.get_opt_str(i)?.unwrap(),
+            lc_nullable_string_cd1000: lc_nullable_string_cd1000
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
+            lc_nullable_string_cd5000: lc_nullable_string_cd5000
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
+            lc_nullable_string_cd3000: lc_nullable_string_cd3000
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
+            lc_nullable_string_cd4000: lc_nullable_string_cd4000
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
+            lc_nullable_string_cd50000: lc_nullable_string_cd50000
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
+            lc_nullable_string_cd100: lc_nullable_string_cd100
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
+            lc_nullable_string_cd500: lc_nullable_string_cd500
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
             some_ip_address: some_ip_address.get_opt_ipv6(i)?.unwrap(),
-            lc_nullable_string8: lc_nullable_string8.get_opt_str(i)?.unwrap(),
+            lc_nullable_string8: lc_nullable_string8
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
             lc_tags: tags,
-            lc_nullable_string_cd_00000: lc_nullable_string_cd_00000.get_opt_str(i)?.unwrap(),
+            lc_nullable_string_cd_00000: lc_nullable_string_cd_00000
+                .get_opt_str(i)?
+                .unwrap()
+                .map(trusted_str),
             nested_lc_string_cd10: nested_strs,
             nested_flag: nested_field_flag.get_arr_bool_iter(i)?.unwrap().collect(),
             nested_some_id,
@@ -165,6 +212,118 @@ fn native_read(input: &[u8]) -> TestResult<()> {
     Ok(())
 }
 
+// Both derived benchmarks parse the same Native input and construct the same
+// `BenchmarkSample`. `BenchmarkCols::iter_blocks` calls the generated
+// `BenchmarkCols::try_read`, which returns a `BenchmarkColsItem` containing
+// every field before the five owned `Vec` conversions allocate.
+fn native_derive_read(input: &[u8]) -> TestResult<()> {
+    let blocks = parse_many(input)?;
+
+    for row in BenchmarkCols::iter_blocks(&blocks) {
+        let row = row?;
+        let sample = BenchmarkSample {
+            id: row.id,
+            lc_string_cd10: row.lc_string_cd10,
+            timestamp: row.timestamp.with_timezone(&Utc),
+            count: row.count,
+            some_number: row.some_number,
+            lc_nullable_string_cd1000: row.lc_nullable_string_cd1000,
+            lc_nullable_string_cd5000: row.lc_nullable_string_cd5000,
+            lc_nullable_string_cd3000: row.lc_nullable_string_cd3000,
+            lc_nullable_string_cd4000: row.lc_nullable_string_cd4000,
+            lc_nullable_string_cd50000: row.lc_nullable_string_cd50000,
+            lc_nullable_string_cd100: row.lc_nullable_string_cd100,
+            lc_nullable_string_cd500: row.lc_nullable_string_cd500,
+            some_ip_address: row.some_ip_address,
+            lc_nullable_string8: row.lc_nullable_string8,
+            lc_tags: row.lc_tags.try_collect_vec()?,
+            lc_nullable_string_cd_00000: row.lc_nullable_string_cd_00000,
+            nested_lc_string_cd10: row.nested_lc_string_cd10.try_collect_vec()?,
+            nested_flag: row
+                .nested_flag
+                .try_as_slice()?
+                .iter()
+                .map(|&v| v == 1)
+                .collect(),
+            nested_some_id: row
+                .nested_some_id
+                .try_as_slice()?
+                .iter()
+                .map(|v| v.get())
+                .collect(),
+            nested_some_other_id: row
+                .nested_some_other_id
+                .try_as_slice()?
+                .iter()
+                .map(|v| v.get())
+                .collect(),
+        };
+        black_box(sample);
+    }
+
+    Ok(())
+}
+
+// This variant bypasses `BlocksRows` and the generated `BenchmarkCols::try_read`,
+// but still uses each field reader's `TryRead::try_read`. Rust evaluates the
+// `BenchmarkSample` field initializers in order, so array collection and its
+// allocations occur between reads of later `BenchmarkCols` fields. It measures
+// this interleaved read-and-convert ordering rather than an allocation-free decoder.
+fn native_derive_direct_read(input: &[u8]) -> TestResult<()> {
+    use chbr::reader::TryRead as _;
+
+    let blocks = parse_many(input)?;
+
+    for block in &blocks {
+        let cols = BenchmarkCols::from_block(block)?;
+        for i in 0..block.num_rows {
+            let sample = BenchmarkSample {
+                id: cols.id.try_read(i)?,
+                lc_string_cd10: cols.lc_string_cd10.try_read(i)?,
+                timestamp: cols.timestamp.try_read(i)?.with_timezone(&Utc),
+                count: cols.count.try_read(i)?,
+                some_number: cols.some_number.try_read(i)?,
+                lc_nullable_string_cd1000: cols.lc_nullable_string_cd1000.try_read(i)?,
+                lc_nullable_string_cd5000: cols.lc_nullable_string_cd5000.try_read(i)?,
+                lc_nullable_string_cd3000: cols.lc_nullable_string_cd3000.try_read(i)?,
+                lc_nullable_string_cd4000: cols.lc_nullable_string_cd4000.try_read(i)?,
+                lc_nullable_string_cd50000: cols.lc_nullable_string_cd50000.try_read(i)?,
+                lc_nullable_string_cd100: cols.lc_nullable_string_cd100.try_read(i)?,
+                lc_nullable_string_cd500: cols.lc_nullable_string_cd500.try_read(i)?,
+                some_ip_address: cols.some_ip_address.try_read(i)?,
+                lc_nullable_string8: cols.lc_nullable_string8.try_read(i)?,
+                lc_tags: cols.lc_tags.try_read(i)?.try_collect_vec()?,
+                lc_nullable_string_cd_00000: cols.lc_nullable_string_cd_00000.try_read(i)?,
+                nested_lc_string_cd10: cols.nested_lc_string_cd10.try_read(i)?.try_collect_vec()?,
+                nested_flag: cols
+                    .nested_flag
+                    .try_read(i)?
+                    .try_as_slice()?
+                    .iter()
+                    .map(|&v| v == 1)
+                    .collect(),
+                nested_some_id: cols
+                    .nested_some_id
+                    .try_read(i)?
+                    .try_as_slice()?
+                    .iter()
+                    .map(|v| v.get())
+                    .collect(),
+                nested_some_other_id: cols
+                    .nested_some_other_id
+                    .try_read(i)?
+                    .try_as_slice()?
+                    .iter()
+                    .map(|v| v.get())
+                    .collect(),
+            };
+            black_box(sample);
+        }
+    }
+
+    Ok(())
+}
+
 fn bench_readers(c: &mut Criterion) {
     let rb_data =
         fs::read("testdata/benchmark_sample.rb").expect("missing testdata/benchmark_sample.rb");
@@ -178,7 +337,22 @@ fn bench_readers(c: &mut Criterion) {
     c.bench_function("chbr", |b| {
         b.iter(|| native_read(black_box(&native_data)).unwrap())
     });
+
+    c.bench_function("chbr_derive", |b| {
+        b.iter(|| native_derive_read(black_box(&native_data)).unwrap())
+    });
+
+    c.bench_function("chbr_derive_direct", |b| {
+        b.iter(|| native_derive_direct_read(black_box(&native_data)).unwrap())
+    });
 }
 
-criterion_group!(benches, bench_readers);
+criterion_group! {
+    name = benches;
+    config = Criterion::default()
+        .warm_up_time(Duration::from_secs(10))
+        .measurement_time(Duration::from_secs(20))
+        .sample_size(200);
+    targets = bench_readers
+}
 criterion_main!(benches);

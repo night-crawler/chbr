@@ -3,46 +3,69 @@ name = "chbr"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+serde1 = ["dep:serde"]
+mimalloc = ["dep:mimalloc"]
+
 [dependencies]
-unsigned-varint = { version = "0.8", features = ["std"] }
 thiserror = "2"
 chrono = "0.4"
 chrono-tz = "0.10"
 nom = { version = "8", features = ["std"] }
 zerocopy = { version = "0.8", features = ["std", "derive"] }
 log = "0.4"
-env_logger = "0.11.8"
 rust_decimal = "1.37.1"
-uuid = { version = "1.16", features = ["v4"] }
+uuid = "1.16"
 half = { version = "2.6", features = ["zerocopy"] }
 paste = "1"
+serde = { version = "1", optional = true }
+bstr = "1"
+mimalloc = { version = "0.1", optional = true }
+
+[dependencies.chbr_derive]
+path = "./chbr_derive"
+
 
 [dev-dependencies]
 testresult = "0.4"
 pretty_assertions = "1.4"
+env_logger = "0.11"
 # clickhouse-rs does not expose deserialize row interface, so to make a benchmark, I had
 # to fork and expose it
 clickhouse = { git = "https://github.com/night-crawler/clickhouse-rs", branch = "main", features = ["chrono", "uuid"] }
-tokio = { version = "1.45", features = ["full"] }
 serde = { version = "1", features = ["default", "derive"] }
-criterion = "0.6"
+criterion = "0.8"
+serde_json = "1"
 
 [profile.release]
 debug = true
 strip = "none"
+codegen-units = 1
+lto = "fat"
 
 [profile.bench]
-# inherits = "release"  # implied
+inherits = "release"
 debug = true
 strip = "none"
-
-[[test]]
-name = "tests"
-path = "tests/main.rs"
 
 [[bench]]
 name = "refs"
 harness = false
+
+[[bench]]
+name = "throughput"
+harness = false
+
+# Fixed-work driver for `scripts/perf_rows.py`; not a criterion bench.
+[[bench]]
+name = "rows"
+harness = false
+
+[[bench]]
+name = "json"
+harness = false
+required-features = ["serde1"]
 
 [lints]
 clippy.allow_attributes = "deny"
@@ -97,3 +120,7 @@ clippy.unnested_or_patterns = "deny"
 clippy.unused_trait_names = "deny"
 clippy.missing_const_for_fn = "deny"
 rust.unfulfilled_lint_expectations = "deny"
+
+[workspace]
+members = ["examples"]
+resolver = "3"
