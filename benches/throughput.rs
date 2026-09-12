@@ -20,8 +20,8 @@ fn consume_all(input: &[u8]) -> TestResult<()> {
 }
 
 fn bench_throughput(c: &mut Criterion) {
-    let native_data = fs::read("testdata/benchmark_sample.native")
-        .expect("missing testdata/benchmark_sample.native");
+    let native_data = fs::read("benches/testdata/benchmark_sample.native")
+        .expect("missing benches/testdata/benchmark_sample.native");
     let bytes = u64::try_from(native_data.len()).expect("input size fits in u64");
 
     let mut group = c.benchmark_group("throughput");

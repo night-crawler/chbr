@@ -17,8 +17,8 @@ fn main() {
         .nth(1)
         .map(|arg| arg.parse().expect("iterations must be an integer"))
         .unwrap_or(300);
-    let data = fs::read("testdata/benchmark_sample.native")
-        .expect("missing testdata/benchmark_sample.native");
+    let data = fs::read("benches/testdata/benchmark_sample.native")
+        .expect("missing benches/testdata/benchmark_sample.native");
     let blocks = parse_many(&data).expect("input parses");
     let rows: usize = blocks.iter().map(|block| block.num_rows).sum();
     println!("rows={rows} iters={iters}");

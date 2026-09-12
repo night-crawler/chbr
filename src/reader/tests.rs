@@ -480,7 +480,7 @@ fn derive_iter_blocks_flat() -> TestResult {
         id: Uuid<'a>,
     }
 
-    let buf = load("./testdata/benchmark_sample.native")?;
+    let buf = load("./testdata/multi_block.native")?;
     let blocks = crate::parse::block::parse_many(&buf)?;
     assert!(blocks.len() > 1, "expected a multi-block file");
 

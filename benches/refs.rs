@@ -325,10 +325,10 @@ fn native_derive_direct_read(input: &[u8]) -> TestResult<()> {
 }
 
 fn bench_readers(c: &mut Criterion) {
-    let rb_data =
-        fs::read("testdata/benchmark_sample.rb").expect("missing testdata/benchmark_sample.rb");
-    let native_data = fs::read("testdata/benchmark_sample.native")
-        .expect("missing testdata/benchmark_sample.native");
+    let rb_data = fs::read("benches/testdata/benchmark_sample.rb")
+        .expect("missing benches/testdata/benchmark_sample.rb");
+    let native_data = fs::read("benches/testdata/benchmark_sample.native")
+        .expect("missing benches/testdata/benchmark_sample.native");
 
     c.bench_function("serde", |b| {
         b.iter(|| ch_rs_read(black_box(&rb_data)).unwrap())
