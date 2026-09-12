@@ -55,6 +55,27 @@ fn array_map_sample_typed() -> TestResult {
 
 #[test]
 fn datetime_timezone_forms() -> TestResult {
+    const _SQL: &str = r#"
+drop table if exists datetime_tz;
+
+create table datetime_tz
+(
+    a DateTime,
+    b DateTime('Europe/Berlin'),
+    c DateTime64(3),
+    d DateTime64(6, 'Asia/Tokyo'),
+    e DateTime64,
+    f Nullable(DateTime64(9)),
+    g Array(DateTime('UTC'))
+) engine = Memory;
+
+insert into datetime_tz values
+    (1700000000, 1700000000, 1700000000.123, 1700000000.123456, 1700000000.5, NULL, [1700000000]);
+
+select a, b, c, d, e, f, g, cast(b, 'Nullable(DateTime(''Europe/Berlin''))') as h
+from datetime_tz format Native;
+"#;
+
     let buf = load("./testdata/datetime_tz.native")?;
     let (_, block) = parse_single(&buf)?;
 
@@ -480,6 +501,8 @@ fn derive_iter_blocks_flat() -> TestResult {
         id: Uuid<'a>,
     }
 
+    // Native is a bare sequence of self-describing blocks, so this fixture needs no query:
+    //   cat testdata/uuid_and_dates.native testdata/uuid_and_dates.native > testdata/multi_block.native
     let buf = load("./testdata/multi_block.native")?;
     let blocks = crate::parse::block::parse_many(&buf)?;
     assert!(blocks.len() > 1, "expected a multi-block file");
@@ -612,6 +635,16 @@ fn col_tuple_reads_named_tuple_positionally() -> TestResult {
 
 #[test]
 fn empty_tuple_keeps_row_count() -> TestResult {
+    // Needs a ClickHouse 26.8 server and client: a 25.3 client desynchronises on the
+    // Array(Tuple()) column, so the stream cannot be captured there.
+    const _SQL: &str = r#"
+select
+    tuple()            as t,
+    [tuple(), tuple()] as at,
+    number
+from numbers(2) format Native;
+"#;
+
     #[derive(FromBlock, Copy, Clone)]
     struct Row<'a> {
         t: Value<'a>,

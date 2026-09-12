@@ -188,25 +188,42 @@ mod tests {
     }
 
     #[test]
-    fn populated_shared_variant_rejected() -> TestResult {
-        for (file, expected) in [
-            (
-                "./testdata/dynamic_shared_variant.native",
-                "Dynamic with 3 values in SharedVariant",
-            ),
-            (
-                "./testdata/json_shared_variant.native",
-                "Dynamic with 3 values in SharedVariant",
-            ),
-        ] {
-            let buf = load(file)?;
-            match parse_many(&buf) {
-                Err(crate::Error::NotImplemented(message)) => assert_eq!(message, expected),
-                Err(other) => panic!("{file}: expected NotImplemented, got {other:?}"),
-                Ok(_) => panic!("{file}: expected NotImplemented, parsed successfully"),
+    fn populated_dynamic_shared_variant_rejected() -> TestResult {
+        const _SQL: &str = r#"
+-- max_types=0 forces every value into the SharedVariant sub-column.
+select number as id, cast(number * 10, 'Dynamic(max_types=0)') as d, toString(number) as after
+from numbers(3) format Native;
+"#;
+
+        let buf = load("./testdata/dynamic_shared_variant.native")?;
+        match parse_many(&buf) {
+            Err(crate::Error::NotImplemented(message)) => {
+                assert_eq!(message, "Dynamic with 3 values in SharedVariant");
+                Ok(())
             }
+            Err(other) => panic!("expected NotImplemented, got {other:?}"),
+            Ok(_) => panic!("expected NotImplemented, parsed successfully"),
         }
-        Ok(())
+    }
+
+    #[test]
+    fn populated_json_shared_variant_rejected() -> TestResult {
+        const _SQL: &str = r#"
+-- max_dynamic_types=0 forces every JSON leaf into the SharedVariant sub-column.
+select number as id, cast(concat('{"a":', toString(number * 10), '}'), 'JSON(max_dynamic_types=0)') as j,
+       toString(number) as after
+from numbers(3) format Native;
+"#;
+
+        let buf = load("./testdata/json_shared_variant.native")?;
+        match parse_many(&buf) {
+            Err(crate::Error::NotImplemented(message)) => {
+                assert_eq!(message, "Dynamic with 3 values in SharedVariant");
+                Ok(())
+            }
+            Err(other) => panic!("expected NotImplemented, got {other:?}"),
+            Ok(_) => panic!("expected NotImplemented, parsed successfully"),
+        }
     }
 
     #[test]

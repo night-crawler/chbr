@@ -1852,6 +1852,23 @@ mod serde_tests {
     // instead of failing on the unit value.
     #[test]
     fn deserializes_typed_nullable_path_into_option() -> TestResult {
+        const _SQL: &str = r#"
+drop table if exists json_typed_nullable;
+
+create table json_typed_nullable
+(
+    id   UInt64,
+    json JSON(k Nullable(Int64), n Nullable(String))
+) engine = MergeTree order by id;
+
+insert into json_typed_nullable (id, json) values
+    (0, '{"k": 1, "n": "x", "free": true}'),
+    (1, '{"k": null, "n": null}'),
+    (2, '{"k": -7, "n": "", "free": "s"}');
+
+select * from json_typed_nullable order by id format Native;
+"#;
+
         #[derive(Debug, Deserialize, PartialEq)]
         struct Row<'a> {
             #[serde(borrow)]
@@ -1899,6 +1916,23 @@ mod serde_tests {
     // NULL exactly like a typed `Nullable` path, and must not be dropped as a missing key.
     #[test]
     fn typed_variant_path_null_is_present() -> TestResult {
+        const _SQL: &str = r#"
+drop table if exists json_typed_variant;
+
+create table json_typed_variant
+(
+    json JSON(n Nullable(String), v Variant(Int64, String))
+) engine = MergeTree order by tuple();
+
+insert into json_typed_variant (json) values
+    ('{}'),
+    ('{"n": null, "v": null}'),
+    ('{"n": "s", "v": 1}'),
+    ('{"n": null, "v": "x", "free": 2}');
+
+select * from json_typed_variant format Native;
+"#;
+
         #[derive(Debug, Deserialize, PartialEq)]
         struct Row<'a> {
             v: Option<serde_json::Value>,
@@ -1949,9 +1983,12 @@ mod serde_tests {
         Ok(())
     }
 
-    // SELECT '{}'::JSON(a Dynamic) AS j FORMAT Native;
     #[test]
     fn typed_dynamic_null() -> TestResult {
+        const _SQL: &str = r#"
+select CAST('{"a":null}', 'JSON(a Dynamic)') as j format Native;
+"#;
+
         check_json_fixture(
             "json_typed_dynamic_null",
             &DeserializeConfig::default(),
@@ -1959,9 +1996,12 @@ mod serde_tests {
         )
     }
 
-    // SELECT '{"a":[1,null,"x"]}'::JSON(a Array(Dynamic)) AS j FORMAT Native;
     #[test]
     fn array_dynamic_null() -> TestResult {
+        const _SQL: &str = r#"
+select CAST('{"a":[1,null,"x"]}', 'JSON(a Array(Dynamic))') as j format Native;
+"#;
+
         check_json_fixture(
             "json_array_dynamic_null",
             &DeserializeConfig::default(),
@@ -1969,9 +2009,12 @@ mod serde_tests {
         )
     }
 
-    // SELECT '{}'::JSON(a Tuple(x Dynamic)) AS j FORMAT Native;
     #[test]
     fn tuple_dynamic_null() -> TestResult {
+        const _SQL: &str = r#"
+select CAST('{"a":{"x":null}}', 'JSON(a Tuple(x Dynamic))') as j format Native;
+"#;
+
         check_json_fixture(
             "json_tuple_dynamic_null",
             &DeserializeConfig::default(),
@@ -1979,10 +2022,12 @@ mod serde_tests {
         )
     }
 
-    // SELECT '{"a%2eb":1,"a%2Eb":2}'::JSON AS j
-    // SETTINGS json_type_escape_dots_in_keys = 0 FORMAT Native;
     #[test]
     fn literal_percent_keys() -> TestResult {
+        const _SQL: &str = r#"
+select CAST('{"a%2Eb":2,"a%2eb":1}', 'JSON') as j format Native;
+"#;
+
         check_json_fixture(
             "json_literal_percent_keys",
             &DeserializeConfig {
@@ -1992,14 +2037,22 @@ mod serde_tests {
         )
     }
 
-    // SELECT '{"a.b":1,"a":{"b":2},"a%2eb":3,"percent%20key":4,
-    //          "arr":[{"c.d":"v%2E"}],"map":{"m%2Ek":{"c.d":"m"}},
-    //          "tuple":{"doc":{"c.d":"t"}},"dynamic":[{"e.f":"d"}]}'
-    //     ::JSON(arr Array(JSON), map Map(String, JSON), tuple Tuple(doc JSON)) AS j
-    // SETTINGS json_type_escape_dots_in_keys=1, output_format_json_quote_64bit_integers=0
-    // FORMAT Native;
     #[test]
     fn escaped_keys_support_decoded_and_preserved_borrowing() -> TestResult {
+        const _SQL: &str = r#"
+drop table if exists json_escaped_keys;
+
+create table json_escaped_keys
+(
+    j JSON(arr Array(JSON), map Map(String, JSON), tuple Tuple(doc JSON))
+) engine = MergeTree order by tuple();
+
+insert into json_escaped_keys (j) values
+    ('{"a%2Eb": 1, "a%2eb": 3, "a": {"b": 2}, "arr": [{"c%2Ed": "v%2E"}], "dynamic": [{"e%2Ef": "d"}], "map": {"m%2Ek": {"c%2Ed": "m"}}, "percent%20key": 4, "tuple": {"doc": {"c%2Ed": "t"}}}');
+
+select * from json_escaped_keys format Native;
+"#;
+
         let data = crate::common::load("./testdata/json_escaped_keys.native")?;
         let (_, block) = parse_single(&data)?;
         let row = Json::try_from(block.mark("j")?)?.try_read(0)?;
