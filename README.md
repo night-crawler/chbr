@@ -18,9 +18,20 @@ This crate is an attempt to implement a random access iterator over CH blocks.
 It supposedly supports all CH types, supposedly correctly, including stuff like `Dynamic`,
 `JSON`, `LowCardinality`, etc.
 
+Type headers are parsed by the [LALRPOP](https://lalrpop.github.io/lalrpop/quick_start_guide.html)
+grammar in `crates/bloch/src/parse/type_header.lalrpop`; `crates/bloch/build.rs` generates the
+parser at build time, so no LALRPOP installation is needed. Enum labels, `Tuple`/`Nested` field
+names and `JSON` paths accept ClickHouse quoting and backslash escapes. Names without escapes
+borrow from the header; escaped names are decoded once into an owned `String`.
+
 ## Known limitations
 
-1. Because header parsing is zero-copy, it doesn't support escaping, so escaped enum values will break the parser.
+1. Type-header names must be UTF-8. Invalid UTF-8 in the header, or an escape sequence that
+   decodes to invalid UTF-8, is an error rather than a lossy name.
+2. `AggregateFunction(...)` state columns and `QBit(...)` parse but return
+   `Error::NotImplemented`, at any nesting depth. Aggregate states are written by
+   `IAggregateFunction::serialize` without a length prefix, so they cannot be skipped
+   generically; `QBit`'s bit-plane layout is not decoded.
 
 ## Perf
 

@@ -18,6 +18,14 @@ pub const MAX_NUM_ROWS: usize = 1_000_000_000_000;
 /// ClickHouse code: `ColumnDynamic::MAX_DYNAMIC_TYPES_LIMIT`
 pub const MAX_DYNAMIC_TYPES: usize = 254;
 
+pub const MAX_TYPE_DEPTH: usize = 300;
+
+/// ClickHouse code: `DataTypeQBit::DataTypeQBit`
+pub const QBIT_STRIDE_ALIGNMENT_BITS: u64 = 8;
+
+/// ClickHouse code: `DataTypeQBit::MAX_STRIDE_GROUPS`
+pub const QBIT_MAX_STRIDE_GROUPS: u64 = 1024;
+
 /// ClickHouse code: `SerializationDynamic::SerializationVersion::V1`. Writes `max_dynamic_types`
 /// before the type count; otherwise identical to V2.
 pub const DYNAMIC_SERIALIZATION_V1: u64 = 1;
